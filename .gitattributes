@@ -1,0 +1,16 @@
+# Cross-platform line endings.
+# Dev is often Windows (CRLF by default); anything executed by Linux must stay LF,
+# or a stray \r in a shebang / unit file breaks bash and systemd at runtime.
+
+# Shell scripts ALWAYS LF — Linux bash dies on CRLF in the shebang.
+*.sh           text eol=lf
+
+# systemd units and web-server configs are read by Linux services — LF too.
+*.service      text eol=lf
+*.conf*        text eol=lf
+
+# Tooling version files (e.g. nvm) — a trailing \r breaks version resolution.
+.nvmrc         text eol=lf
+
+# SQL isn't strictly sensitive, but LF is the convention.
+*.sql          text eol=lf

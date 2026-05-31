@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Model Router{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header>
+    <h1>Model Router MCP</h1>
+    <nav>
+      <a href="/" class="{{ 'active' if active == 'test' else '' }}">Тестирование</a>
+      <a href="/registry" class="{{ 'active' if active == 'registry' else '' }}">Реестр</a>
+      <a href="/logs" class="{{ 'active' if active == 'logs' else '' }}">Логи</a>
+      <span class="spacer"></span>
+      <a href="/mcp" title="MCP Streamable HTTP endpoint">/mcp</a>
+    </nav>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <script src="/static/app.js"></script>
+  {% block script %}{% endblock %}
+</body>
+</html>

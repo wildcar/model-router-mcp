@@ -1,0 +1,34 @@
+[project]
+name = "model-router-mcp"
+version = "0.1.0"
+description = "MCP server that routes requests to AI models across providers and modalities, with a registry, per-user request/response logging, and cost accounting."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=1.2.0",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "httpx>=0.27",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.2",
+    "aiosqlite>=0.20",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",
+]
+
+[project.optional-dependencies]
+anthropic = ["anthropic>=0.40"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+model-router-mcp = "router_mcp.main:run"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["router_mcp*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

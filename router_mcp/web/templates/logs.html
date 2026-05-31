@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Логи — Model Router{% endblock %}
+{% block content %}
+<section class="card">
+  <h2>Статистика по пользователям</h2>
+  <table id="usage"><thead><tr>
+    <th>Пользователь</th><th>Запросов</th><th>Токенов</th><th>Стоимость, $</th>
+  </tr></thead><tbody></tbody></table>
+</section>
+
+<section class="card">
+  <h2>Журнал запросов</h2>
+  <div class="row">
+    <label>Пользователь <input id="f-user" placeholder="(все)"></label>
+    <label>Лимит <input id="f-limit" type="number" value="50"></label>
+    <button id="reload" type="button">Обновить</button>
+  </div>
+  <table id="logs"><thead><tr>
+    <th>id</th><th>Время</th><th>Пользователь</th><th>Модель</th><th>Мод.</th>
+    <th>Статус</th><th>Токены</th><th>$</th><th>Запрос</th>
+  </tr></thead><tbody></tbody></table>
+</section>
+{% endblock %}
+{% block script %}
+<script>
+async function loadUsage() {
+  const rows = await api('/api/usage');
+  const tb = document.querySelector('#usage tbody');
+  tb.innerHTML = '';
+  for (const r of rows) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${r.external_user_id}</td><td>${r.requests}</td>` +
+      `<td>${r.total_tokens}</td><td>${(r.total_cost_usd ?? 0).toFixed(6)}</td>`;
+    tb.appendChild(tr);
+  }
+}
+
+async function loadLogs() {
+  const user = document.getElementById('f-user').value.trim();
+  const limit = document.getElementById('f-limit').value || 50;
+  const q = new URLSearchParams({ limit }); if (user) q.set('user', user);
+  const rows = await api('/api/logs?' + q);
+  const tb = document.querySelector('#logs tbody');
+  tb.innerHTML = '';
+  for (const r of rows) {
+    const tr = document.createElement('tr');
+    const status = r.status === 'ok' ? r.status : `<span class="err">${r.status}</span>`;
+    tr.innerHTML = `<td>${r.id}</td><td>${r.created_at}</td><td>${r.external_user_id}</td>` +
+      `<td>${r.model_id ?? '–'}</td><td>${r.modality}</td><td>${status}</td>` +
+      `<td>${r.total_tokens ?? '–'}</td><td>${(r.cost_usd ?? 0).toFixed(6)}</td>` +
+      `<td class="trunc" title="${(r.request_text || '').replace(/"/g, '&quot;')}">${(r.request_text || '').slice(0, 60)}</td>`;
+    tb.appendChild(tr);
+  }
+}
+
+function reload() { loadUsage(); loadLogs(); }
+document.getElementById('reload').addEventListener('click', reload);
+reload();
+</script>
+{% endblock %}

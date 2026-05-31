@@ -1,0 +1,26 @@
+# Local agent / IDE state — do not commit
+.claude/
+
+# Environment / secrets
+.env
+.env.local
+.env*.local
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+
+# Add project-specific ignores below (build output, dependencies, caches, ...)
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Runtime data & logs
+data/
+logs/

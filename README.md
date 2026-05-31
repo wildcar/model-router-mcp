@@ -1,0 +1,54 @@
+# model-router-mcp
+
+An MCP server that routes requests to AI models across providers and modalities
+(chat, image, speech-to-text, text-to-speech, CLI). It keeps a registry of
+connected models (service-provider → model-provider → model) with cost tiers,
+logs every request/response by an external user id, computes per-request cost,
+and ships a web console for testing and registry administration.
+
+The MCP surface is served over **Streamable HTTP** at `/mcp`; the same process
+serves a web UI at `/`.
+
+## Quick start
+
+```bash
+python -m venv .venv && . .venv/bin/activate
+pip install -e ".[dev,anthropic]"
+
+cp .env.example .env        # then set OPENROUTER_API_KEY (and others as needed)
+uvicorn router_mcp.main:app --host 127.0.0.1 --port 8000
+```
+
+- Web test console: <http://127.0.0.1:8000/>
+- Registry admin: <http://127.0.0.1:8000/registry>
+- Request logs & per-user usage: <http://127.0.0.1:8000/logs>
+- MCP endpoint (Streamable HTTP): `http://127.0.0.1:8000/mcp`
+
+## MCP tools (Phase 1)
+
+| Tool | Purpose |
+|------|---------|
+| `list_models(modality?, tier?, provider?)` | List registered models |
+| `chat(external_user_id, text?/messages?, model_id?, tier?, provider?, params?)` | Route a chat request; returns text + usage + cost |
+| `get_usage(external_user_id?, since?)` | Aggregated per-user request count, tokens, cost |
+
+The external user id is an explicit tool argument: MCP clients forward their own
+end-user id for per-user statistics.
+
+## Status
+
+Phase 0 (skeleton) and Phase 1 (OpenRouter chat, registry, logging, cost, web UI,
+MCP tools) are complete. Image/STT/TTS, direct DeepSeek/Claude adapters, and CLI
+engines (`codex`/`claude`) are planned — see `AGENTS/SPEC.md` and `AGENTS/STATE.md`.
+
+## Tests
+
+```bash
+pytest -q                                   # automated suite (no network)
+python tests/mcp_probe.py http://127.0.0.1:8000/mcp   # live MCP probe (server running)
+```
+
+## Project docs
+
+Agent/contributor instructions and design live under `AGENTS.md`, `AGENTS/`, and
+`docs/adr/`.

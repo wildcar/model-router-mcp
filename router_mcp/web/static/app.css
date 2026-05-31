@@ -1,0 +1,32 @@
+:root { --bg:#0f1115; --card:#1a1d24; --fg:#e6e8eb; --muted:#9aa3af; --accent:#4f8cff; --err:#ff6b6b; --border:#2a2e37; }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 system-ui, sans-serif; }
+header { padding:16px 24px; border-bottom:1px solid var(--border); }
+header h1 { margin:0 0 8px; font-size:18px; }
+nav { display:flex; gap:16px; align-items:center; }
+nav a { color:var(--muted); text-decoration:none; padding:4px 0; }
+nav a.active { color:var(--fg); border-bottom:2px solid var(--accent); }
+nav .spacer { flex:1; }
+main { padding:24px; max-width:1100px; margin:0 auto; }
+.card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:18px; margin-bottom:20px; }
+.card h2 { margin:0 0 14px; font-size:15px; }
+.row { display:flex; gap:14px; flex-wrap:wrap; align-items:flex-end; margin-bottom:12px; }
+label { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted); }
+label.grow { flex:1; min-width:220px; }
+input, select, textarea { background:#11141a; color:var(--fg); border:1px solid var(--border); border-radius:6px; padding:8px; font:inherit; }
+textarea { width:100%; resize:vertical; }
+button { background:#262b34; color:var(--fg); border:1px solid var(--border); border-radius:6px; padding:8px 14px; cursor:pointer; }
+button:hover { border-color:var(--accent); }
+button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+button:disabled { opacity:.5; cursor:not-allowed; }
+pre { white-space:pre-wrap; word-break:break-word; background:#11141a; padding:14px; border-radius:8px; border:1px solid var(--border); }
+.meta { color:var(--muted); margin-bottom:10px; }
+.gen-image { max-width:100%; border-radius:8px; margin-top:10px; }
+table { width:100%; border-collapse:collapse; font-size:13px; }
+th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--border); }
+th { color:var(--muted); font-weight:600; }
+td.trunc { max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.err { color:var(--err); }
+#toast { position:fixed; bottom:24px; right:24px; background:#262b34; border:1px solid var(--border); padding:12px 18px; border-radius:8px; opacity:0; transform:translateY(8px); transition:.2s; pointer-events:none; }
+#toast.show { opacity:1; transform:none; }
+#toast.error { border-color:var(--err); color:var(--err); }

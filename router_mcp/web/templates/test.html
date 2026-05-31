@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Тестирование — Model Router{% endblock %}
+{% block content %}
+<section class="card">
+  <h2>Отправить запрос</h2>
+  <div class="row">
+    <label>ID пользователя
+      <input id="user" type="text" value="web-tester">
+    </label>
+    <label>Модальность
+      <select id="modality">
+        <option value="chat" selected>chat</option>
+      </select>
+    </label>
+    <label>Уровень (tier)
+      <select id="tier">
+        <option value="">— любой —</option>
+        <option value="free">free</option>
+        <option value="cheap">cheap</option>
+        <option value="expensive">expensive</option>
+      </select>
+    </label>
+  </div>
+  <div class="row">
+    <label class="grow">Модель (model_id, опционально)
+      <input id="model" type="text" list="models-list" placeholder="напр. openai/gpt-4o-mini">
+      <datalist id="models-list"></datalist>
+    </label>
+    <button id="refresh-models" type="button">Обновить список моделей</button>
+  </div>
+  <label class="grow">Запрос
+    <textarea id="prompt" rows="5" placeholder="Введите текст запроса…"></textarea>
+  </label>
+  <button id="send" type="button" class="primary">Отправить</button>
+</section>
+
+<section class="card" id="result-card" hidden>
+  <h2>Ответ</h2>
+  <div id="meta" class="meta"></div>
+  <pre id="answer"></pre>
+  <div id="images"></div>
+</section>
+{% endblock %}
+{% block script %}
+<script>
+async function loadModels() {
+  const tier = document.getElementById('tier').value;
+  const q = new URLSearchParams({ modality: 'chat' });
+  if (tier) q.set('tier', tier);
+  const models = await api(`/api/models?${q}`);
+  const list = document.getElementById('models-list');
+  list.innerHTML = '';
+  for (const m of models.slice(0, 500)) {
+    const opt = document.createElement('option');
+    opt.value = m.model_id;
+    opt.label = `${m.model_id} (${m.tier})`;
+    list.appendChild(opt);
+  }
+  toast(`Загружено моделей: ${models.length}`);
+}
+
+async function send() {
+  const btn = document.getElementById('send');
+  btn.disabled = true;
+  try {
+    const body = {
+      external_user_id: document.getElementById('user').value || 'web-tester',
+      text: document.getElementById('prompt').value,
+      model_id: document.getElementById('model').value || null,
+      tier: document.getElementById('tier').value || null,
+    };
+    const res = await api('/api/chat', { method: 'POST', body });
+    document.getElementById('result-card').hidden = false;
+    document.getElementById('answer').textContent = res.text || '(пусто)';
+    const u = res.usage || {};
+    document.getElementById('meta').innerHTML =
+      `Провайдер: <b>${res.provider}</b> · Модель: <b>${res.model_id}</b> · ` +
+      `Токены: ${u.prompt_tokens ?? '–'}/${u.completion_tokens ?? '–'} · ` +
+      `Стоимость: <b>$${(res.cost_usd ?? 0).toFixed(6)}</b> (${res.cost_source})`;
+    const imgs = document.getElementById('images');
+    imgs.innerHTML = '';
+    for (const url of (res.image_urls || [])) {
+      const img = document.createElement('img');
+      img.src = url; img.className = 'gen-image';
+      imgs.appendChild(img);
+    }
+  } catch (e) {
+    toast('Ошибка: ' + e.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+document.getElementById('send').addEventListener('click', send);
+document.getElementById('refresh-models').addEventListener('click', loadModels);
+</script>
+{% endblock %}
