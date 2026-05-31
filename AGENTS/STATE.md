@@ -11,18 +11,18 @@ it as a managed service on this host.
 
 ## Now
 
-- ✅ Phase 0 skeleton + Phase 1 OpenRouter chat slice (registry, routing, cost,
-  request_logs, MCP tools `list_models`/`chat`/`get_usage`, web console).
-- ✅ Deploy ready: `GET /health`, optional `/mcp` Bearer auth (`AUTH_TOKEN`,
-  pure-ASGI middleware — does not buffer SSE), systemd unit + `install.sh` +
-  `deploy.sh` + nginx/TLS config + `deploy/DEPLOY.md` runbook.
-- ✅ Tests green: `pytest` (11 passed) + live MCP probe (with/without token).
+- ✅ Phase 0 skeleton + Phase 1 OpenRouter chat slice + deploy wrapper.
+- ✅ Phase 2: image (Codex OAuth), STT (Deepgram), TTS (ElevenLabs) adapters,
+  seeded into the registry; MCP tools `generate_image`/`transcribe`/
+  `synthesize_speech`; web API `/api/image`, `/api/transcribe` (upload), `/api/tts`;
+  test console gained modality selector + audio upload + image/audio output.
+  Binary outputs go to the blob store (served via `/blobs/{ref}`).
+- ✅ Tests green: `pytest` (15 passed) + live MCP probe (6 tools).
 
 ## Next
 
 - Run the install on the host (create `modelrouter`, deploy key, clone, `.env`,
   `install.sh`, nginx + certbot) — manual steps in `deploy/DEPLOY.md`.
-- Phase 2: image (Codex OAuth), STT (Deepgram), TTS (ElevenLabs) adapters + tools.
 - Phase 3: direct DeepSeek + Claude API adapters.
 - Phase 4: CLI engines (`codex`, `claude`).
 

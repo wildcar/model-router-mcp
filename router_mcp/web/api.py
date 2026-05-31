@@ -9,14 +9,17 @@ from __future__ import annotations
 import base64
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Response
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile
 from pydantic import BaseModel
 
 from router_mcp.domain.errors import RouterError
-from router_mcp.domain.messages import RouterRequest
+from router_mcp.domain.messages import Attachment, RouterRequest
 from router_mcp.domain.modality import Modality
-from router_mcp.mcp_server.serialize import dispatch_summary, model_to_dict
+from router_mcp.mcp_server.serialize import (
+    attachments_web,
+    dispatch_summary,
+    model_to_dict,
+)
 from router_mcp.registry.models import RegistryModel
 from router_mcp.runtime import get_core
 
@@ -32,6 +35,22 @@ class ChatBody(BaseModel):
     tier: str | None = None
     provider: str | None = None
     params: dict[str, Any] | None = None
+
+
+class ImageBody(BaseModel):
+    external_user_id: str = "web-tester"
+    prompt: str
+    model_id: str | None = None
+    provider: str | None = None
+    params: dict[str, Any] | None = None
+
+
+class TtsBody(BaseModel):
+    external_user_id: str = "web-tester"
+    text: str
+    voice: str | None = None
+    model_id: str | None = None
+    provider: str | None = None
 
 
 class ManualModelBody(BaseModel):
@@ -86,6 +105,74 @@ async def api_chat(body: ChatBody) -> dict[str, Any]:
     if result.response.attachments:
         out["image_urls"] = [a.url for a in result.response.attachments if a.url]
         out["image_refs"] = [a.ref for a in result.response.attachments if a.ref]
+    return out
+
+
+@api_router.post("/image")
+async def api_image(body: ImageBody) -> dict[str, Any]:
+    core = get_core()
+    request = RouterRequest(
+        modality=Modality.IMAGE,
+        external_user_id=body.external_user_id,
+        model_id=body.model_id,
+        provider_hint=body.provider,
+        text=body.prompt,
+        params=body.params or {},
+    )
+    try:
+        result = await core.router.dispatch(request)
+    except RouterError as exc:
+        raise HTTPException(status_code=502, detail=f"{type(exc).__name__}: {exc}") from exc
+    out = dispatch_summary(result)
+    out.update(attachments_web(result.response.attachments))
+    return out
+
+
+@api_router.post("/transcribe")
+async def api_transcribe(
+    file: UploadFile = File(...),
+    external_user_id: str = Form("web-tester"),
+    model_id: str | None = Form(None),
+    provider: str | None = Form(None),
+) -> dict[str, Any]:
+    core = get_core()
+    audio = await file.read()
+    request = RouterRequest(
+        modality=Modality.STT,
+        external_user_id=external_user_id,
+        model_id=model_id,
+        provider_hint=provider,
+        attachments=[
+            Attachment(kind="audio", mime=file.content_type or "audio/ogg", data=audio)
+        ],
+    )
+    try:
+        result = await core.router.dispatch(request)
+    except RouterError as exc:
+        raise HTTPException(status_code=502, detail=f"{type(exc).__name__}: {exc}") from exc
+    out = dispatch_summary(result)
+    out["text"] = result.response.text
+    return out
+
+
+@api_router.post("/tts")
+async def api_tts(body: TtsBody) -> dict[str, Any]:
+    core = get_core()
+    params = {"voice": body.voice} if body.voice else {}
+    request = RouterRequest(
+        modality=Modality.TTS,
+        external_user_id=body.external_user_id,
+        model_id=body.model_id,
+        provider_hint=body.provider,
+        text=body.text,
+        params=params,
+    )
+    try:
+        result = await core.router.dispatch(request)
+    except RouterError as exc:
+        raise HTTPException(status_code=502, detail=f"{type(exc).__name__}: {exc}") from exc
+    out = dispatch_summary(result)
+    out.update(attachments_web(result.response.attachments))
     return out
 
 

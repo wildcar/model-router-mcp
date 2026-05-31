@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-05-31 · Phase 2 — image / STT / TTS modalities
+- What: Added Codex-image (OAuth), Deepgram (STT), ElevenLabs (TTS) adapters, seeded into the registry; MCP tools generate_image/transcribe/synthesize_speech; web API /api/image,/api/transcribe,/api/tts; test console modality UI; binary outputs via blob store.
+- Why: Phase 2 — broaden modalities beyond chat.
+- Files: router_mcp/adapters/{codex_image,deepgram,elevenlabs}.py, bootstrap.py, mcp_server/{tools,serialize}.py, web/{api.py,templates/test.html}, tests/test_modalities.py, tests/test_web.py
+- Next: Phase 3 — direct DeepSeek + Claude API adapters.
+
 ## 2026-05-31 · Deploy wrapper — systemd + nginx/TLS + deploy.sh
 - What: Added `/health`, optional `/mcp` Bearer auth (pure-ASGI, SSE-safe), and deploy artifacts (systemd unit, install.sh, deploy.sh, nginx conf, DEPLOY.md).
 - Why: Run model-router-mcp as a managed, auto-restarting, HTTPS-exposed service on this host.

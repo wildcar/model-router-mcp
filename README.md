@@ -24,12 +24,15 @@ uvicorn router_mcp.main:app --host 127.0.0.1 --port 8000
 - Request logs & per-user usage: <http://127.0.0.1:8000/logs>
 - MCP endpoint (Streamable HTTP): `http://127.0.0.1:8000/mcp`
 
-## MCP tools (Phase 1)
+## MCP tools
 
 | Tool | Purpose |
 |------|---------|
 | `list_models(modality?, tier?, provider?)` | List registered models |
 | `chat(external_user_id, text?/messages?, model_id?, tier?, provider?, params?)` | Route a chat request; returns text + usage + cost |
+| `generate_image(external_user_id, prompt, model_id?, provider?, params?)` | Generate an image; returns base64/URLs + cost |
+| `transcribe(external_user_id, audio_b64, mime?, model_id?, provider?)` | Speech-to-text |
+| `synthesize_speech(external_user_id, text, voice?, model_id?, provider?)` | Text-to-speech; returns base64 audio |
 | `get_usage(external_user_id?, since?)` | Aggregated per-user request count, tokens, cost |
 
 The external user id is an explicit tool argument: MCP clients forward their own
@@ -50,9 +53,10 @@ set; the web console sits behind nginx HTTP Basic auth.
 
 ## Status
 
-Phase 0 (skeleton) and Phase 1 (OpenRouter chat, registry, logging, cost, web UI,
-MCP tools) are complete. Image/STT/TTS, direct DeepSeek/Claude adapters, and CLI
-engines (`codex`/`claude`) are planned — see `AGENTS/SPEC.md` and `AGENTS/STATE.md`.
+Phases 0–2 are complete: OpenRouter chat, image (Codex OAuth), STT (Deepgram),
+TTS (ElevenLabs), registry, per-user logging, cost, web UI, MCP tools, plus a
+systemd + nginx deploy wrapper. Direct DeepSeek/Claude adapters and CLI engines
+(`codex`/`claude`) are planned — see `AGENTS/SPEC.md` and `AGENTS/STATE.md`.
 
 ## Tests
 

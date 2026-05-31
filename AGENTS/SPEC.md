@@ -53,9 +53,9 @@ on it; adapters never touch storage/mcp directly.
 4. ✅ Routing: explicit `model_id`, or modality + tier/provider hints, or per-modality default.
 5. ✅ Per-request/response logging by `external_user_id` with token usage and cost.
 6. ✅ Cost computation from registry prices; amortized-subscription hook (table + field).
-7. ✅ MCP tools over Streamable HTTP: `list_models`, `chat`, `get_usage`.
-8. ✅ Web UI: test console + registry admin (providers, manual models) + logs/usage.
-9. ⏳ Modality breadth: image (Codex OAuth), STT (Deepgram), TTS (ElevenLabs). [Phase 2]
+7. ✅ MCP tools over Streamable HTTP: `list_models`, `chat`, `generate_image`, `transcribe`, `synthesize_speech`, `get_usage`.
+8. ✅ Web UI: test console (chat/image/stt/tts) + registry admin (providers, manual models) + logs/usage.
+9. ✅ Modality breadth: image (Codex OAuth), STT (Deepgram), TTS (ElevenLabs). [Phase 2]
 10. ⏳ Direct adapters: DeepSeek, Claude API. [Phase 3]
 11. ⏳ CLI engines: `codex` (CodexRunner), `claude`. [Phase 4]
 12. ⏳ Full billing reports / amortization rollups. [later]
@@ -99,8 +99,9 @@ tests/                 test_smoke.py (chain), test_web.py (app), mcp_probe.py (m
 
 ## Current state
 
-- ✅ Phase 0 (skeleton) + Phase 1 (OpenRouter chat end-to-end) complete and tested.
-- ⏳ Phases 2–6 per the plan: more modalities, direct/CLI adapters, hardening.
+- ✅ Phase 0 (skeleton) + Phase 1 (OpenRouter chat) + deploy wrapper + Phase 2
+  (image/STT/TTS) complete and tested.
+- ⏳ Phases 3–6 per the plan: direct DeepSeek/Claude adapters, CLI engines, hardening.
 
 See `AGENTS/STATE.md` for the live Now / Next snapshot.
 

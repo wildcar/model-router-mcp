@@ -16,9 +16,13 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from router_mcp.domain.messages import RouterRequest
+from router_mcp.domain.messages import Attachment, RouterRequest
 from router_mcp.domain.modality import Modality
-from router_mcp.mcp_server.serialize import dispatch_summary, model_to_dict
+from router_mcp.mcp_server.serialize import (
+    attachments_b64,
+    dispatch_summary,
+    model_to_dict,
+)
 from router_mcp.runtime import get_core
 
 # streamable_http_path="/" so that mounting the sub-app at "/mcp" yields the
@@ -74,6 +78,82 @@ async def chat(
 
 
 @mcp.tool()
+async def generate_image(
+    external_user_id: str,
+    prompt: str,
+    model_id: str | None = None,
+    provider: str | None = None,
+    params: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Generate an image from a text prompt. Returns image(s) as base64 and/or
+    URLs, with usage and cost."""
+    core = get_core()
+    request = RouterRequest(
+        modality=Modality.IMAGE,
+        external_user_id=external_user_id,
+        model_id=model_id,
+        provider_hint=provider,
+        text=prompt,
+        params=params or {},
+    )
+    result = await core.router.dispatch(request)
+    out = dispatch_summary(result)
+    out.update(attachments_b64(result.response.attachments, core.blobs))
+    return out
+
+
+@mcp.tool()
+async def transcribe(
+    external_user_id: str,
+    audio_b64: str,
+    mime: str = "audio/ogg",
+    model_id: str | None = None,
+    provider: str | None = None,
+) -> dict[str, Any]:
+    """Transcribe base64-encoded audio to text (speech-to-text)."""
+    core = get_core()
+    request = RouterRequest(
+        modality=Modality.STT,
+        external_user_id=external_user_id,
+        model_id=model_id,
+        provider_hint=provider,
+        attachments=[Attachment(kind="audio", mime=mime, data=base64.b64decode(audio_b64))],
+    )
+    result = await core.router.dispatch(request)
+    out = dispatch_summary(result)
+    out["text"] = result.response.text
+    return out
+
+
+@mcp.tool()
+async def synthesize_speech(
+    external_user_id: str,
+    text: str,
+    voice: str | None = None,
+    model_id: str | None = None,
+    provider: str | None = None,
+    params: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Synthesize speech from text (text-to-speech). Returns base64 audio."""
+    core = get_core()
+    merged = dict(params or {})
+    if voice:
+        merged["voice"] = voice
+    request = RouterRequest(
+        modality=Modality.TTS,
+        external_user_id=external_user_id,
+        model_id=model_id,
+        provider_hint=provider,
+        text=text,
+        params=merged,
+    )
+    result = await core.router.dispatch(request)
+    out = dispatch_summary(result)
+    out.update(attachments_b64(result.response.attachments, core.blobs))
+    return out
+
+
+@mcp.tool()
 async def get_usage(
     external_user_id: str | None = None,
     since: str | None = None,
@@ -90,7 +170,3 @@ async def get_usage(
         }
         for r in rows
     ]
-
-
-def _b64(data: bytes) -> str:
-    return base64.b64encode(data).decode("ascii")

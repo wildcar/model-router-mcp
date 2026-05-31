@@ -44,10 +44,19 @@ def test_pages_render(client):
 
 
 def test_models_filtered_modality_empty(client):
-    # No TTS models registered and no API key, so this is reliably empty.
-    r = client.get("/api/models?modality=tts")
+    # No CLI adapter/models in Phase 2, so this modality is reliably empty.
+    r = client.get("/api/models?modality=cli")
     assert r.status_code == 200
     assert r.json() == []
+
+
+def test_seed_models_present(client):
+    # Phase 2 seeds fixed-catalog models regardless of whether keys are set.
+    r = client.get("/api/models?modality=tts")
+    assert r.status_code == 200
+    assert any(m["service_provider"] == "elevenlabs" for m in r.json())
+    r = client.get("/api/models?modality=stt")
+    assert any(m["service_provider"] == "deepgram" for m in r.json())
 
 
 def test_providers_listed(client):

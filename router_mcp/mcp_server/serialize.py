@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import base64
 from typing import Any
 
+from router_mcp.domain.messages import Attachment
 from router_mcp.registry.models import RegistryModel
 from router_mcp.routing.router import DispatchResult
 
@@ -36,6 +38,68 @@ def usage_to_dict(result: DispatchResult) -> dict[str, Any]:
         "audio_seconds": u.audio_seconds,
         "images": u.images,
     }
+
+
+def _attachment_bytes(att: Attachment, blobs) -> bytes | None:
+    if att.data is not None:
+        return att.data
+    if att.ref and blobs is not None and blobs.exists(att.ref):
+        return blobs.load(att.ref)
+    return None
+
+
+def attachments_b64(attachments: list[Attachment], blobs) -> dict[str, Any]:
+    """For MCP clients: inline images/audio as base64 (urls kept when remote)."""
+    image_urls: list[str] = []
+    image_b64: list[str] = []
+    audio_b64: list[str] = []
+    audio_mime: str | None = None
+    for att in attachments:
+        if att.kind == "image":
+            if att.url:
+                image_urls.append(att.url)
+                continue
+            data = _attachment_bytes(att, blobs)
+            if data is not None:
+                image_b64.append(base64.b64encode(data).decode("ascii"))
+        elif att.kind == "audio":
+            data = _attachment_bytes(att, blobs)
+            if data is not None:
+                audio_b64.append(base64.b64encode(data).decode("ascii"))
+                audio_mime = att.mime
+    out: dict[str, Any] = {}
+    if image_urls:
+        out["image_urls"] = image_urls
+    if image_b64:
+        out["image_b64"] = image_b64
+    if audio_b64:
+        out["audio_b64"] = audio_b64[0] if len(audio_b64) == 1 else audio_b64
+        out["audio_mime"] = audio_mime
+    return out
+
+
+def attachments_web(attachments: list[Attachment]) -> dict[str, Any]:
+    """For the browser UI: prefer blob refs (served via /blobs/{ref}); keep
+    remote/data urls as-is. Never inlines large base64 into JSON."""
+    image_urls: list[str] = []
+    image_refs: list[str] = []
+    audio_ref: str | None = None
+    for att in attachments:
+        if att.kind == "image":
+            if att.url:
+                image_urls.append(att.url)
+            elif att.ref:
+                image_refs.append(att.ref)
+        elif att.kind == "audio" and att.ref:
+            audio_ref = att.ref
+    out: dict[str, Any] = {}
+    if image_urls:
+        out["image_urls"] = image_urls
+    if image_refs:
+        out["image_refs"] = image_refs
+    if audio_ref:
+        out["audio_ref"] = audio_ref
+    return out
 
 
 def dispatch_summary(result: DispatchResult) -> dict[str, Any]:
