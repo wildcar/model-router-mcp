@@ -31,7 +31,10 @@ else
 fi
 
 echo ">> installing dependencies"
-run_as_svc "${APP_DIR}/.venv/bin/pip" install --quiet -e "${APP_DIR}[anthropic]"
+# Run pip from inside APP_DIR: the editable install registers a path hook that
+# pip resolves relative to the cwd, and the service user cannot read the
+# invoking user's home dir (PermissionError otherwise).
+sudo -u "${SVC_USER}" bash -c "cd '${APP_DIR}' && .venv/bin/pip install --quiet -e '.[anthropic]'"
 
 echo ">> restarting ${SERVICE_NAME}"
 sudo systemctl restart "${SERVICE_NAME}"

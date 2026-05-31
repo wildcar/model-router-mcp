@@ -45,8 +45,9 @@ if [[ ! -x "${APP_DIR}/.venv/bin/python" ]]; then
   sudo -u "${SVC_USER}" python3 -m venv "${APP_DIR}/.venv"
 fi
 echo ">> installing dependencies"
-sudo -u "${SVC_USER}" "${APP_DIR}/.venv/bin/pip" install --quiet --upgrade pip
-sudo -u "${SVC_USER}" "${APP_DIR}/.venv/bin/pip" install --quiet -e "${APP_DIR}[anthropic]"
+# Run pip from inside APP_DIR (the editable-install path hook is resolved
+# relative to cwd; the service user can't read the invoker's home dir).
+sudo -u "${SVC_USER}" bash -c "cd '${APP_DIR}' && .venv/bin/pip install --quiet --upgrade pip && .venv/bin/pip install --quiet -e '.[anthropic]'"
 
 # 4. Template + install the unit.
 TMP_UNIT="$(mktemp)"
