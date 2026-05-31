@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-05-31 · Phase 3 — direct DeepSeek + Claude API adapters
+- What: Added DeepSeek (OpenAI-compatible chat) and Claude (Anthropic Messages, raw httpx) adapters, seeded chat models with approximate prices; verified DeepSeek live end-to-end.
+- Why: Phase 3 — direct provider connections beyond OpenRouter.
+- Files: router_mcp/adapters/{deepseek,claude_api}.py, bootstrap.py, tests/test_adapters_parse.py
+- Next: Phase 4 — CLI engines (codex via CodexRunner, claude).
+
 ## 2026-05-31 · Phase 2 — image / STT / TTS modalities
 - What: Added Codex-image (OAuth), Deepgram (STT), ElevenLabs (TTS) adapters, seeded into the registry; MCP tools generate_image/transcribe/synthesize_speech; web API /api/image,/api/transcribe,/api/tts; test console modality UI; binary outputs via blob store.
 - Why: Phase 2 — broaden modalities beyond chat.

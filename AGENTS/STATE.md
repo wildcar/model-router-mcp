@@ -11,20 +11,20 @@ it as a managed service on this host.
 
 ## Now
 
-- ✅ Phase 0 skeleton + Phase 1 OpenRouter chat slice + deploy wrapper.
-- ✅ Phase 2: image (Codex OAuth), STT (Deepgram), TTS (ElevenLabs) adapters,
-  seeded into the registry; MCP tools `generate_image`/`transcribe`/
-  `synthesize_speech`; web API `/api/image`, `/api/transcribe` (upload), `/api/tts`;
-  test console gained modality selector + audio upload + image/audio output.
-  Binary outputs go to the blob store (served via `/blobs/{ref}`).
-- ✅ Tests green: `pytest` (15 passed) + live MCP probe (6 tools).
+- ✅ Phases 0–2 + deploy wrapper (deployed and running on the host).
+- ✅ Phase 3: direct DeepSeek adapter (OpenAI-compatible chat) and Claude API
+  adapter (Anthropic Messages, raw httpx). Seeded chat models with approximate
+  prices (editable in /registry). Routed by the existing `chat` tool / `/api/chat`.
+- ✅ Verified live: DeepSeek chat end-to-end (text + real tokens + computed cost +
+  log + usage). `anthropic-api` disabled until `ANTHROPIC_API_KEY` is set.
+- ✅ Tests green: `pytest` (20 passed).
 
 ## Next
 
-- Run the install on the host (create `modelrouter`, deploy key, clone, `.env`,
-  `install.sh`, nginx + certbot) — manual steps in `deploy/DEPLOY.md`.
-- Phase 3: direct DeepSeek + Claude API adapters.
-- Phase 4: CLI engines (`codex`, `claude`).
+- Phase 4: CLI engines — `codex` (reuse telecodex CodexRunner) and `claude`
+  (`claude -p ... --output-format json`), `run_cli` tool, cwd whitelist.
+- Phase 5: registry admin polish; subscription/amortization UI.
+- Set Anthropic key on the host if Claude API is wanted; tune seed model prices.
 
 ## Open questions
 

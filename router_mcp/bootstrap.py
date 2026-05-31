@@ -10,8 +10,10 @@ import logging
 from dataclasses import dataclass, field
 
 from router_mcp.adapters.base import ProviderAdapter
+from router_mcp.adapters.claude_api import ClaudeApiAdapter
 from router_mcp.adapters.codex_image import CodexImageAdapter
 from router_mcp.adapters.deepgram import DeepgramAdapter
+from router_mcp.adapters.deepseek import DeepSeekAdapter
 from router_mcp.adapters.elevenlabs import ElevenLabsAdapter
 from router_mcp.adapters.openrouter import OpenRouterAdapter
 from router_mcp.blobs.store import BlobStore
@@ -71,6 +73,25 @@ def _seed_model(
         tier=prices.pop("tier", "expensive"),
         source="seed",
         **prices,
+    )
+
+
+def _chat_seed(
+    sp_id: str, provider: str, model_id: str, name: str,
+    prompt_price: float, completion_price: float,
+) -> RegistryModel:
+    """A fixed chat registry row with a tier computed from approximate prices.
+    Prices are starting estimates — adjust them in the registry admin (/registry)."""
+    return RegistryModel(
+        service_provider_id=sp_id,
+        model_provider=provider,
+        model_id=model_id,
+        display_name=name,
+        modalities=(Modality.CHAT,),
+        tier=RegistryModel.compute_tier(prompt_price, completion_price),
+        prompt_price=prompt_price,
+        completion_price=completion_price,
+        source="seed",
     )
 
 
@@ -148,6 +169,41 @@ def _build_adapters(settings: Settings) -> list[ProviderSpec]:
                     "elevenlabs", "elevenlabs", settings.elevenlabs_tts_model,
                     "ElevenLabs text-to-speech", Modality.TTS, tier="expensive",
                 )
+            ],
+        ),
+        ProviderSpec(
+            id="deepseek",
+            display_name="DeepSeek",
+            adapter_key="deepseek",
+            base_url=settings.deepseek_base_url,
+            adapter=DeepSeekAdapter(
+                api_key=settings.deepseek_api_key,
+                base_url=settings.deepseek_base_url,
+                timeout_seconds=settings.http_timeout_seconds,
+                retries=settings.http_retries,
+            ),
+            seed_models=[
+                # Approximate USD/token (DeepSeek list pricing) — adjust in /registry.
+                _chat_seed("deepseek", "deepseek", "deepseek-chat", "DeepSeek Chat", 2.7e-7, 1.1e-6),
+                _chat_seed("deepseek", "deepseek", "deepseek-reasoner", "DeepSeek Reasoner", 5.5e-7, 2.19e-6),
+            ],
+        ),
+        ProviderSpec(
+            id="anthropic-api",
+            display_name="Claude (Anthropic API)",
+            adapter_key="claude_api",
+            base_url=settings.anthropic_base_url,
+            adapter=ClaudeApiAdapter(
+                api_key=settings.anthropic_api_key,
+                base_url=settings.anthropic_base_url,
+                timeout_seconds=settings.http_timeout_seconds,
+                retries=settings.http_retries,
+            ),
+            seed_models=[
+                # Approximate USD/token (Anthropic list pricing) — adjust in /registry.
+                _chat_seed("anthropic-api", "anthropic", "claude-haiku-4-5-20251001", "Claude Haiku 4.5", 8e-7, 4e-6),
+                _chat_seed("anthropic-api", "anthropic", "claude-sonnet-4-6", "Claude Sonnet 4.6", 3e-6, 1.5e-5),
+                _chat_seed("anthropic-api", "anthropic", "claude-opus-4-8", "Claude Opus 4.8", 1.5e-5, 7.5e-5),
             ],
         ),
     ]

@@ -56,7 +56,7 @@ on it; adapters never touch storage/mcp directly.
 7. ✅ MCP tools over Streamable HTTP: `list_models`, `chat`, `generate_image`, `transcribe`, `synthesize_speech`, `get_usage`.
 8. ✅ Web UI: test console (chat/image/stt/tts) + registry admin (providers, manual models) + logs/usage.
 9. ✅ Modality breadth: image (Codex OAuth), STT (Deepgram), TTS (ElevenLabs). [Phase 2]
-10. ⏳ Direct adapters: DeepSeek, Claude API. [Phase 3]
+10. ✅ Direct adapters: DeepSeek (OpenAI-compatible), Claude API (Anthropic Messages). [Phase 3]
 11. ⏳ CLI engines: `codex` (CodexRunner), `claude`. [Phase 4]
 12. ⏳ Full billing reports / amortization rollups. [later]
 13. ✅ Production deploy: systemd unit (auto-restart), nginx+TLS, `/health`, `/mcp` Bearer auth, manual `deploy.sh`.
@@ -99,9 +99,9 @@ tests/                 test_smoke.py (chain), test_web.py (app), mcp_probe.py (m
 
 ## Current state
 
-- ✅ Phase 0 (skeleton) + Phase 1 (OpenRouter chat) + deploy wrapper + Phase 2
-  (image/STT/TTS) complete and tested.
-- ⏳ Phases 3–6 per the plan: direct DeepSeek/Claude adapters, CLI engines, hardening.
+- ✅ Phases 0–3 + deploy wrapper complete and tested: OpenRouter chat, image
+  (Codex), STT (Deepgram), TTS (ElevenLabs), direct DeepSeek + Claude API.
+- ⏳ Phases 4–6 per the plan: CLI engines (`codex`/`claude`), admin polish, hardening.
 
 See `AGENTS/STATE.md` for the live Now / Next snapshot.
 

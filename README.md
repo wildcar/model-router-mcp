@@ -53,10 +53,10 @@ set; the web console sits behind nginx HTTP Basic auth.
 
 ## Status
 
-Phases 0–2 are complete: OpenRouter chat, image (Codex OAuth), STT (Deepgram),
-TTS (ElevenLabs), registry, per-user logging, cost, web UI, MCP tools, plus a
-systemd + nginx deploy wrapper. Direct DeepSeek/Claude adapters and CLI engines
-(`codex`/`claude`) are planned — see `AGENTS/SPEC.md` and `AGENTS/STATE.md`.
+Phases 0–3 are complete: OpenRouter chat, image (Codex OAuth), STT (Deepgram),
+TTS (ElevenLabs), direct DeepSeek + Claude API, registry, per-user logging, cost,
+web UI, MCP tools, plus a systemd + nginx deploy wrapper. CLI engines
+(`codex`/`claude`) are next — see `AGENTS/SPEC.md` and `AGENTS/STATE.md`.
 
 ## Tests
 
