@@ -71,5 +71,7 @@ curl -fsS http://127.0.0.1:8088/health
 - Mount detail: `FastMCP(streamable_http_path="/")` + mount at `/mcp` (else `/mcp/mcp`).
 - nginx must use `proxy_buffering off` + `proxy_http_version 1.1` on `/mcp` for
   Streamable HTTP / SSE.
-- Dedicated `modelrouter` user cannot see `keeper`'s `~/.codex` / `~/.claude` —
-  matters once CLI engines (Phase 4) are wired.
+- CLI engines (`run_cli`): the `modelrouter` user needs `codex`/`claude` on its
+  PATH (or absolute `CODEX_COMMAND`/`CLAUDE_COMMAND`) and their own auth — it does
+  not see `keeper`'s `~/.codex` / `~/.claude`. Set `CLI_ALLOWED_CWD_ROOTS` to allow
+  an explicit working dir.

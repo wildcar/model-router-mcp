@@ -26,9 +26,11 @@ service and administering the registry.
 ## Architecture
 
 ```
-MCP client ─┐                         ┌─ adapters/* (one per provider)
-            ├─→ FastAPI app ──────────┤    OpenRouter (chat+image) [Phase 1]
-Web browser ┘   ├─ /mcp  (FastMCP Streamable HTTP, tools)
+MCP client ─┐                         ┌─ adapters/* (one per provider):
+            ├─→ FastAPI app ──────────┤    openrouter (chat+image), deepseek &
+Web browser ┘   ├─ /mcp  (FastMCP …)  │    claude_api (chat), codex_image (image),
+                │                     │    deepgram (stt), elevenlabs (tts),
+                │                     └    codex_cli & claude_cli (cli)
                 ├─ /api/* (JSON API for the web UI)
                 ├─ /, /registry, /logs (Jinja2 pages)
                 └─ /blobs/{ref} (binary payload serving)
@@ -72,7 +74,9 @@ router_mcp/
   runtime.py           process-wide AppCore handle for MCP tools
   logging_config.py
   domain/              modality, messages, errors (pure types)
-  adapters/            base (ABC + RetryClientMixin), openrouter
+  adapters/            base (ABC + RetryClientMixin), _subprocess (CLI helper),
+                       openrouter, deepseek, claude_api, codex_image, deepgram,
+                       elevenlabs, codex_cli, claude_cli
   registry/            models (RegistryModel), service (catalog merge)
   routing/router.py    ModelRouter.resolve + dispatch
   accounting/cost.py   compute_cost
@@ -80,7 +84,8 @@ router_mcp/
   blobs/store.py       on-disk blob store
   mcp_server/          tools (FastMCP), serialize
   web/                 api (JSON), pages (Jinja2), templates/, static/
-tests/                 test_smoke.py (chain), test_web.py (app), mcp_probe.py (manual)
+tests/                 test_smoke (chain), test_web (app), test_modalities,
+                       test_adapters_parse, test_cli, test_auth; mcp_probe.py (manual)
 ```
 
 ## Deployment

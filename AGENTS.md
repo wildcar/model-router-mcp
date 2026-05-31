@@ -104,13 +104,16 @@ router_mcp/
   app.py / main.py / bootstrap.py / runtime.py   server wiring + core handle
   config.py / logging_config.py                  settings, logging
   domain/      pure types: modality, messages (RouterRequest/Response/Usage), errors
-  adapters/    ProviderAdapter ABC + RetryClientMixin; openrouter (chat+image)
-  registry/    RegistryModel + RegistryService (OpenRouter catalog + manual merge)
+  adapters/    ProviderAdapter ABC + RetryClientMixin + _subprocess (CLI helper);
+               openrouter, deepseek, claude_api, codex_image, deepgram, elevenlabs,
+               codex_cli, claude_cli
+  registry/    RegistryModel + RegistryService (OpenRouter catalog + seed/manual merge)
   routing/     ModelRouter.resolve + dispatch (cost + logging)
   accounting/  compute_cost (per-request / amortized hook)
   storage/     aiosqlite Database (service_providers, registry_models, subscriptions, request_logs)
   blobs/       on-disk blob store (binary payloads)
-  mcp_server/  FastMCP tools (list_models, chat, get_usage) + serialize
+  mcp_server/  FastMCP tools (list_models, chat, generate_image, transcribe,
+               synthesize_speech, run_cli, get_usage) + serialize
   web/         JSON API (/api/*), Jinja2 pages (/, /registry, /logs), static, /blobs
 ```
 
