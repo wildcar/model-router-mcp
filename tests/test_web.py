@@ -28,6 +28,14 @@ def client(tmp_path_factory):
         yield c
 
 
+def test_health(client):
+    r = client.get("/health")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "ok"
+    assert "openrouter" in body["providers"]
+
+
 def test_pages_render(client):
     for path in ("/", "/registry", "/logs"):
         r = client.get(path)

@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     db_path: str = Field(default=str(DATA_DIR / "router.db"), alias="DB_PATH")
     blob_dir: str = Field(default=str(DATA_DIR / "blobs"), alias="BLOB_DIR")
+    # When set, requests to /mcp must carry `Authorization: Bearer <AUTH_TOKEN>`.
+    # The web console/API is guarded separately (nginx Basic auth); /health is open.
+    auth_token: str | None = Field(default=None, alias="AUTH_TOKEN")
 
     # --- HTTP defaults --------------------------------------------------
     http_timeout_seconds: float = Field(default=60.0, alias="HTTP_TIMEOUT_SECONDS")

@@ -35,6 +35,19 @@ uvicorn router_mcp.main:app --host 127.0.0.1 --port 8000
 The external user id is an explicit tool argument: MCP clients forward their own
 end-user id for per-user statistics.
 
+## Deployment
+
+Production runbook (systemd + nginx/TLS, dedicated `modelrouter` user, manual
+`deploy.sh`): see [`deploy/DEPLOY.md`](deploy/DEPLOY.md). Quick reference:
+
+```bash
+sudo bash deploy/install.sh     # first time (after clone + .env, see runbook)
+bash deploy/deploy.sh           # update: pull, reinstall, restart, health-check
+```
+
+`GET /health` is open; `/mcp` requires `Authorization: Bearer $AUTH_TOKEN` when
+set; the web console sits behind nginx HTTP Basic auth.
+
 ## Status
 
 Phase 0 (skeleton) and Phase 1 (OpenRouter chat, registry, logging, cost, web UI,

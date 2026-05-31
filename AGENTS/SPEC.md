@@ -59,6 +59,7 @@ on it; adapters never touch storage/mcp directly.
 10. ⏳ Direct adapters: DeepSeek, Claude API. [Phase 3]
 11. ⏳ CLI engines: `codex` (CodexRunner), `claude`. [Phase 4]
 12. ⏳ Full billing reports / amortization rollups. [later]
+13. ✅ Production deploy: systemd unit (auto-restart), nginx+TLS, `/health`, `/mcp` Bearer auth, manual `deploy.sh`.
 
 ## Project structure
 
@@ -84,10 +85,17 @@ tests/                 test_smoke.py (chain), test_web.py (app), mcp_probe.py (m
 
 ## Deployment
 
-- Run: `uvicorn router_mcp.main:app --host $HOST --port $PORT` (or `python -m router_mcp.main`).
-- Secrets/config live in `.env` at repo root (see `.env.example`); never committed.
+- Local dev: `uvicorn router_mcp.main:app --host $HOST --port $PORT` (or `python -m router_mcp.main`).
+- Production (this host): runs as systemd service `model-router-mcp.service` under a
+  dedicated user `modelrouter`, from `/opt/model-router-mcp`, bound to `127.0.0.1:8088`,
+  behind nginx + TLS on a subdomain. `Restart=always`; updates via `deploy/deploy.sh`.
+  Full runbook: `deploy/DEPLOY.md`. Artifacts: `deploy/model-router-mcp.service`,
+  `deploy/install.sh`, `deploy/deploy.sh`, `deploy/nginx-model-router.conf`.
+- Secrets/config live in `.env` (see `.env.example`); never committed.
 - Runtime data (`data/router.db`, `data/blobs/`) and `logs/` are gitignored.
-- MCP endpoint: `http://<host>:<port>/mcp` (Streamable HTTP). Web UI at `/`.
+- Endpoints: `GET /health` (open); `/mcp` (Streamable HTTP, requires
+  `Authorization: Bearer $AUTH_TOKEN` when set, enforced by a pure-ASGI middleware);
+  web console `/`, `/registry`, `/logs` (guarded by nginx HTTP Basic auth).
 
 ## Current state
 
