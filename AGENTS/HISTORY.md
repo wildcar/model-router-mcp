@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-05-31 · Phase 4 — CLI engines (codex, claude)
+- What: Added codex/claude CLI adapters (one-shot subprocess + JSON parsing), shared _subprocess helper with cwd whitelist, run_cli MCP tool + /api/cli, cli modality in the test console. Claude CLI total_cost_usd used as cost override.
+- Why: Phase 4 — invoke local CLI agents alongside HTTP providers.
+- Files: router_mcp/adapters/{_subprocess,codex_cli,claude_cli}.py, bootstrap.py, mcp_server/tools.py, web/{api.py,templates/test.html}, tests/test_cli.py
+- Next: Phase 5 — registry admin polish, subscription/amortization UI.
+
 ## 2026-05-31 · Phase 3 — direct DeepSeek + Claude API adapters
 - What: Added DeepSeek (OpenAI-compatible chat) and Claude (Anthropic Messages, raw httpx) adapters, seeded chat models with approximate prices; verified DeepSeek live end-to-end.
 - Why: Phase 3 — direct provider connections beyond OpenRouter.

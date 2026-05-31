@@ -11,20 +11,24 @@ it as a managed service on this host.
 
 ## Now
 
-- ✅ Phases 0–2 + deploy wrapper (deployed and running on the host).
-- ✅ Phase 3: direct DeepSeek adapter (OpenAI-compatible chat) and Claude API
-  adapter (Anthropic Messages, raw httpx). Seeded chat models with approximate
-  prices (editable in /registry). Routed by the existing `chat` tool / `/api/chat`.
-- ✅ Verified live: DeepSeek chat end-to-end (text + real tokens + computed cost +
-  log + usage). `anthropic-api` disabled until `ANTHROPIC_API_KEY` is set.
-- ✅ Tests green: `pytest` (20 passed).
+- ✅ Phases 0–3 + deploy wrapper (deployed and running on the host).
+- ✅ Phase 4: CLI engines — `codex` (`codex exec --json`, ported event parsing)
+  and `claude` (`claude -p --output-format json`), via the `run_cli` MCP tool and
+  `/api/cli`. Shared subprocess helper (`adapters/_subprocess.py`) with exec
+  resolution (PATH + nvm/.local fallbacks) and a cwd whitelist
+  (`CLI_ALLOWED_CWD_ROOTS`). Claude CLI's `total_cost_usd` is used as a cost
+  override. Test console gained a `cli` modality + engine selector.
+- ✅ Verified live: `claude` run_cli end-to-end (text + usage + provider cost +
+  session_id). Both CLI providers enabled (binaries on PATH).
+- ✅ Tests green: `pytest` (28 passed).
 
 ## Next
 
-- Phase 4: CLI engines — `codex` (reuse telecodex CodexRunner) and `claude`
-  (`claude -p ... --output-format json`), `run_cli` tool, cwd whitelist.
-- Phase 5: registry admin polish; subscription/amortization UI.
-- Set Anthropic key on the host if Claude API is wanted; tune seed model prices.
+- Phase 5: registry admin polish; subscription/amortization UI; tune seed prices.
+- Phase 6: hardening, optional streaming for long CLI/chat runs.
+- Prod note: the `modelrouter` user needs `codex`/`claude` on its PATH and their
+  auth to use CLI engines (codex auth.json is synced; claude needs its own login
+  or ANTHROPIC_API_KEY in the service env).
 
 ## Open questions
 

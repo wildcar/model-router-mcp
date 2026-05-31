@@ -154,6 +154,42 @@ async def synthesize_speech(
 
 
 @mcp.tool()
+async def run_cli(
+    external_user_id: str,
+    prompt: str,
+    engine: str = "codex",
+    cwd: str | None = None,
+    timeout_sec: int | None = None,
+) -> dict[str, Any]:
+    """Run a prompt through a local CLI engine (`codex` or `claude`).
+
+    `cwd` (optional) must be under a server-allowed root. Returns the engine's
+    text output with usage and cost.
+    """
+    core = get_core()
+    engine = engine.strip().lower()
+    if engine not in ("codex", "claude"):
+        raise ValueError("engine must be 'codex' or 'claude'")
+    params: dict[str, Any] = {}
+    if cwd:
+        params["cwd"] = cwd
+    if timeout_sec:
+        params["timeout_sec"] = timeout_sec
+    request = RouterRequest(
+        modality=Modality.CLI,
+        external_user_id=external_user_id,
+        provider_hint=f"{engine}-cli",
+        text=prompt,
+        params=params,
+    )
+    result = await core.router.dispatch(request)
+    out = dispatch_summary(result)
+    out["text"] = result.response.text
+    out["session_id"] = result.response.raw_meta.get("session_id")
+    return out
+
+
+@mcp.tool()
 async def get_usage(
     external_user_id: str | None = None,
     since: str | None = None,

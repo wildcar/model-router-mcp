@@ -53,6 +53,14 @@ class TtsBody(BaseModel):
     provider: str | None = None
 
 
+class CliBody(BaseModel):
+    external_user_id: str = "web-tester"
+    prompt: str
+    engine: str = "codex"  # "codex" | "claude"
+    cwd: str | None = None
+    timeout_sec: int | None = None
+
+
 class ManualModelBody(BaseModel):
     service_provider_id: str
     model_id: str
@@ -173,6 +181,34 @@ async def api_tts(body: TtsBody) -> dict[str, Any]:
         raise HTTPException(status_code=502, detail=f"{type(exc).__name__}: {exc}") from exc
     out = dispatch_summary(result)
     out.update(attachments_web(result.response.attachments))
+    return out
+
+
+@api_router.post("/cli")
+async def api_cli(body: CliBody) -> dict[str, Any]:
+    core = get_core()
+    engine = body.engine.strip().lower()
+    if engine not in ("codex", "claude"):
+        raise HTTPException(status_code=400, detail="engine must be 'codex' or 'claude'")
+    params: dict[str, Any] = {}
+    if body.cwd:
+        params["cwd"] = body.cwd
+    if body.timeout_sec:
+        params["timeout_sec"] = body.timeout_sec
+    request = RouterRequest(
+        modality=Modality.CLI,
+        external_user_id=body.external_user_id,
+        provider_hint=f"{engine}-cli",
+        text=body.prompt,
+        params=params,
+    )
+    try:
+        result = await core.router.dispatch(request)
+    except RouterError as exc:
+        raise HTTPException(status_code=502, detail=f"{type(exc).__name__}: {exc}") from exc
+    out = dispatch_summary(result)
+    out["text"] = result.response.text
+    out["session_id"] = result.response.raw_meta.get("session_id")
     return out
 
 

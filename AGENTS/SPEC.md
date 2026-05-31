@@ -53,11 +53,11 @@ on it; adapters never touch storage/mcp directly.
 4. ✅ Routing: explicit `model_id`, or modality + tier/provider hints, or per-modality default.
 5. ✅ Per-request/response logging by `external_user_id` with token usage and cost.
 6. ✅ Cost computation from registry prices; amortized-subscription hook (table + field).
-7. ✅ MCP tools over Streamable HTTP: `list_models`, `chat`, `generate_image`, `transcribe`, `synthesize_speech`, `get_usage`.
+7. ✅ MCP tools over Streamable HTTP: `list_models`, `chat`, `generate_image`, `transcribe`, `synthesize_speech`, `run_cli`, `get_usage`.
 8. ✅ Web UI: test console (chat/image/stt/tts) + registry admin (providers, manual models) + logs/usage.
 9. ✅ Modality breadth: image (Codex OAuth), STT (Deepgram), TTS (ElevenLabs). [Phase 2]
 10. ✅ Direct adapters: DeepSeek (OpenAI-compatible), Claude API (Anthropic Messages). [Phase 3]
-11. ⏳ CLI engines: `codex` (CodexRunner), `claude`. [Phase 4]
+11. ✅ CLI engines: `codex` (`codex exec --json`) and `claude` (`claude -p --output-format json`), via `run_cli` with a cwd whitelist. [Phase 4]
 12. ⏳ Full billing reports / amortization rollups. [later]
 13. ✅ Production deploy: systemd unit (auto-restart), nginx+TLS, `/health`, `/mcp` Bearer auth, manual `deploy.sh`.
 
@@ -99,9 +99,10 @@ tests/                 test_smoke.py (chain), test_web.py (app), mcp_probe.py (m
 
 ## Current state
 
-- ✅ Phases 0–3 + deploy wrapper complete and tested: OpenRouter chat, image
-  (Codex), STT (Deepgram), TTS (ElevenLabs), direct DeepSeek + Claude API.
-- ⏳ Phases 4–6 per the plan: CLI engines (`codex`/`claude`), admin polish, hardening.
+- ✅ Phases 0–4 + deploy wrapper complete and tested: OpenRouter chat, image
+  (Codex), STT (Deepgram), TTS (ElevenLabs), direct DeepSeek + Claude API, and
+  CLI engines (`codex`/`claude`).
+- ⏳ Phases 5–6 per the plan: registry admin polish, hardening, optional streaming.
 
 See `AGENTS/STATE.md` for the live Now / Next snapshot.
 

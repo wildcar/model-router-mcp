@@ -13,6 +13,13 @@
         <option value="image">image</option>
         <option value="stt">stt (распознавание)</option>
         <option value="tts">tts (синтез)</option>
+        <option value="cli">cli (codex/claude)</option>
+      </select>
+    </label>
+    <label id="engine-field" hidden>Движок CLI
+      <select id="engine">
+        <option value="codex">codex</option>
+        <option value="claude">claude</option>
       </select>
     </label>
     <label>Уровень (tier)
@@ -58,6 +65,7 @@ function onModalityChange() {
   const m = $('modality').value;
   $('file-field').hidden = (m !== 'stt');
   $('text-field').hidden = (m === 'stt');
+  $('engine-field').hidden = (m !== 'cli');
 }
 
 async function loadModels() {
@@ -112,6 +120,9 @@ async function send() {
       resetResult();
       for (const url of (res.image_urls || [])) addImage(url);
       for (const ref of (res.image_refs || [])) addImage('/blobs/' + ref);
+    } else if (m === 'cli') {
+      res = await api('/api/cli', { method: 'POST', body: { external_user_id: user, prompt: $('prompt').value, engine: $('engine').value } });
+      resetResult(); $('answer').hidden = false; $('answer').textContent = res.text || '(пусто)';
     } else if (m === 'tts') {
       res = await api('/api/tts', { method: 'POST', body: { external_user_id: user, text: $('prompt').value, model_id } });
       resetResult();

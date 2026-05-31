@@ -43,20 +43,21 @@ def test_pages_render(client):
         assert "Model Router" in r.text
 
 
-def test_models_filtered_modality_empty(client):
-    # No CLI adapter/models in Phase 2, so this modality is reliably empty.
-    r = client.get("/api/models?modality=cli")
+def test_models_filtered_unknown_modality_empty(client):
+    # An unknown modality matches nothing, regardless of keys.
+    r = client.get("/api/models?modality=bogus")
     assert r.status_code == 200
     assert r.json() == []
 
 
 def test_seed_models_present(client):
-    # Phase 2 seeds fixed-catalog models regardless of whether keys are set.
+    # Fixed-catalog models are seeded regardless of whether keys are set.
     r = client.get("/api/models?modality=tts")
     assert r.status_code == 200
     assert any(m["service_provider"] == "elevenlabs" for m in r.json())
-    r = client.get("/api/models?modality=stt")
-    assert any(m["service_provider"] == "deepgram" for m in r.json())
+    assert any(m["service_provider"] == "deepgram" for m in client.get("/api/models?modality=stt").json())
+    cli = client.get("/api/models?modality=cli").json()
+    assert {"codex-cli", "claude-cli"} <= {m["service_provider"] for m in cli}
 
 
 def test_providers_listed(client):

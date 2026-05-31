@@ -33,6 +33,7 @@ uvicorn router_mcp.main:app --host 127.0.0.1 --port 8000
 | `generate_image(external_user_id, prompt, model_id?, provider?, params?)` | Generate an image; returns base64/URLs + cost |
 | `transcribe(external_user_id, audio_b64, mime?, model_id?, provider?)` | Speech-to-text |
 | `synthesize_speech(external_user_id, text, voice?, model_id?, provider?)` | Text-to-speech; returns base64 audio |
+| `run_cli(external_user_id, prompt, engine, cwd?, timeout_sec?)` | Run a local CLI engine (`codex`/`claude`); returns text + usage + cost |
 | `get_usage(external_user_id?, since?)` | Aggregated per-user request count, tokens, cost |
 
 The external user id is an explicit tool argument: MCP clients forward their own
@@ -53,10 +54,11 @@ set; the web console sits behind nginx HTTP Basic auth.
 
 ## Status
 
-Phases 0–3 are complete: OpenRouter chat, image (Codex OAuth), STT (Deepgram),
-TTS (ElevenLabs), direct DeepSeek + Claude API, registry, per-user logging, cost,
-web UI, MCP tools, plus a systemd + nginx deploy wrapper. CLI engines
-(`codex`/`claude`) are next — see `AGENTS/SPEC.md` and `AGENTS/STATE.md`.
+Phases 0–4 are complete: OpenRouter chat, image (Codex OAuth), STT (Deepgram),
+TTS (ElevenLabs), direct DeepSeek + Claude API, CLI engines (`codex`/`claude`),
+registry, per-user logging, cost, web UI, MCP tools, plus a systemd + nginx
+deploy wrapper. Remaining: registry admin polish and hardening — see
+`AGENTS/SPEC.md` and `AGENTS/STATE.md`.
 
 ## Tests
 

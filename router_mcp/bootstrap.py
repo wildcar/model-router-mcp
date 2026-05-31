@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 
 from router_mcp.adapters.base import ProviderAdapter
 from router_mcp.adapters.claude_api import ClaudeApiAdapter
+from router_mcp.adapters.claude_cli import ClaudeCliAdapter
+from router_mcp.adapters.codex_cli import CodexCliAdapter
 from router_mcp.adapters.codex_image import CodexImageAdapter
 from router_mcp.adapters.deepgram import DeepgramAdapter
 from router_mcp.adapters.deepseek import DeepSeekAdapter
@@ -204,6 +206,34 @@ def _build_adapters(settings: Settings) -> list[ProviderSpec]:
                 _chat_seed("anthropic-api", "anthropic", "claude-haiku-4-5-20251001", "Claude Haiku 4.5", 8e-7, 4e-6),
                 _chat_seed("anthropic-api", "anthropic", "claude-sonnet-4-6", "Claude Sonnet 4.6", 3e-6, 1.5e-5),
                 _chat_seed("anthropic-api", "anthropic", "claude-opus-4-8", "Claude Opus 4.8", 1.5e-5, 7.5e-5),
+            ],
+        ),
+        ProviderSpec(
+            id="codex-cli",
+            display_name="Codex CLI",
+            adapter_key="codex_cli",
+            base_url=None,
+            adapter=CodexCliAdapter(
+                command=settings.codex_command,
+                timeout_sec=settings.cli_run_timeout_sec,
+                allowed_cwd_roots=settings.allowed_cwd_roots(),
+            ),
+            seed_models=[
+                _seed_model("codex-cli", "openai", "codex", "Codex CLI", Modality.CLI, tier="expensive")
+            ],
+        ),
+        ProviderSpec(
+            id="claude-cli",
+            display_name="Claude CLI",
+            adapter_key="claude_cli",
+            base_url=None,
+            adapter=ClaudeCliAdapter(
+                command=settings.claude_command,
+                timeout_sec=settings.cli_run_timeout_sec,
+                allowed_cwd_roots=settings.allowed_cwd_roots(),
+            ),
+            seed_models=[
+                _seed_model("claude-cli", "anthropic", "claude", "Claude CLI", Modality.CLI, tier="expensive")
             ],
         ),
     ]
