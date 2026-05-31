@@ -1,10 +1,14 @@
 # Local agent / IDE state — do not commit
 .claude/
 
-# Environment / secrets
+# Environment / secrets (keep only .env.example tracked)
 .env
-.env.local
-.env*.local
+.env.*
+!.env.example
+
+# OAuth / credential files (never commit)
+auth.json
+*.auth.json
 
 # OS / editor noise
 .DS_Store
