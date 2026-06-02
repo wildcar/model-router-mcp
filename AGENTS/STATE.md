@@ -26,7 +26,12 @@ it as a managed service on this host.
   shows USD per 1M tokens (uniform 3-decimal `pricePerMillion`, no exponents) with
   labelled Промпт/Ответ columns; manual-add form takes $/1M and converts to
   per-token on submit.
-- ✅ Tests green: `pytest` (28 passed).
+- ✅ Fixed a startup crash: `resolve_executable` raised `PermissionError` while
+  probing `~/.nvm` once that tree appeared under the (ProtectHome-masked) home of
+  the `modelrouter` user; now guarded against `OSError`.
+- ✅ Deployed to prod and healthy: all 8 providers configured (incl. `codex-cli`
+  and `claude-cli`); web console serves the new picker + per-1M prices.
+- ✅ Tests green: `pytest` (29 passed).
 
 ## Next
 
