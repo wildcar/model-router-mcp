@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-06-02 · Web UX — model picker + readable prices
+- What: Test console gained a cascading model picker (provider→vendor→model→version, client-side from model_id) and now sends the provider hint; registry price table shows USD/1M tokens (uniform decimals, no exponents) with labelled Промпт/Ответ; manual-add form takes $/1M.
+- Why: User: service provider wasn't selectable, OpenRouter list too long, prices shown in exponent form with no unit/label.
+- Files: web/templates/test.html, web/templates/registry.html, web/static/app.js, web/static/app.css
+- Next: Phase 5 cont. — subscription/amortization UI; tune seed prices.
+
 ## 2026-05-31 · Phase 4 — CLI engines (codex, claude)
 - What: Added codex/claude CLI adapters (one-shot subprocess + JSON parsing), shared _subprocess helper with cwd whitelist, run_cli MCP tool + /api/cli, cli modality in the test console. Claude CLI total_cost_usd used as cost override.
 - Why: Phase 4 — invoke local CLI agents alongside HTTP providers.

@@ -26,6 +26,8 @@ table { width:100%; border-collapse:collapse; font-size:13px; }
 th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--border); }
 th { color:var(--muted); font-weight:600; }
 td.trunc { max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+th.num, td.num { text-align:right; font-variant-numeric:tabular-nums; font-family:ui-monospace, "SF Mono", Menlo, monospace; white-space:nowrap; }
+.hint { color:var(--muted); font-size:12px; margin:0 0 12px; }
 .err { color:var(--err); }
 #toast { position:fixed; bottom:24px; right:24px; background:#262b34; border:1px solid var(--border); padding:12px 18px; border-radius:8px; opacity:0; transform:translateY(8px); transition:.2s; pointer-events:none; }
 #toast.show { opacity:1; transform:none; }

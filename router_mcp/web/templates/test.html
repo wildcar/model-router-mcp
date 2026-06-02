@@ -31,12 +31,28 @@
       </select>
     </label>
   </div>
+
+  <!-- Cascading model picker: service provider → model vendor → model → version. -->
+  <div class="row" id="picker">
+    <label>Поставщик сервиса
+      <select id="sel-provider"><option value="">— любой —</option></select>
+    </label>
+    <label>Вендор модели
+      <select id="sel-vendor"><option value="">— любой —</option></select>
+    </label>
+    <label class="grow">Модель
+      <select id="sel-model"><option value="">— любая —</option></select>
+    </label>
+    <label>Версия / вариант
+      <select id="sel-version"><option value="">— любая —</option></select>
+    </label>
+  </div>
   <div class="row">
-    <label class="grow">Модель (model_id, опционально)
+    <label class="grow">model_id (итоговый — можно ввести вручную)
       <input id="model" type="text" list="models-list" placeholder="напр. openai/gpt-4o-mini">
       <datalist id="models-list"></datalist>
     </label>
-    <button id="refresh-models" type="button">Обновить список моделей</button>
+    <button id="refresh-models" type="button">Обновить список</button>
   </div>
 
   <label class="grow" id="text-field">Текст запроса / промпт
@@ -61,11 +77,94 @@
 <script>
 const $ = (id) => document.getElementById(id);
 
-function onModalityChange() {
-  const m = $('modality').value;
-  $('file-field').hidden = (m !== 'stt');
-  $('text-field').hidden = (m === 'stt');
-  $('engine-field').hidden = (m !== 'cli');
+// --- model picker -------------------------------------------------------
+// `allModels` is the full list for the current modality+tier; the four selects
+// narrow it down. Each model_id looks like "<vendor>/<name>[:variant]" — we slice
+// it into vendor / base name / variant so the dropdowns stay short.
+let allModels = [];
+
+const vendorOf = (m) =>
+  m.model_provider || (m.model_id.includes('/') ? m.model_id.split('/')[0] : 'other');
+
+function baseOf(m) {
+  let rest = m.model_id;
+  const slash = rest.indexOf('/');
+  if (slash >= 0) rest = rest.slice(slash + 1);
+  const colon = rest.indexOf(':');
+  if (colon >= 0) rest = rest.slice(0, colon);
+  return rest;
+}
+
+const variantOf = (m) => {
+  const colon = m.model_id.indexOf(':');
+  return colon >= 0 ? m.model_id.slice(colon + 1) : '';
+};
+
+function fillSelect(sel, options, anyLabel) {
+  const prev = sel.value;
+  sel.innerHTML = '';
+  const any = document.createElement('option');
+  any.value = ''; any.textContent = anyLabel;
+  sel.appendChild(any);
+  for (const o of options) {
+    const opt = document.createElement('option');
+    opt.value = o.value; opt.textContent = o.label;
+    sel.appendChild(opt);
+  }
+  sel.value = options.some((o) => o.value === prev) ? prev : '';
+}
+
+const byProvider = () => {
+  const p = $('sel-provider').value;
+  return p ? allModels.filter((m) => m.service_provider === p) : allModels;
+};
+const byVendor = () => {
+  const v = $('sel-vendor').value;
+  return v ? byProvider().filter((m) => vendorOf(m) === v) : byProvider();
+};
+const byBase = () => {
+  const b = $('sel-model').value;
+  return b ? byVendor().filter((m) => baseOf(m) === b) : byVendor();
+};
+
+const uniqSorted = (xs) => [...new Set(xs)].sort();
+
+function rebuildProviders() {
+  fillSelect($('sel-provider'),
+    uniqSorted(allModels.map((m) => m.service_provider)).map((v) => ({ value: v, label: v })),
+    '— любой —');
+  rebuildVendors();
+}
+function rebuildVendors() {
+  fillSelect($('sel-vendor'),
+    uniqSorted(byProvider().map(vendorOf)).map((v) => ({ value: v, label: v })),
+    '— любой —');
+  rebuildBases();
+}
+function rebuildBases() {
+  fillSelect($('sel-model'),
+    uniqSorted(byVendor().map(baseOf)).map((v) => ({ value: v, label: v })),
+    '— любая —');
+  rebuildVersions();
+}
+function rebuildVersions() {
+  const seen = new Set();
+  const opts = [];
+  for (const m of byBase()) {
+    if (seen.has(m.model_id)) continue;
+    seen.add(m.model_id);
+    opts.push({ value: m.model_id, label: `${variantOf(m) || 'базовая'} · ${m.tier}` });
+  }
+  opts.sort((a, b) => a.label.localeCompare(b.label));
+  fillSelect($('sel-version'), opts, '— любая —');
+  syncModelId();
+}
+function syncModelId() {
+  const version = $('sel-version').value;
+  if (version) { $('model').value = version; return; }
+  // No explicit version chosen, but if the narrowed set is a single model, use it.
+  const ms = byBase();
+  if ($('sel-model').value && ms.length === 1) $('model').value = ms[0].model_id;
 }
 
 async function loadModels() {
@@ -73,22 +172,35 @@ async function loadModels() {
   const tier = $('tier').value;
   const q = new URLSearchParams({ modality: m });
   if (tier) q.set('tier', tier);
-  const models = await api(`/api/models?${q}`);
+  allModels = await api(`/api/models?${q}`);
   const list = $('models-list');
   list.innerHTML = '';
-  for (const x of models.slice(0, 500)) {
+  for (const x of allModels.slice(0, 1000)) {
     const opt = document.createElement('option');
     opt.value = x.model_id;
     opt.label = `${x.model_id} (${x.tier})`;
     list.appendChild(opt);
   }
-  toast(`Загружено моделей: ${models.length}`);
+  rebuildProviders();
+  toast(`Загружено моделей: ${allModels.length}`);
+}
+
+// --- request handling ---------------------------------------------------
+function onModalityChange() {
+  const m = $('modality').value;
+  $('file-field').hidden = (m !== 'stt');
+  $('text-field').hidden = (m === 'stt');
+  $('engine-field').hidden = (m !== 'cli');
+  $('picker').hidden = (m === 'cli');  // CLI is driven by the engine selector, not the registry
+  loadModels();
 }
 
 function showMeta(res) {
   const u = res.usage || {};
   const bits = [`Провайдер: <b>${res.provider}</b>`, `Модель: <b>${res.model_id}</b>`];
-  if (u.total_tokens != null) bits.push(`Токены: ${u.prompt_tokens ?? '–'}/${u.completion_tokens ?? '–'}`);
+  if (u.total_tokens != null) {
+    bits.push(`Токены (промпт/ответ): ${u.prompt_tokens ?? '–'}/${u.completion_tokens ?? '–'}`);
+  }
   if (u.audio_seconds != null) bits.push(`Аудио: ${u.audio_seconds}s`);
   if (u.images != null) bits.push(`Изображений: ${u.images}`);
   bits.push(`Стоимость: <b>$${(res.cost_usd ?? 0).toFixed(6)}</b> (${res.cost_source})`);
@@ -110,13 +222,14 @@ async function send() {
     const user = $('user').value || 'web-tester';
     const model_id = $('model').value || null;
     const tier = $('tier').value || null;
+    const provider = $('sel-provider').value || null;
     let res;
 
     if (m === 'chat') {
-      res = await api('/api/chat', { method: 'POST', body: { external_user_id: user, text: $('prompt').value, model_id, tier } });
+      res = await api('/api/chat', { method: 'POST', body: { external_user_id: user, text: $('prompt').value, model_id, tier, provider } });
       resetResult(); $('answer').hidden = false; $('answer').textContent = res.text || '(пусто)';
     } else if (m === 'image') {
-      res = await api('/api/image', { method: 'POST', body: { external_user_id: user, prompt: $('prompt').value, model_id } });
+      res = await api('/api/image', { method: 'POST', body: { external_user_id: user, prompt: $('prompt').value, model_id, provider } });
       resetResult();
       for (const url of (res.image_urls || [])) addImage(url);
       for (const ref of (res.image_refs || [])) addImage('/blobs/' + ref);
@@ -124,7 +237,7 @@ async function send() {
       res = await api('/api/cli', { method: 'POST', body: { external_user_id: user, prompt: $('prompt').value, engine: $('engine').value } });
       resetResult(); $('answer').hidden = false; $('answer').textContent = res.text || '(пусто)';
     } else if (m === 'tts') {
-      res = await api('/api/tts', { method: 'POST', body: { external_user_id: user, text: $('prompt').value, model_id } });
+      res = await api('/api/tts', { method: 'POST', body: { external_user_id: user, text: $('prompt').value, model_id, provider } });
       resetResult();
       if (res.audio_ref) { const a = $('audio-out'); a.src = '/blobs/' + res.audio_ref; a.hidden = false; }
     } else if (m === 'stt') {
@@ -133,6 +246,7 @@ async function send() {
       const fd = new FormData();
       fd.append('file', f); fd.append('external_user_id', user);
       if (model_id) fd.append('model_id', model_id);
+      if (provider) fd.append('provider', provider);
       const r = await fetch('/api/transcribe', { method: 'POST', body: fd });
       if (!r.ok) { let d = r.statusText; try { d = (await r.json()).detail || d; } catch (_) {} throw new Error(d); }
       res = await r.json();
@@ -153,6 +267,11 @@ function addImage(src) {
 }
 
 $('modality').addEventListener('change', onModalityChange);
+$('tier').addEventListener('change', loadModels);
+$('sel-provider').addEventListener('change', rebuildVendors);
+$('sel-vendor').addEventListener('change', rebuildBases);
+$('sel-model').addEventListener('change', rebuildVersions);
+$('sel-version').addEventListener('change', syncModelId);
 $('send').addEventListener('click', send);
 $('refresh-models').addEventListener('click', loadModels);
 onModalityChange();

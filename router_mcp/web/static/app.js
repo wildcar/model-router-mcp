@@ -15,6 +15,13 @@ async function api(url, opts = {}) {
   return res.json();
 }
 
+// Prices in the registry are stored as USD per single token. Humans compare them
+// far more easily as USD per 1,000,000 tokens, with a fixed number of decimals so
+// the columns line up. Returns a string with uniform width (3 decimals).
+function pricePerMillion(perToken) {
+  return ((Number(perToken) || 0) * 1e6).toFixed(3);
+}
+
 function toast(message, isError = false) {
   let el = document.getElementById('toast');
   if (!el) {

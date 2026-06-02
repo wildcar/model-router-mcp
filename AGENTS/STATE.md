@@ -20,11 +20,17 @@ it as a managed service on this host.
   override. Test console gained a `cli` modality + engine selector.
 - ✅ Verified live: `claude` run_cli end-to-end (text + usage + provider cost +
   session_id). Both CLI providers enabled (binaries on PATH).
+- ✅ Web UX (Phase 5 start): test console now has a cascading model picker
+  (поставщик сервиса → вендор → модель → версия/вариант, derived client-side from
+  `model_id`); the chosen provider is sent as a routing hint. Registry price table
+  shows USD per 1M tokens (uniform 3-decimal `pricePerMillion`, no exponents) with
+  labelled Промпт/Ответ columns; manual-add form takes $/1M and converts to
+  per-token on submit.
 - ✅ Tests green: `pytest` (28 passed).
 
 ## Next
 
-- Phase 5: registry admin polish; subscription/amortization UI; tune seed prices.
+- Phase 5 (cont.): subscription/amortization UI; tune seed prices.
 - Phase 6: hardening, optional streaming for long CLI/chat runs.
 - Prod note: the `modelrouter` user needs `codex`/`claude` on its PATH and their
   auth to use CLI engines (codex auth.json is synced; claude needs its own login
