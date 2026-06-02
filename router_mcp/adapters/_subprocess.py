@@ -41,8 +41,13 @@ def resolve_executable(name: str, fallbacks: tuple[str, ...] = ()) -> str | None
         *[Path(f) for f in fallbacks],
     ]
     nvm_root = home / ".nvm/versions/node"
-    if nvm_root.is_dir():
-        candidates += sorted(nvm_root.glob(f"*/bin/{name}"), reverse=True)
+    try:
+        if nvm_root.is_dir():
+            candidates += sorted(nvm_root.glob(f"*/bin/{name}"), reverse=True)
+    except OSError:
+        # Probed paths under $HOME may be unreadable (e.g. systemd ProtectHome=true
+        # masks the service user's home). Treat as "not found" rather than crashing.
+        pass
     for c in candidates:
         if _is_exec(c):
             return str(c)
@@ -50,7 +55,10 @@ def resolve_executable(name: str, fallbacks: tuple[str, ...] = ()) -> str | None
 
 
 def _is_exec(path: Path) -> bool:
-    return path.is_file() and os.access(path, os.X_OK)
+    try:
+        return path.is_file() and os.access(path, os.X_OK)
+    except OSError:
+        return False
 
 
 def validate_cwd(requested: str | None, allowed_roots: list[str], default: str) -> str:

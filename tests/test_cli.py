@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from router_mcp.adapters._subprocess import validate_cwd
+from router_mcp.adapters import _subprocess
+from router_mcp.adapters._subprocess import resolve_executable, validate_cwd
 from router_mcp.adapters.claude_cli import ClaudeCliAdapter
 from router_mcp.adapters.codex_cli import CodexCliAdapter
 from router_mcp.domain.errors import ProviderError
@@ -23,6 +26,21 @@ def test_validate_cwd_accepts_allowed_root(tmp_path):
 def test_validate_cwd_rejects_outside(tmp_path):
     with pytest.raises(ProviderError):
         validate_cwd("/etc", [str(tmp_path)], "/default")
+
+
+def test_resolve_executable_survives_unreadable_home(monkeypatch):
+    # systemd ProtectHome=true masks the service user's home, so probing
+    # ~/.nvm raises PermissionError. resolve_executable must not propagate it.
+    real_is_dir = Path.is_dir
+
+    def boom_is_dir(self):
+        if ".nvm" in str(self):
+            raise PermissionError(13, "Permission denied")
+        return real_is_dir(self)
+
+    monkeypatch.setattr(_subprocess.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(Path, "is_dir", boom_is_dir)
+    assert resolve_executable("definitely-not-a-real-binary-xyz") is None
 
 
 def test_codex_parse_deltas_and_usage():

@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-06-02 · Fix — startup crash on masked service-user home
+- What: resolve_executable now swallows OSError when probing ~/.nvm / candidate paths (PermissionError under systemd ProtectHome=true was crashing startup once /home/modelrouter/.nvm appeared). Added a regression test.
+- Why: Prod deploy failed — service exited 3 with PermissionError on /home/modelrouter/.nvm/versions/node.
+- Files: router_mcp/adapters/_subprocess.py, tests/test_cli.py
+- Next: decide how to actually expose codex/claude to the prod service (PATH/ReadWritePaths vs ProtectHome).
+
 ## 2026-06-02 · Web UX — model picker + readable prices
 - What: Test console gained a cascading model picker (provider→vendor→model→version, client-side from model_id) and now sends the provider hint; registry price table shows USD/1M tokens (uniform decimals, no exponents) with labelled Промпт/Ответ; manual-add form takes $/1M.
 - Why: User: service provider wasn't selectable, OpenRouter list too long, prices shown in exponent form with no unit/label.
