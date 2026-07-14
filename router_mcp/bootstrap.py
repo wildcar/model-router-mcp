@@ -217,6 +217,7 @@ def _build_adapters(settings: Settings) -> list[ProviderSpec]:
                 command=settings.codex_command,
                 timeout_sec=settings.cli_run_timeout_sec,
                 allowed_cwd_roots=settings.allowed_cwd_roots(),
+                default_cwd=settings.cli_default_cwd,
             ),
             seed_models=[
                 _seed_model("codex-cli", "openai", "codex", "Codex CLI", Modality.CLI, tier="expensive")
@@ -231,6 +232,7 @@ def _build_adapters(settings: Settings) -> list[ProviderSpec]:
                 command=settings.claude_command,
                 timeout_sec=settings.cli_run_timeout_sec,
                 allowed_cwd_roots=settings.allowed_cwd_roots(),
+                default_cwd=settings.cli_default_cwd,
             ),
             seed_models=[
                 _seed_model("claude-cli", "anthropic", "claude", "Claude CLI", Modality.CLI, tier="expensive")

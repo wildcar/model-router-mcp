@@ -89,6 +89,8 @@ class Settings(BaseSettings):
     cli_run_timeout_sec: int = Field(default=1800, alias="CLI_RUN_TIMEOUT_SEC")
     # Comma-separated list of directory prefixes a CLI request may use as cwd.
     cli_allowed_cwd_roots: str = Field(default="", alias="CLI_ALLOWED_CWD_ROOTS")
+    # Default working directory for CLI runs; empty = the router process cwd.
+    cli_default_cwd: str | None = Field(default=None, alias="CLI_DEFAULT_CWD")
 
     # --- Routing defaults (per modality) --------------------------------
     default_chat_model: str | None = Field(default=None, alias="DEFAULT_CHAT_MODEL")

@@ -30,12 +30,15 @@ it as a managed service on this host.
   probing `~/.nvm` once that tree appeared under the (ProtectHome-masked) home of
   the `modelrouter` user; now guarded against `OSError`.
 - ✅ Deployed to prod and healthy; web console serves the new picker + per-1M prices.
-- ⚠️ Checked live 2026-07-14: CLI engines do **not** work in prod — `claude`/`codex`
-  binaries are not resolvable under the hardened service user (`ProtectHome=true`,
-  nothing on the unit's PATH), so `run_cli`/`/api/cli` dispatch fails with
-  "No configured provider available for modality cli". The `service_providers.enabled`
-  flag still reads true (upsert never downgrades it on restart) — misleading in
-  `/health` and `/api/registry/providers`.
+- 🔧 Prod claude-cli (2026-07-14): fixed the ProtectHome blocker — the service now
+  has a dedicated HOME `/var/lib/model-router/home` (drop-in `claude-cli.conf`,
+  tracked in `deploy/`), with an isolated native claude 2.1.187 install inside and
+  runs defaulting to `$HOME/workspace` (`CLI_DEFAULT_CWD`, also the only
+  `CLI_ALLOWED_CWD_ROOTS` root). Chain verified live: dispatch reaches the CLI,
+  which now answers "Not logged in". Pending: one-time subscription login under
+  `modelrouter` (interactive OAuth), then end-to-end verify. codex binary for the
+  service — still absent. Known quirk: `service_providers.enabled` never
+  downgrades on restart (upsert skips it); dispatch re-checks `is_configured()`.
 - ✅ Tests green: `pytest` (29 passed).
 - ✅ Process: humanizer-ru skill vendored to `.claude/skills/humanizer-ru/` and made
   mandatory for all agent-produced Russian prose (AGENTS.md → Language Rules).

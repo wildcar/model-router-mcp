@@ -71,7 +71,14 @@ curl -fsS http://127.0.0.1:8088/health
 - Mount detail: `FastMCP(streamable_http_path="/")` + mount at `/mcp` (else `/mcp/mcp`).
 - nginx must use `proxy_buffering off` + `proxy_http_version 1.1` on `/mcp` for
   Streamable HTTP / SSE.
-- CLI engines (`run_cli`): the `modelrouter` user needs `codex`/`claude` on its
-  PATH (or absolute `CODEX_COMMAND`/`CLAUDE_COMMAND`) and their own auth — it does
-  not see `keeper`'s `~/.codex` / `~/.claude`. Set `CLI_ALLOWED_CWD_ROOTS` to allow
-  an explicit working dir.
+- CLI engines (`run_cli`): ProtectHome=true masks all of /home for the service, so
+  it has a dedicated HOME=`/var/lib/model-router/home` via the drop-in
+  `/etc/systemd/system/model-router-mcp.service.d/claude-cli.conf` (tracked copy:
+  `deploy/claude-cli.conf`). claude is natively installed inside that HOME
+  (`.local/share/claude/versions/<v>` + `.local/bin/claude` symlink; resolved via
+  the `$HOME/.local/bin` fallback in `resolve_executable`). Auth: one-time
+  subscription login under `modelrouter` — its own `.credentials.json`; never
+  reuse `keeper`'s (two writers race on one refresh token). Runs execute in
+  `$HOME/workspace` — `CLI_DEFAULT_CWD`, the only `CLI_ALLOWED_CWD_ROOTS` root,
+  and the CLI's trusted folder (empty on purpose: no CLAUDE.md pickup). codex for
+  the service: not installed yet.

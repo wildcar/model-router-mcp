@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-07-14 · Prod claude-cli: dedicated HOME + workspace cwd
+- What: systemd drop-in (deploy/claude-cli.conf) gives the service HOME=/var/lib/model-router/home (+ReadWritePaths); isolated native claude 2.1.187 install inside it; new CLI_DEFAULT_CWD setting wired into both CLI adapters; prod runs in $HOME/workspace (also the cwd whitelist root).
+- Why: ProtectHome=true masked /home — claude-cli was enabled in DB but undispatchable; runs must not execute in /opt (repo CLAUDE.md pickup, read-only fs, secrets nearby).
+- Files: router_mcp/config.py, router_mcp/bootstrap.py, .env.example, deploy/claude-cli.conf, AGENTS/ENV.md, AGENTS/SPEC.md, AGENTS/STATE.md
+- Next: one-time subscription login under modelrouter; live verify via /api/cli; same install recipe for codex-cli.
+
 ## 2026-07-14 · Mandate humanizer-ru skill for Russian prose
 - What: Vendored https://github.com/smixs/humanizer-ru (SKILL.md + LICENSE) into .claude/skills/humanizer-ru/, un-ignored .claude/skills/ in .gitignore, added a mandatory Language Rule to AGENTS.md.
 - Why: User request — every agent must run its Russian output through the humanizer-ru patterns.
