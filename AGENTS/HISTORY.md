@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-07-14 · codex-cli infra + live `configured` flag
+- What: codex 0.144.1 (vendored musl binary) installed into the service HOME and verified end-to-end via /api/cli; live `configured` field added to /api/registry/providers + «Доступен» column in the console; bootstrap comment fixed. Temporary auth.json copy removed — per openai-auth-sync ADR-0002 shared token families get revoked, each client logs in itself.
+- Why: User asked to bring codex-cli up the same way and fix the misleading stale enabled flag.
+- Files: router_mcp/web/api.py, router_mcp/web/templates/registry.html, router_mcp/bootstrap.py, tests/test_web.py, AGENTS/{SPEC,STATE,ENV}.md
+- Next: user runs `codex login --device-auth` under modelrouter; re-auth the codex_image /opt token (dead family from Jun 16).
+
 ## 2026-07-14 · Prod claude-cli live (login + deploy + verify)
 - What: Deployed 295fb28 (CLI_DEFAULT_CWD wiring); user completed the one-time subscription login and folder trust under modelrouter; verified /api/cli end-to-end (pwd → $HOME/workspace, usage, session_id, provider-reported cost).
 - Why: Finish the prod claude-cli fix started the same day.

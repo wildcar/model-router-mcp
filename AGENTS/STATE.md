@@ -37,25 +37,36 @@ it as a managed service on this host.
   (`CLI_DEFAULT_CWD`, also the only `CLI_ALLOWED_CWD_ROOTS` root). Verified
   end-to-end via `/api/cli`: text + usage + session_id; under subscription the CLI
   still reports a notional nonzero `total_cost_usd`, logged with
-  `cost_source=provider`. codex binary for the service — still absent (same
-  recipe). Known quirk: `service_providers.enabled` never downgrades on restart
-  (upsert skips it); dispatch re-checks `is_configured()`.
+  `cost_source=provider`.
+- 🔧 Prod codex-cli (2026-07-14): codex 0.144.1 (vendored musl binary from the npm
+  package) installed into the same service HOME; chain verified end-to-end via
+  `/api/cli` (pwd → workspace, usage 25.3k/44 tokens) on a temporary auth copy,
+  which was then removed: openai-auth-sync ADR-0002 — OpenAI reuse-detection
+  revokes the whole token family when a shared single-use refresh token is reused,
+  so every client needs its own grant. Pending: one-time
+  `codex login --device-auth` under `modelrouter`.
+- ⚠️ codex-oauth (image adapter): `/opt/model-router-mcp/auth.json` still holds a
+  Jun 16 token from the retired shared family — its refresh token is dead, and a
+  refresh attempt risks revoking keeper's live codex login (ADR-0002 mechanism).
+  Needs its own re-auth before image gen is used again.
+- ✅ Providers now expose live `configured` (adapter key/binary check) next to the
+  `enabled` admin toggle: `/api/registry/providers` + «Доступен» column in the
+  registry console. `enabled` is seeded from configured state on first insert only
+  and never downgraded by restarts; dispatch re-checks `is_configured()` live.
 - ✅ Tests green: `pytest` (29 passed).
 - ✅ Process: humanizer-ru skill vendored to `.claude/skills/humanizer-ru/` and made
   mandatory for all agent-produced Russian prose (AGENTS.md → Language Rules).
 
 ## Next
 
+- One-time `codex login --device-auth` under `modelrouter` (user action) — then
+  live-verify codex-cli again.
+- Re-auth the codex_image `/opt/model-router-mcp/auth.json` (own grant, ADR-0002).
 - Phase 5 (cont.): subscription/amortization UI; tune seed prices.
 - Phase 6: hardening, optional streaming for long CLI/chat runs.
-- Prod note: the `modelrouter` user needs `codex`/`claude` on its PATH and their
-  auth to use CLI engines (codex auth.json is synced; claude needs its own login
-  or ANTHROPIC_API_KEY in the service env).
 
 ## Open questions
 
-- Codex `auth.json` for the `modelrouter` user (dedicated copy vs reuse keeper's
-  via `openai-auth-sync`) — decide when CLI/Codex adapters land.
 - Subdomain + TLS cert name for nginx (placeholder `router.example.com`).
 - Real end-to-end chat still needs a live `OPENROUTER_API_KEY` (chain proven via
   stub tests).

@@ -80,5 +80,11 @@ curl -fsS http://127.0.0.1:8088/health
   subscription login under `modelrouter` — its own `.credentials.json`; never
   reuse `keeper`'s (two writers race on one refresh token). Runs execute in
   `$HOME/workspace` — `CLI_DEFAULT_CWD`, the only `CLI_ALLOWED_CWD_ROOTS` root,
-  and the CLI's trusted folder (empty on purpose: no CLAUDE.md pickup). codex for
-  the service: not installed yet.
+  and the CLI's trusted folder (empty on purpose: no CLAUDE.md pickup). codex:
+  the vendored musl binary from the npm package
+  (`@openai/codex-linux-x64/vendor/.../bin/codex`) is copied to the same
+  `$HOME/.local/bin`; auth = its own grant via `codex login --device-auth` under
+  `modelrouter`. NEVER copy/sync codex `auth.json` between clients — OpenAI
+  reuse-detection revokes the whole token family (openai-auth-sync ADR-0002; that
+  tool is retired). Both binaries are frozen copies: update manually on new
+  versions.

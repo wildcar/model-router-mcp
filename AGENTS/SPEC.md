@@ -56,7 +56,7 @@ on it; adapters never touch storage/mcp directly.
 5. ✅ Per-request/response logging by `external_user_id` with token usage and cost.
 6. ✅ Cost computation from registry prices; amortized-subscription hook (table + field).
 7. ✅ MCP tools over Streamable HTTP: `list_models`, `chat`, `generate_image`, `transcribe`, `synthesize_speech`, `run_cli`, `get_usage`.
-8. ✅ Web UI: test console (chat/image/stt/tts) + registry admin (providers, manual models) + logs/usage.
+8. ✅ Web UI: test console (chat/image/stt/tts) + registry admin (providers: `enabled` admin toggle + live `configured` state, manual models) + logs/usage.
 9. ✅ Modality breadth: image (Codex OAuth), STT (Deepgram), TTS (ElevenLabs). [Phase 2]
 10. ✅ Direct adapters: DeepSeek (OpenAI-compatible), Claude API (Anthropic Messages). [Phase 3]
 11. ✅ CLI engines: `codex` (`codex exec --json`) and `claude` (`claude -p --output-format json`), via `run_cli` with a cwd whitelist and a configurable default cwd (`CLI_DEFAULT_CWD`). [Phase 4]

@@ -250,7 +250,10 @@ async def build_core(settings: Settings) -> AppCore:
     specs = _build_adapters(settings)
     adapters: dict[str, ProviderAdapter] = {spec.id: spec.adapter for spec in specs}
 
-    # Seed service_providers; a provider is enabled iff its adapter is configured.
+    # Seed service_providers. `enabled` is an admin toggle: it takes the adapter's
+    # configured state on first insert only — later restarts leave it alone
+    # (upsert_service_provider skips it on conflict). Dispatch re-checks
+    # is_configured() live; /api/registry/providers exposes both flags.
     # Then seed each provider's fixed-catalog models (idempotent upsert).
     for spec in specs:
         await db.upsert_service_provider(

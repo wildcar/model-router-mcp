@@ -63,8 +63,10 @@ def test_seed_models_present(client):
 def test_providers_listed(client):
     r = client.get("/api/registry/providers")
     assert r.status_code == 200
-    ids = [p["id"] for p in r.json()]
+    body = r.json()
+    ids = [p["id"] for p in body]
     assert "openrouter" in ids
+    assert all(isinstance(p["configured"], bool) for p in body)
 
 
 def test_add_manual_model_and_list(client):

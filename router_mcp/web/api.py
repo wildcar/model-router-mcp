@@ -244,6 +244,9 @@ async def api_providers() -> list[dict[str, Any]]:
             "display_name": p.display_name,
             "adapter": p.adapter,
             "enabled": p.enabled,
+            # Live adapter state: `enabled` is the admin toggle and survives
+            # restarts even when the adapter has lost its key/binary.
+            "configured": p.id in core.adapters and core.adapters[p.id].is_configured(),
             "base_url": p.base_url,
         }
         for p in providers

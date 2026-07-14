@@ -4,7 +4,7 @@
 <section class="card">
   <h2>Поставщики сервиса</h2>
   <table id="providers"><thead><tr>
-    <th>ID</th><th>Название</th><th>Адаптер</th><th>Включён</th>
+    <th>ID</th><th>Название</th><th>Адаптер</th><th>Включён</th><th>Доступен</th>
   </tr></thead><tbody></tbody></table>
 </section>
 
@@ -71,7 +71,13 @@ async function loadProviders() {
     cb.addEventListener('change', () =>
       api(`/api/registry/providers/${p.id}`, { method: 'PATCH', body: { enabled: cb.checked } })
         .then(() => toast('Сохранено')));
-    td.appendChild(cb); tr.appendChild(td); tb.appendChild(tr);
+    td.appendChild(cb); tr.appendChild(td);
+    const st = document.createElement('td');
+    st.textContent = p.configured ? '✓' : '✗';
+    st.title = p.configured
+      ? 'Адаптер настроен, запросы пройдут'
+      : 'Нет ключа или бинарника: диспетчер откажет, даже если провайдер включён';
+    tr.appendChild(st); tb.appendChild(tr);
   }
 }
 
