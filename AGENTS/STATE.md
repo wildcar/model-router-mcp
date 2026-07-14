@@ -46,8 +46,8 @@ it as a managed service on this host.
   `/var/lib/model-router/home/.codex/auth.json` via `CODEX_AUTH_PATH` (dev `.env`
   points at keeper's `~/.codex/auth.json`). One grant, one file: the adapter
   re-reads it per request and re-checks it before refreshing, so both writers stay
-  on one rotation chain. Dead Jun-16-family files remain on disk pending deletion
-  approval: `/opt/model-router-mcp/auth.json{,.bak}`, repo-root `auth.json`.
+  on one rotation chain. The dead Jun-16-family files (`/opt` auth.json + .bak,
+  repo-root auth.json) were deleted with user approval on 2026-07-14.
 - ✅ Providers now expose live `configured` (adapter key/binary check) next to the
   `enabled` admin toggle: `/api/registry/providers` + «Доступен» column in the
   registry console. `enabled` is seeded from configured state on first insert only
@@ -58,8 +58,6 @@ it as a managed service on this host.
 
 ## Next
 
-- Delete the dead-family auth.json leftovers once the user confirms:
-  `/opt/model-router-mcp/auth.json`, its `.bak`, and repo-root `auth.json`.
 - Phase 5 (cont.): subscription/amortization UI; tune seed prices.
 - Phase 6: hardening, optional streaming for long CLI/chat runs.
 

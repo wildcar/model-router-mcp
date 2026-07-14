@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-07-14 · Purge dead-family auth.json leftovers
+- What: Deleted /opt/model-router-mcp/auth.json (+.bak) and repo-root auth.json — dead Jun 16 token family; nothing references them since the CODEX_AUTH_PATH repoint. Service healthy after removal.
+- Why: User confirmed; dead OAuth credentials on disk are pure risk (ADR-0002 reuse-revocation).
+- Files: host cleanup only; AGENTS/STATE.md
+- Next: Phase 5 cont. — subscription/amortization UI; tune seed prices.
+
 ## 2026-07-14 · codex-cli live; codex-oauth shares the CLI grant
 - What: `codex login --device-auth` done under modelrouter (verified via /api/cli); CODEX_AUTH_PATH repointed to that same auth.json (dev: keeper's ~/.codex); the image adapter now re-reads the file before refreshing so parallel writers stay on one rotation chain; stale "dedicated copy" docstring advice replaced.
 - Why: One OAuth grant per client (openai-auth-sync ADR-0002); the /opt file held a dead Jun 16 token family.
