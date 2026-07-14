@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-07-14 · Prod claude-cli live (login + deploy + verify)
+- What: Deployed 295fb28 (CLI_DEFAULT_CWD wiring); user completed the one-time subscription login and folder trust under modelrouter; verified /api/cli end-to-end (pwd → $HOME/workspace, usage, session_id, provider-reported cost).
+- Why: Finish the prod claude-cli fix started the same day.
+- Files: AGENTS/STATE.md (no code)
+- Next: same install recipe for codex-cli; Phase 5 cont. — subscription/amortization UI.
+
 ## 2026-07-14 · Prod claude-cli: dedicated HOME + workspace cwd
 - What: systemd drop-in (deploy/claude-cli.conf) gives the service HOME=/var/lib/model-router/home (+ReadWritePaths); isolated native claude 2.1.187 install inside it; new CLI_DEFAULT_CWD setting wired into both CLI adapters; prod runs in $HOME/workspace (also the cwd whitelist root).
 - Why: ProtectHome=true masked /home — claude-cli was enabled in DB but undispatchable; runs must not execute in /opt (repo CLAUDE.md pickup, read-only fs, secrets nearby).

@@ -30,15 +30,16 @@ it as a managed service on this host.
   probing `~/.nvm` once that tree appeared under the (ProtectHome-masked) home of
   the `modelrouter` user; now guarded against `OSError`.
 - ✅ Deployed to prod and healthy; web console serves the new picker + per-1M prices.
-- 🔧 Prod claude-cli (2026-07-14): fixed the ProtectHome blocker — the service now
-  has a dedicated HOME `/var/lib/model-router/home` (drop-in `claude-cli.conf`,
-  tracked in `deploy/`), with an isolated native claude 2.1.187 install inside and
-  runs defaulting to `$HOME/workspace` (`CLI_DEFAULT_CWD`, also the only
-  `CLI_ALLOWED_CWD_ROOTS` root). Chain verified live: dispatch reaches the CLI,
-  which now answers "Not logged in". Pending: one-time subscription login under
-  `modelrouter` (interactive OAuth), then end-to-end verify. codex binary for the
-  service — still absent. Known quirk: `service_providers.enabled` never
-  downgrades on restart (upsert skips it); dispatch re-checks `is_configured()`.
+- ✅ Prod claude-cli live (2026-07-14): dedicated service HOME
+  `/var/lib/model-router/home` (drop-in tracked as `deploy/claude-cli.conf`),
+  isolated native claude 2.1.187 install inside it, one-time subscription login +
+  folder trust done under `modelrouter`. Runs execute in `$HOME/workspace`
+  (`CLI_DEFAULT_CWD`, also the only `CLI_ALLOWED_CWD_ROOTS` root). Verified
+  end-to-end via `/api/cli`: text + usage + session_id; under subscription the CLI
+  still reports a notional nonzero `total_cost_usd`, logged with
+  `cost_source=provider`. codex binary for the service — still absent (same
+  recipe). Known quirk: `service_providers.enabled` never downgrades on restart
+  (upsert skips it); dispatch re-checks `is_configured()`.
 - ✅ Tests green: `pytest` (29 passed).
 - ✅ Process: humanizer-ru skill vendored to `.claude/skills/humanizer-ru/` and made
   mandatory for all agent-produced Russian prose (AGENTS.md → Language Rules).
