@@ -68,6 +68,7 @@ When you ship a deferred item from `STATE.md`, write a normal HISTORY entry and 
 - Conversation with the user: Russian.
 - End-user UI text: Russian, with ability to extend to other languages.
 - Existing docs already written in another language are an established contract — keep editing them in that language; don't silently translate.
+- Mandatory: any Russian prose an agent produces (replies to the user, UI strings, docs) must follow the `humanizer-ru` checklist in `.claude/skills/humanizer-ru/SKILL.md` (vendored from https://github.com/smixs/humanizer-ru). Claude Code auto-loads it as a project skill; other agents read the file and apply its patterns.
 
 ## Project Rules
 

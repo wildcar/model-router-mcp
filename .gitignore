@@ -1,5 +1,6 @@
-# Local agent / IDE state — do not commit
-.claude/
+# Local agent / IDE state — do not commit (shared project skills stay tracked)
+.claude/*
+!.claude/skills/
 
 # Environment / secrets (keep only .env.example tracked)
 .env

@@ -29,9 +29,16 @@ it as a managed service on this host.
 - ✅ Fixed a startup crash: `resolve_executable` raised `PermissionError` while
   probing `~/.nvm` once that tree appeared under the (ProtectHome-masked) home of
   the `modelrouter` user; now guarded against `OSError`.
-- ✅ Deployed to prod and healthy: all 8 providers configured (incl. `codex-cli`
-  and `claude-cli`); web console serves the new picker + per-1M prices.
+- ✅ Deployed to prod and healthy; web console serves the new picker + per-1M prices.
+- ⚠️ Checked live 2026-07-14: CLI engines do **not** work in prod — `claude`/`codex`
+  binaries are not resolvable under the hardened service user (`ProtectHome=true`,
+  nothing on the unit's PATH), so `run_cli`/`/api/cli` dispatch fails with
+  "No configured provider available for modality cli". The `service_providers.enabled`
+  flag still reads true (upsert never downgrades it on restart) — misleading in
+  `/health` and `/api/registry/providers`.
 - ✅ Tests green: `pytest` (29 passed).
+- ✅ Process: humanizer-ru skill vendored to `.claude/skills/humanizer-ru/` and made
+  mandatory for all agent-produced Russian prose (AGENTS.md → Language Rules).
 
 ## Next
 

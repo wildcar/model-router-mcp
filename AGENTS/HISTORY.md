@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-07-14 · Mandate humanizer-ru skill for Russian prose
+- What: Vendored https://github.com/smixs/humanizer-ru (SKILL.md + LICENSE) into .claude/skills/humanizer-ru/, un-ignored .claude/skills/ in .gitignore, added a mandatory Language Rule to AGENTS.md.
+- Why: User request — every agent must run its Russian output through the humanizer-ru patterns.
+- Files: .claude/skills/humanizer-ru/*, .gitignore, AGENTS.md, AGENTS/STATE.md
+- Next: Phase 5 cont.; expose claude/codex binaries + auth to the prod service user (claude-cli currently unusable in prod despite enabled flag).
+
 ## 2026-06-02 · Fix — startup crash on masked service-user home
 - What: resolve_executable now swallows OSError when probing ~/.nvm / candidate paths (PermissionError under systemd ProtectHome=true was crashing startup once /home/modelrouter/.nvm appeared). Added a regression test.
 - Why: Prod deploy failed — service exited 3 with PermissionError on /home/modelrouter/.nvm/versions/node.
