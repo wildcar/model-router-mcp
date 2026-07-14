@@ -38,17 +38,16 @@ it as a managed service on this host.
   end-to-end via `/api/cli`: text + usage + session_id; under subscription the CLI
   still reports a notional nonzero `total_cost_usd`, logged with
   `cost_source=provider`.
-- 🔧 Prod codex-cli (2026-07-14): codex 0.144.1 (vendored musl binary from the npm
-  package) installed into the same service HOME; chain verified end-to-end via
-  `/api/cli` (pwd → workspace, usage 25.3k/44 tokens) on a temporary auth copy,
-  which was then removed: openai-auth-sync ADR-0002 — OpenAI reuse-detection
-  revokes the whole token family when a shared single-use refresh token is reused,
-  so every client needs its own grant. Pending: one-time
-  `codex login --device-auth` under `modelrouter`.
-- ⚠️ codex-oauth (image adapter): `/opt/model-router-mcp/auth.json` still holds a
-  Jun 16 token from the retired shared family — its refresh token is dead, and a
-  refresh attempt risks revoking keeper's live codex login (ADR-0002 mechanism).
-  Needs its own re-auth before image gen is used again.
+- ✅ Prod codex-cli live (2026-07-14): codex 0.144.1 (vendored musl binary from the
+  npm package) in the service HOME; its own OAuth grant via
+  `codex login --device-auth` under `modelrouter` (openai-auth-sync ADR-0002: one
+  grant per client, never copy auth.json). Verified end-to-end via `/api/cli`.
+- ✅ codex-oauth (image adapter) now shares the service codex CLI's
+  `/var/lib/model-router/home/.codex/auth.json` via `CODEX_AUTH_PATH` (dev `.env`
+  points at keeper's `~/.codex/auth.json`). One grant, one file: the adapter
+  re-reads it per request and re-checks it before refreshing, so both writers stay
+  on one rotation chain. Dead Jun-16-family files remain on disk pending deletion
+  approval: `/opt/model-router-mcp/auth.json{,.bak}`, repo-root `auth.json`.
 - ✅ Providers now expose live `configured` (adapter key/binary check) next to the
   `enabled` admin toggle: `/api/registry/providers` + «Доступен» column in the
   registry console. `enabled` is seeded from configured state on first insert only
@@ -59,9 +58,8 @@ it as a managed service on this host.
 
 ## Next
 
-- One-time `codex login --device-auth` under `modelrouter` (user action) — then
-  live-verify codex-cli again.
-- Re-auth the codex_image `/opt/model-router-mcp/auth.json` (own grant, ADR-0002).
+- Delete the dead-family auth.json leftovers once the user confirms:
+  `/opt/model-router-mcp/auth.json`, its `.bak`, and repo-root `auth.json`.
 - Phase 5 (cont.): subscription/amortization UI; tune seed prices.
 - Phase 6: hardening, optional streaming for long CLI/chat runs.
 

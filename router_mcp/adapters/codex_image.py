@@ -5,8 +5,12 @@ providers.openai-codex layout), streams a /responses image_generation call, and
 refreshes the access token on 401/403. Returns the generated PNG as bytes so the
 router persists it to the blob store.
 
-NOTE: the OAuth refresh token is single-use and rotates on refresh. Point
-CODEX_AUTH_PATH at a DEDICATED copy to avoid clobbering ort_bot/hermes.
+NOTE: the OAuth refresh token is single-use and rotates on refresh, and OpenAI
+revokes the whole token family when a rotated-away token is reused (see
+openai-auth-sync ADR-0002) — so never keep copies of one credential. Point
+CODEX_AUTH_PATH at the codex CLI's own auth.json of the SAME user: the file is
+re-read per request and re-checked before refreshing, so both writers stay on
+one rotation chain.
 """
 
 from __future__ import annotations
@@ -70,7 +74,7 @@ class CodexImageAdapter(ProviderAdapter):
         try:
             data_uri = await self._generate_with_tokens(prompt, tokens)
         except AccessDenied:
-            refreshed = await self._refresh_tokens(tokens)
+            refreshed = await self._recover_tokens(tokens)
             data_uri = await self._generate_with_tokens(prompt, refreshed)
 
         raw_b64 = data_uri.split(",", 1)[1]
@@ -204,6 +208,16 @@ class CodexImageAdapter(ProviderAdapter):
                 continue
         status = response.status_code if response is not None else "unknown"
         raise ProviderUnavailable(f"Codex image backend unavailable: {status}")
+
+    async def _recover_tokens(self, failed: dict[str, str]) -> dict[str, str]:
+        """After a 401/403, prefer tokens another writer (the codex CLI shares
+        this file) already refreshed on disk; refresh ourselves only when the
+        file still holds the token that just failed. This keeps the single-use
+        refresh token from being reused across writers."""
+        latest = self._load_tokens()
+        if latest.get("access_token") != failed.get("access_token"):
+            return latest
+        return await self._refresh_tokens(latest)
 
     async def _refresh_tokens(self, tokens: dict[str, str]) -> dict[str, str]:
         refresh_token = tokens.get("refresh_token")

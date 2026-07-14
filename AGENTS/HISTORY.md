@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-07-14 · codex-cli live; codex-oauth shares the CLI grant
+- What: `codex login --device-auth` done under modelrouter (verified via /api/cli); CODEX_AUTH_PATH repointed to that same auth.json (dev: keeper's ~/.codex); the image adapter now re-reads the file before refreshing so parallel writers stay on one rotation chain; stale "dedicated copy" docstring advice replaced.
+- Why: One OAuth grant per client (openai-auth-sync ADR-0002); the /opt file held a dead Jun 16 token family.
+- Files: router_mcp/adapters/codex_image.py, .env.example, AGENTS/{STATE,ENV,HISTORY}.md
+- Next: delete dead auth.json leftovers (/opt auth.json + .bak, repo auth.json) after user confirms.
+
 ## 2026-07-14 · codex-cli infra + live `configured` flag
 - What: codex 0.144.1 (vendored musl binary) installed into the service HOME and verified end-to-end via /api/cli; live `configured` field added to /api/registry/providers + «Доступен» column in the console; bootstrap comment fixed. Temporary auth.json copy removed — per openai-auth-sync ADR-0002 shared token families get revoked, each client logs in itself.
 - Why: User asked to bring codex-cli up the same way and fix the misleading stale enabled flag.

@@ -88,3 +88,7 @@ curl -fsS http://127.0.0.1:8088/health
   reuse-detection revokes the whole token family (openai-auth-sync ADR-0002; that
   tool is retired). Both binaries are frozen copies: update manually on new
   versions.
+- codex-oauth (image gen) shares the service codex CLI's auth.json:
+  `CODEX_AUTH_PATH=/var/lib/model-router/home/.codex/auth.json` (dev `.env`:
+  keeper's `~/.codex/auth.json`). One grant, one file — the adapter re-reads it
+  per request and re-checks before refreshing.
