@@ -50,9 +50,10 @@ async def _make_core(tmp_path):
             prompt_price=1e-6,
             completion_price=2e-6,
             source="manual",
+            price_source_kind="manual",
         )
     )
-    registry = RegistryService(db, openrouter_api_key=None, openrouter_base_url="http://x")
+    registry = RegistryService(db, adapters={})
     blobs = BlobStore(str(tmp_path / "blobs"))
     router = ModelRouter(db, registry, {"stub": StubChatAdapter()}, blobs)
     return db, registry, router
@@ -83,6 +84,39 @@ async def test_dispatch_logs_and_costs(tmp_path):
         assert usage[0].requests == 1
         assert usage[0].total_tokens == 15
         assert usage[0].total_cost_usd == pytest.approx(2e-5)
+    finally:
+        await registry.close()
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_unverified_price_is_logged_as_estimated(tmp_path):
+    """A price nobody confirmed produces a number that must not pass for fact."""
+    db, registry, router = await _make_core(tmp_path)
+    try:
+        await db.upsert_registry_model(
+            RegistryModel(
+                service_provider_id="stub",
+                model_provider="stub",
+                model_id="stub/guessed",
+                display_name="Guessed prices",
+                modalities=(Modality.CHAT,),
+                tier="cheap",
+                prompt_price=1e-6,
+                completion_price=2e-6,
+                source="seed",
+                price_source_kind="estimate",
+            )
+        )
+        req = RouterRequest(
+            modality=Modality.CHAT, external_user_id="u4", model_id="stub/guessed", text="hi"
+        )
+        result = await router.dispatch(req)
+
+        assert result.cost.cost_usd == pytest.approx(2e-5)
+        assert result.cost.cost_source == "estimated"
+        logs = await db.list_request_logs(external_user_id="u4")
+        assert logs[0]["cost_source"] == "estimated"
     finally:
         await registry.close()
         await db.close()

@@ -11,11 +11,13 @@ from __future__ import annotations
 import json
 import logging
 import re
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import httpx
 
-from router_mcp.adapters.base import ProviderAdapter, RetryClientMixin
+from router_mcp.adapters.base import ProviderAdapter, RetryClientMixin, truncated_error
 from router_mcp.domain.errors import ProviderError, ProviderUnavailable
 from router_mcp.domain.messages import Attachment, RouterRequest, RouterResponse, Usage
 from router_mcp.domain.modality import Modality
@@ -24,6 +26,10 @@ from router_mcp.registry.models import RegistryModel
 logger = logging.getLogger(__name__)
 
 IMAGE_HTTP_RE = re.compile(r"^https?://.+\.(?:png|jpe?g|webp|gif)(?:\?.*)?$", re.IGNORECASE)
+
+# OpenRouter is the one provider whose catalog carries prices, so rows it
+# produces are the only ones marked as API-sourced.
+PRICE_SOURCE = "api:openrouter GET /models (pricing)"
 
 
 class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
@@ -83,6 +89,13 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
         image_urls = list(dict.fromkeys(u for u in image_urls if u))
 
         if not text and not image_urls:
+            usage_block = data.get("usage") if isinstance(data, dict) else None
+            if choice0.get("finish_reason") == "length":
+                raise truncated_error(
+                    f"OpenRouter model {model.model_id}",
+                    max_tokens=payload.get("max_tokens"),
+                    completion_tokens=(usage_block or {}).get("completion_tokens"),
+                )
             logger.warning(
                 "OpenRouter parse miss model=%s sample=%s",
                 model.model_id,
@@ -104,6 +117,102 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
             text=text or None,
             attachments=attachments,
             raw_meta={"finish_reason": choice0.get("finish_reason")},
+        )
+
+    # --- catalog ---------------------------------------------------------
+    async def list_catalog(self) -> list[RegistryModel] | None:
+        """Live model list with pricing (the source RegistryService used to own)."""
+        if not self.is_configured():
+            return None
+        response = await self._request_with_retry("GET", "/models")
+        try:
+            payload = response.json()
+        except json.JSONDecodeError as exc:
+            raise ProviderUnavailable("OpenRouter returned invalid JSON") from exc
+        raw_models = payload.get("data", []) if isinstance(payload, dict) else []
+        checked_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        models: list[RegistryModel] = []
+        for item in raw_models:
+            if not isinstance(item, dict):
+                continue
+            model = self._parse_catalog_model(item, checked_at)
+            if model is not None:
+                models.append(model)
+        return models
+
+    @staticmethod
+    def _to_float(value: Any) -> float:
+        if value is None:
+            return 0.0
+        try:
+            return float(Decimal(str(value)))
+        except (InvalidOperation, ValueError, TypeError):
+            return 0.0
+
+    @staticmethod
+    def _extract_provider(model_id: str) -> str:
+        if "/" in model_id:
+            return model_id.split("/", 1)[0]
+        return "other"
+
+    @classmethod
+    def _extract_modalities(cls, raw: dict[str, Any]) -> tuple[Modality, ...]:
+        mods: set[Modality] = set()
+        architecture = raw.get("architecture")
+        if isinstance(architecture, dict):
+            modality = architecture.get("modality")
+            if isinstance(modality, str) and "image" in modality.lower():
+                mods.add(Modality.IMAGE)
+            for item in architecture.get("input_modalities", []) or []:
+                value = str(item).lower()
+                if "image" in value:
+                    mods.add(Modality.IMAGE)
+                if "text" in value:
+                    mods.add(Modality.CHAT)
+            for item in architecture.get("output_modalities", []) or []:
+                value = str(item).lower()
+                if "image" in value:
+                    mods.add(Modality.IMAGE)
+        if not mods:
+            mods.add(Modality.CHAT)
+        return tuple(sorted(mods, key=lambda m: m.value))
+
+    @classmethod
+    def _parse_catalog_model(
+        cls, raw: dict[str, Any], checked_at: str | None = None
+    ) -> RegistryModel | None:
+        model_id = str(raw.get("id") or "").strip()
+        if not model_id:
+            return None
+        pricing = raw.get("pricing") if isinstance(raw.get("pricing"), dict) else {}
+        prompt_price = cls._to_float(pricing.get("prompt"))
+        completion_price = cls._to_float(pricing.get("completion"))
+        image_price = cls._to_float(pricing.get("image"))
+        try:
+            context_length = int(raw.get("context_length") or 0)
+        except (ValueError, TypeError):
+            context_length = 0
+        modalities = cls._extract_modalities(raw)
+        caps: list[str] = []
+        if Modality.IMAGE in modalities:
+            caps.append("vision")
+        return RegistryModel(
+            service_provider_id="openrouter",
+            model_provider=cls._extract_provider(model_id),
+            model_id=model_id,
+            display_name=str(raw.get("name") or model_id),
+            modalities=modalities,
+            capabilities=tuple(caps),
+            tier=RegistryModel.compute_tier(prompt_price, completion_price),
+            prompt_price=prompt_price,
+            completion_price=completion_price,
+            image_price=image_price,
+            context_length=context_length,
+            source="catalog",
+            is_active=True,
+            price_source=PRICE_SOURCE,
+            price_source_kind="api",
+            price_checked_at=checked_at,
         )
 
     # --- helpers --------------------------------------------------------

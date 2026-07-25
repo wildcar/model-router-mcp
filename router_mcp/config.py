@@ -40,6 +40,13 @@ class Settings(BaseSettings):
     )
     model_cache_ttl_seconds: int = Field(default=1800, alias="MODEL_CACHE_TTL_SECONDS")
 
+    # --- Catalog sync ---------------------------------------------------
+    # How often the background task re-reads every provider's model list.
+    # 0 disables the timer; the TTL-guarded lazy sync still runs on reads.
+    catalog_sync_interval_seconds: int = Field(
+        default=21600, alias="CATALOG_SYNC_INTERVAL_SECONDS"
+    )
+
     # --- DeepSeek (OpenAI-compatible chat) ------------------------------
     deepseek_api_key: str | None = Field(default=None, alias="DEEPSEEK_API_KEY")
     deepseek_base_url: str = Field(

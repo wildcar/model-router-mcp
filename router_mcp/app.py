@@ -8,6 +8,8 @@ and tear the core down on shutdown.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -57,6 +59,21 @@ class McpBearerAuthMiddleware:
 STATIC_DIR = Path(__file__).resolve().parent / "web" / "static"
 
 
+async def catalog_sync_loop(core, interval_seconds: int) -> None:
+    """Re-read every provider's model list on a timer.
+
+    Providers retire model ids without warning; without this the registry only
+    learns about it when a request fails. Failures inside a sync are already
+    swallowed per provider, so this loop only guards against unexpected ones.
+    """
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            await core.registry.sync_all(force=True)
+        except Exception:  # pragma: no cover - the timer must survive anything
+            logger.warning("Scheduled catalog sync failed", exc_info=True)
+
+
 def build_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or load_settings()
     setup_logging(settings.log_file, settings.log_level)
@@ -72,9 +89,20 @@ def build_app(settings: Settings | None = None) -> FastAPI:
         logger.info(
             "Core ready: providers=%s db=%s", list(core.adapters), settings.db_path
         )
-        async with mcp.session_manager.run():
-            yield
-        await core.aclose()
+        sync_task: asyncio.Task | None = None
+        if settings.catalog_sync_interval_seconds > 0:
+            sync_task = asyncio.create_task(
+                catalog_sync_loop(core, settings.catalog_sync_interval_seconds)
+            )
+        try:
+            async with mcp.session_manager.run():
+                yield
+        finally:
+            if sync_task is not None:
+                sync_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await sync_task
+            await core.aclose()
 
     app = FastAPI(title="model-router-mcp", lifespan=lifespan)
 

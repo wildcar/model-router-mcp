@@ -10,11 +10,13 @@ import logging
 from dataclasses import dataclass, field
 
 from router_mcp.adapters.base import ProviderAdapter
+from router_mcp.adapters.claude_api import PRICING_PAGE as anthropic_pricing_page
 from router_mcp.adapters.claude_api import ClaudeApiAdapter
 from router_mcp.adapters.claude_cli import ClaudeCliAdapter
 from router_mcp.adapters.codex_cli import CodexCliAdapter
 from router_mcp.adapters.codex_image import CodexImageAdapter
 from router_mcp.adapters.deepgram import DeepgramAdapter
+from router_mcp.adapters.deepseek import PRICING_PAGE as deepseek_pricing_page
 from router_mcp.adapters.deepseek import DeepSeekAdapter
 from router_mcp.adapters.elevenlabs import ElevenLabsAdapter
 from router_mcp.adapters.openrouter import OpenRouterAdapter
@@ -36,8 +38,12 @@ class ProviderSpec:
     adapter_key: str
     base_url: str | None
     adapter: ProviderAdapter
-    # Fixed-catalog seed models for providers without a live catalog (everything
-    # except OpenRouter, whose catalog is synced by RegistryService).
+    # Where this provider publishes its prices. Shown in the registry console so
+    # a number can always be traced back to a source.
+    pricing_url: str | None = None
+    # Seed models for providers without a live catalog (CLI engines, single-model
+    # services). Inserted only when the row does not exist yet: a restart must
+    # never resurrect a model the provider has retired.
     seed_models: list[RegistryModel] = field(default_factory=list)
 
 
@@ -63,7 +69,13 @@ class AppCore:
 
 
 def _seed_model(
-    sp_id: str, provider: str, model_id: str, name: str, modality: Modality, **prices
+    sp_id: str,
+    provider: str,
+    model_id: str,
+    name: str,
+    modality: Modality,
+    price_source: str | None = None,
+    **prices,
 ) -> RegistryModel:
     """A fixed-catalog registry row for a provider without a live catalog."""
     return RegistryModel(
@@ -74,16 +86,22 @@ def _seed_model(
         modalities=(modality,),
         tier=prices.pop("tier", "expensive"),
         source="seed",
+        price_source=price_source,
+        price_source_kind="estimate",
         **prices,
     )
 
 
 def _chat_seed(
     sp_id: str, provider: str, model_id: str, name: str,
-    prompt_price: float, completion_price: float,
+    prompt_price: float, completion_price: float, price_source: str | None = None,
 ) -> RegistryModel:
     """A fixed chat registry row with a tier computed from approximate prices.
-    Prices are starting estimates — adjust them in the registry admin (/registry)."""
+
+    These numbers are transcribed by hand and go stale, so they stay marked as
+    estimates: costs computed from them are logged with `cost_source='estimated'`
+    until someone confirms the price in the registry admin (/registry).
+    """
     return RegistryModel(
         service_provider_id=sp_id,
         model_provider=provider,
@@ -94,6 +112,8 @@ def _chat_seed(
         prompt_price=prompt_price,
         completion_price=completion_price,
         source="seed",
+        price_source=price_source,
+        price_source_kind="estimate",
     )
 
 
@@ -106,6 +126,7 @@ def _build_adapters(settings: Settings) -> list[ProviderSpec]:
             display_name="OpenRouter",
             adapter_key="openrouter",
             base_url=settings.openrouter_base_url,
+            pricing_url="https://openrouter.ai/models",
             adapter=OpenRouterAdapter(
                 api_key=settings.openrouter_api_key,
                 base_url=settings.openrouter_base_url,
@@ -118,6 +139,7 @@ def _build_adapters(settings: Settings) -> list[ProviderSpec]:
             display_name="Codex (OAuth image)",
             adapter_key="codex_image",
             base_url=settings.codex_base_url,
+            pricing_url="https://platform.openai.com/docs/pricing",
             adapter=CodexImageAdapter(
                 auth_path=settings.codex_auth_path,
                 base_url=settings.codex_base_url,
@@ -138,6 +160,7 @@ def _build_adapters(settings: Settings) -> list[ProviderSpec]:
             display_name="Deepgram (STT)",
             adapter_key="deepgram",
             base_url=settings.deepgram_base_url,
+            pricing_url="https://deepgram.com/pricing",
             adapter=DeepgramAdapter(
                 api_key=settings.deepgram_api_key,
                 base_url=settings.deepgram_base_url,
@@ -157,6 +180,7 @@ def _build_adapters(settings: Settings) -> list[ProviderSpec]:
             display_name="ElevenLabs (TTS)",
             adapter_key="elevenlabs",
             base_url=settings.elevenlabs_base_url,
+            pricing_url="https://elevenlabs.io/pricing",
             adapter=ElevenLabsAdapter(
                 api_key=settings.elevenlabs_api_key,
                 base_url=settings.elevenlabs_base_url,
@@ -178,23 +202,24 @@ def _build_adapters(settings: Settings) -> list[ProviderSpec]:
             display_name="DeepSeek",
             adapter_key="deepseek",
             base_url=settings.deepseek_base_url,
+            pricing_url=deepseek_pricing_page,
             adapter=DeepSeekAdapter(
                 api_key=settings.deepseek_api_key,
                 base_url=settings.deepseek_base_url,
                 timeout_seconds=settings.http_timeout_seconds,
                 retries=settings.http_retries,
             ),
-            seed_models=[
-                # Approximate USD/token (DeepSeek list pricing) — adjust in /registry.
-                _chat_seed("deepseek", "deepseek", "deepseek-chat", "DeepSeek Chat", 2.7e-7, 1.1e-6),
-                _chat_seed("deepseek", "deepseek", "deepseek-reasoner", "DeepSeek Reasoner", 5.5e-7, 2.19e-6),
-            ],
+            # No seeds: DeepSeek renames its models (v4-pro/v4-flash replaced
+            # deepseek-chat/deepseek-reasoner) and hardcoded ids kept coming back
+            # from restarts long after the provider had retired them. The catalog
+            # sync supplies the live list; prices are filled in /registry.
         ),
         ProviderSpec(
             id="anthropic-api",
             display_name="Claude (Anthropic API)",
             adapter_key="claude_api",
             base_url=settings.anthropic_base_url,
+            pricing_url=anthropic_pricing_page,
             adapter=ClaudeApiAdapter(
                 api_key=settings.anthropic_api_key,
                 base_url=settings.anthropic_base_url,
@@ -203,9 +228,11 @@ def _build_adapters(settings: Settings) -> list[ProviderSpec]:
             ),
             seed_models=[
                 # Approximate USD/token (Anthropic list pricing) — adjust in /registry.
-                _chat_seed("anthropic-api", "anthropic", "claude-haiku-4-5-20251001", "Claude Haiku 4.5", 8e-7, 4e-6),
-                _chat_seed("anthropic-api", "anthropic", "claude-sonnet-4-6", "Claude Sonnet 4.6", 3e-6, 1.5e-5),
-                _chat_seed("anthropic-api", "anthropic", "claude-opus-4-8", "Claude Opus 4.8", 1.5e-5, 7.5e-5),
+                # The model list itself is refreshed by the catalog sync; these
+                # rows exist so prices survive before anyone edits them.
+                _chat_seed("anthropic-api", "anthropic", "claude-haiku-4-5-20251001", "Claude Haiku 4.5", 8e-7, 4e-6, anthropic_pricing_page),
+                _chat_seed("anthropic-api", "anthropic", "claude-sonnet-4-6", "Claude Sonnet 4.6", 3e-6, 1.5e-5, anthropic_pricing_page),
+                _chat_seed("anthropic-api", "anthropic", "claude-opus-4-8", "Claude Opus 4.8", 1.5e-5, 7.5e-5, anthropic_pricing_page),
             ],
         ),
         ProviderSpec(
@@ -262,21 +289,21 @@ async def build_core(settings: Settings) -> AppCore:
             adapter=spec.adapter_key,
             base_url=spec.base_url,
             enabled=spec.adapter.is_configured(),
+            pricing_url=spec.pricing_url,
         )
         for seed in spec.seed_models:
-            await db.upsert_registry_model(seed)
+            await db.seed_registry_model(seed)
 
     registry = RegistryService(
         db=db,
-        openrouter_api_key=settings.openrouter_api_key,
-        openrouter_base_url=settings.openrouter_base_url,
+        adapters=adapters,
         ttl_seconds=settings.model_cache_ttl_seconds,
     )
-    # Best-effort initial catalog load (no-op without an API key).
+    # Best-effort initial catalog sync (skips providers without keys/catalogs).
     try:
-        await registry.refresh_catalog(force=True)
+        await registry.sync_all(force=True)
     except Exception:  # pragma: no cover - never block startup on catalog
-        logger.warning("Initial catalog refresh failed", exc_info=True)
+        logger.warning("Initial catalog sync failed", exc_info=True)
 
     defaults = {
         Modality.CHAT: settings.default_chat_model,

@@ -21,7 +21,15 @@ def client(tmp_path_factory):
         DB_PATH=str(tmp_path / "web.db"),
         BLOB_DIR=str(tmp_path / "blobs"),
         LOG_FILE=str(tmp_path / "log.txt"),
+        # Every provider key is cleared explicitly: Settings still reads the
+        # repo .env, and a configured adapter would make the catalog sync call
+        # the real API during tests.
         OPENROUTER_API_KEY=None,
+        DEEPSEEK_API_KEY=None,
+        ANTHROPIC_API_KEY=None,
+        DEEPGRAM_API_KEY=None,
+        ELEVENLABS_API_KEY=None,
+        CATALOG_SYNC_INTERVAL_SECONDS=0,
     )
     app = build_app(settings)
     with TestClient(app) as c:
@@ -67,6 +75,22 @@ def test_providers_listed(client):
     ids = [p["id"] for p in body]
     assert "openrouter" in ids
     assert all(isinstance(p["configured"], bool) for p in body)
+    # Every price in the registry must be traceable to a published source.
+    priced = {"openrouter", "deepseek", "anthropic-api", "deepgram", "elevenlabs"}
+    assert all(p["pricing_url"] for p in body if p["id"] in priced)
+
+
+def test_refresh_without_keys_reports_skips(client):
+    r = client.post("/api/registry/refresh")
+    assert r.status_code == 200, r.text
+    reports = r.json()["providers"]
+    # No API keys in this fixture, so nothing syncs — but every provider must
+    # say why instead of failing silently.
+    assert reports and all(rep["skipped"] for rep in reports)
+
+
+def test_refresh_unknown_provider_is_a_client_error(client):
+    assert client.post("/api/registry/refresh?provider=nope").status_code == 400
 
 
 def test_add_manual_model_and_list(client):
@@ -84,5 +108,19 @@ def test_add_manual_model_and_list(client):
     assert r.json()["tier"] == "expensive"
 
     r = client.get("/api/registry/models?source=manual")
-    ids = [m["model_id"] for m in r.json()]
-    assert "demo/manual-1" in ids
+    rows = {m["model_id"]: m for m in r.json()}
+    assert "demo/manual-1" in rows
+    added = rows["demo/manual-1"]
+    # A hand-entered price counts as verified and falls back to the provider's
+    # price page as its source.
+    assert added["price_source_kind"] == "manual"
+    assert added["price_is_verified"] is True
+    assert added["price_source"] == "https://openrouter.ai/models"
+    assert added["price_checked_at"]
+
+
+def test_deepseek_has_no_hardcoded_models(client):
+    """The retired deepseek-chat/deepseek-reasoner ids used to come back on every
+    restart. Without keys DeepSeek should now contribute nothing at all."""
+    rows = client.get("/api/registry/models").json()
+    assert [m for m in rows if m["service_provider"] == "deepseek"] == []

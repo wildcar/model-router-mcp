@@ -62,6 +62,72 @@ on it; adapters never touch storage/mcp directly.
 11. ✅ CLI engines: `codex` (`codex exec --json`) and `claude` (`claude -p --output-format json`), via `run_cli` with a cwd whitelist and a configurable default cwd (`CLI_DEFAULT_CWD`). [Phase 4]
 12. ⏳ Full billing reports / amortization rollups. [later]
 13. ✅ Production deploy: systemd unit (auto-restart), nginx+TLS, `/health`, `/mcp` Bearer auth, manual `deploy.sh`.
+14. ✅ Truncation is a distinct, self-explaining failure (`ResponseTruncated`), never "empty response"; `finish_reason` is logged.
+15. ✅ Per-provider catalog sync on a period: adapters expose `list_catalog()`, models missing upstream are deprecated rather than deleted, seeds never resurrect a retired id.
+16. ✅ Price provenance per model (`price_source`, `price_source_kind`, `price_checked_at`) and per provider (`pricing_url`); unverified prices surface as `cost_source='estimated'`.
+17. ✅ Request-level fallback policy for dead/unavailable models (`same` / `cheaper` / `pricier`), with the substitution reported and logged.
+
+## Catalog freshness, price provenance, fallback
+
+Contract for requirements 14–17.
+
+### Failure taxonomy (14)
+
+`ResponseTruncated(ProviderError)` is raised when a provider returns no usable
+content *and* reports that generation hit the output-token ceiling
+(`finish_reason == "length"` / `stop_reason == "max_tokens"`). The message names
+the ceiling and the tokens actually produced, so the caller knows to raise
+`max_tokens` instead of debugging the prompt. `request_logs.finish_reason` keeps
+the provider's stop reason for both successful and failed calls.
+
+### Catalog sync (15)
+
+- `ProviderAdapter.list_catalog()` returns `list[RegistryModel] | None`; `None`
+  means "this provider has no queryable catalog" (CLI engines, TTS/STT).
+- `RegistryService.sync_provider(provider_id)` / `sync_all()` reconcile one or all
+  providers; both are TTL-guarded (`MODEL_CACHE_TTL_SECONDS`) and force-able.
+  A background task in the app lifespan re-syncs every
+  `CATALOG_SYNC_INTERVAL_SECONDS` (0 disables); `POST /api/registry/refresh`
+  triggers it by hand.
+- Reconciliation rules:
+  - seen upstream → `last_seen_at = now`, `is_active = 1`, `deprecated_at = NULL`;
+  - absent upstream → `is_active = 0`, `deprecated_at = now`. Rows are never
+    deleted: logs and cost history reference them;
+  - prices from a catalog that carries pricing (OpenRouter) overwrite rows whose
+    `source = 'catalog'`; rows with `source = 'manual'` keep their prices,
+    display name and pricing mode;
+  - a catalog without pricing (DeepSeek, Anthropic) never zeroes an existing price.
+- Bootstrap seeds are insert-if-absent, so a retired model id cannot be
+  resurrected by a restart.
+
+### Price provenance (16)
+
+`registry_models` gains `price_source` (URL or `api:<endpoint>`),
+`price_source_kind` (`api` | `page` | `manual` | `estimate`) and
+`price_checked_at`; `service_providers` gains `pricing_url`. Where a provider
+publishes prices through its API (OpenRouter `/models`) the kind is `api`;
+elsewhere the row points at the vendor's price page and stays `page`/`manual`
+until a human confirms it. `compute_cost` reports `cost_source='estimated'`
+instead of `'computed'` when the price behind the number is unverified
+(`kind='estimate'`), so an invented figure is visible in logs and usage.
+
+### Fallback policy (17)
+
+Requests may carry `fallback = {policy, max_steps, scope}`:
+
+- `policy`: `off` (default, current behavior) | `same` | `cheaper` | `pricier`;
+- `max_steps`: how many substitutions to try (default 1);
+- `scope`: `provider` (default, same service provider) | `vendor` (same
+  model_provider anywhere) | `any`.
+
+Candidates are the active models of the same modality inside the scope, ordered
+by `prompt_price + completion_price`; `same` takes the nearest neighbour,
+`cheaper`/`pricier` step down/up that ladder. Fallback triggers on: unknown
+model id, `is_active = 0`, provider disabled or unconfigured, and provider errors
+that mean "this model cannot serve the request" (model not found, unavailable).
+It never crosses modality and never retries a prompt-level rejection. The
+substitution is explicit in the response (`requested_model_id`, `model_id`,
+`fallback_reason`) and in `request_logs`.
 
 ## Project structure
 
@@ -77,7 +143,7 @@ router_mcp/
   adapters/            base (ABC + RetryClientMixin), _subprocess (CLI helper),
                        openrouter, deepseek, claude_api, codex_image, deepgram,
                        elevenlabs, codex_cli, claude_cli
-  registry/            models (RegistryModel), service (catalog merge)
+  registry/            models (RegistryModel), service (per-provider catalog sync)
   routing/router.py    ModelRouter.resolve + dispatch
   accounting/cost.py   compute_cost
   storage/database.py  aiosqlite schema + CRUD + logging + usage

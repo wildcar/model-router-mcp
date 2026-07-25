@@ -4,6 +4,13 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-07-25 · Registry freshness: sync, price provenance, fallback
+- What: `ResponseTruncated` + logged `finish_reason`; per-provider `list_catalog()` with TTL/background/manual sync that deprecates (never deletes) retired models and stops seeds resurrecting them; price provenance fields with `cost_source='estimated'` for unconfirmed prices; per-request fallback policy (same/cheaper/pricier) with the substitution reported in the response and the log.
+- Why: User feedback after the DeepSeek v4-pro switch: the registry served retired ids, a max_tokens cutoff read as "empty response", and the v4-pro price was copied from deepseek-chat.
+- Files: adapters/{base,deepseek,claude_api,openrouter}.py, registry/{models,service}.py, routing/router.py, storage/database.py, accounting/cost.py, bootstrap.py, app.py, config.py, web/{api.py,templates/*}, mcp_server/*, tests/{test_fallback,test_registry_sync,test_web,test_smoke,test_adapters_parse}.py, AGENTS/SPEC.md, .env.example
+- Fixes-on-the-fly: models from priceless catalogs stored zeros and looked cheapest — `price_is_unknown` now ranks them last and keeps them off the fallback ladder; `tests/test_web.py` cleared only the OpenRouter key, so the sync was calling the live DeepSeek API during tests.
+- Next: deploy, refresh catalogs in prod, fill real DeepSeek prices in /registry.
+
 ## 2026-07-14 · Purge dead-family auth.json leftovers
 - What: Deleted /opt/model-router-mcp/auth.json (+.bak) and repo-root auth.json — dead Jun 16 token family; nothing references them since the CODEX_AUTH_PATH repoint. Service healthy after removal.
 - Why: User confirmed; dead OAuth credentials on disk are pure risk (ADR-0002 reuse-revocation).

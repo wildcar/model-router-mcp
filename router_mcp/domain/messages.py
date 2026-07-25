@@ -43,6 +43,55 @@ class Usage:
 
 
 @dataclass(slots=True)
+class FallbackPolicy:
+    """What to do when the requested model is retired, unknown or unavailable.
+
+    Callers pin a model id and then find out weeks later that the provider
+    renamed it. This lets them say up-front which neighbour is acceptable
+    instead of failing the batch.
+    """
+
+    OFF = "off"
+    SAME = "same"  # nearest price to the requested model
+    CHEAPER = "cheaper"  # one step down the price ladder
+    PRICIER = "pricier"  # one step up
+
+    policy: str = OFF
+    max_steps: int = 1  # how many substitutes to try before giving up
+    scope: str = "provider"  # "provider" | "vendor" | "any"
+
+    @property
+    def enabled(self) -> bool:
+        return self.policy != self.OFF
+
+    @classmethod
+    def parse(cls, value: Any) -> "FallbackPolicy | None":
+        """Accept `{"policy": "cheaper"}` or the shorthand `"cheaper"`."""
+        if value is None:
+            return None
+        if isinstance(value, FallbackPolicy):
+            return value
+        if isinstance(value, str):
+            value = {"policy": value}
+        if not isinstance(value, dict):
+            raise ValueError("fallback must be an object or a policy name")
+        policy = str(value.get("policy", cls.OFF)).strip().lower()
+        if policy not in (cls.OFF, cls.SAME, cls.CHEAPER, cls.PRICIER):
+            raise ValueError(
+                f"Unknown fallback policy {policy!r} "
+                f"(expected {cls.OFF}/{cls.SAME}/{cls.CHEAPER}/{cls.PRICIER})"
+            )
+        scope = str(value.get("scope", "provider")).strip().lower()
+        if scope not in ("provider", "vendor", "any"):
+            raise ValueError(f"Unknown fallback scope {scope!r}")
+        try:
+            max_steps = int(value.get("max_steps", 1))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("fallback.max_steps must be an integer") from exc
+        return cls(policy=policy, max_steps=max(0, min(max_steps, 5)), scope=scope)
+
+
+@dataclass(slots=True)
 class RouterRequest:
     modality: Modality
     external_user_id: str  # opaque id supplied by the caller; stats key only
@@ -53,6 +102,7 @@ class RouterRequest:
     messages: list[dict[str, Any]] | None = None  # full chat history (OpenAI shape)
     attachments: list[Attachment] = field(default_factory=list)
     params: dict[str, Any] = field(default_factory=dict)  # passthrough knobs
+    fallback: FallbackPolicy | None = None  # None == off
 
 
 @dataclass(slots=True)

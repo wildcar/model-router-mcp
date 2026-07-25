@@ -23,7 +23,11 @@ from router_mcp.storage.database import SubscriptionRecord
 @dataclass(slots=True)
 class CostResult:
     cost_usd: float
-    cost_source: str  # "computed" | "manual" | "amortized" | "provider"
+    # "computed"  — from a price whose origin is known (API/page/admin);
+    # "estimated" — from a guessed price nobody confirmed, so the number is
+    #               indicative only and must read that way in logs and reports;
+    # "manual" | "amortized" | "provider" — as before.
+    cost_source: str
     pricing_mode: str  # "per_request" | "amortized_subscription"
 
 
@@ -53,9 +57,11 @@ def compute_cost(
         # No quota -> cannot attribute per-request; record zero but flag mode.
         return CostResult(0.0, "amortized", "amortized_subscription")
 
-    # 3. Per-request from registry prices.
+    # 3. Per-request from registry prices. A price with no confirmed origin
+    # yields a number that only looks precise, so it is labelled as such.
     cost = _per_request_cost(model, modality, usage)
-    return CostResult(float(cost), "computed", "per_request")
+    source = "computed" if model.price_is_verified else "estimated"
+    return CostResult(float(cost), source, "per_request")
 
 
 def _per_request_cost(model: RegistryModel, modality: Modality, usage: Usage) -> Decimal:

@@ -4,8 +4,13 @@
 <section class="card">
   <h2>Поставщики сервиса</h2>
   <table id="providers"><thead><tr>
-    <th>ID</th><th>Название</th><th>Адаптер</th><th>Включён</th><th>Доступен</th>
+    <th>ID</th><th>Название</th><th>Адаптер</th><th>Включён</th><th>Доступен</th><th>Прайс</th>
   </tr></thead><tbody></tbody></table>
+  <div class="row">
+    <button id="sync" type="button">Синхронизировать каталоги</button>
+    <span class="hint">Спрашивает у каждого поставщика его список моделей.
+      Снятые модели помечаются устаревшими, ручные цены сохраняются.</span>
+  </div>
 </section>
 
 <section class="card">
@@ -24,6 +29,11 @@
     <label>Ответ, $/1M <input id="m-cp" type="number" step="any" value="0"></label>
     <label>Изображение, $/шт <input id="m-ip" type="number" step="any" value="0"></label>
     <label>Аудио, $/сек <input id="m-ap" type="number" step="any" value="0"></label>
+  </div>
+  <div class="row">
+    <label class="grow">Источник цены
+      <input id="m-psrc" placeholder="URL прайса поставщика (по умолчанию — его страница)">
+    </label>
   </div>
   <div class="row">
     <label>Режим цены
@@ -46,13 +56,15 @@
         <option value="">все</option>
         <option value="manual">manual</option>
         <option value="catalog">catalog</option>
+        <option value="seed">seed</option>
       </select>
     </label>
     <button id="reload" type="button">Обновить</button>
   </div>
   <table id="models"><thead><tr>
     <th>Поставщик</th><th>model_id</th><th>Модальности</th><th>Tier</th>
-    <th class="num">Промпт, $/1M</th><th class="num">Ответ, $/1M</th><th>Источник</th><th></th>
+    <th class="num">Промпт, $/1M</th><th class="num">Ответ, $/1M</th>
+    <th>Источник</th><th>Цена откуда</th><th>Статус</th><th></th>
   </tr></thead><tbody></tbody></table>
 </section>
 {% endblock %}
@@ -77,8 +89,69 @@ async function loadProviders() {
     st.title = p.configured
       ? 'Адаптер настроен, запросы пройдут'
       : 'Нет ключа или бинарника: диспетчер откажет, даже если провайдер включён';
-    tr.appendChild(st); tb.appendChild(tr);
+    tr.appendChild(st);
+    const pr = document.createElement('td');
+    if (p.pricing_url) {
+      const a = document.createElement('a');
+      a.href = p.pricing_url; a.target = '_blank'; a.rel = 'noreferrer';
+      a.textContent = 'прайс';
+      pr.appendChild(a);
+    } else { pr.textContent = '—'; }
+    tr.appendChild(pr); tb.appendChild(tr);
   }
+}
+
+async function syncCatalogs() {
+  const res = await api('/api/registry/refresh', { method: 'POST', body: {} });
+  const done = res.providers.filter(r => !r.skipped);
+  toast(done.length
+    ? done.map(r => `${r.provider_id}: +${r.added} ~${r.updated} -${r.deprecated}`).join('; ')
+    : 'Ни один поставщик не отдал каталог');
+  loadModels();
+}
+
+const PRICE_KIND_LABEL = {
+  api: 'из API',
+  page: 'со страницы',
+  manual: 'вручную',
+  estimate: 'оценка',
+  unknown: 'цены нет',
+};
+
+function priceOriginCell(m) {
+  const td = document.createElement('td');
+  const label = PRICE_KIND_LABEL[m.price_source_kind] || m.price_source_kind;
+  if (m.price_source && /^https?:/.test(m.price_source)) {
+    const a = document.createElement('a');
+    a.href = m.price_source; a.target = '_blank'; a.rel = 'noreferrer';
+    a.textContent = label;
+    td.appendChild(a);
+  } else {
+    td.textContent = label;
+    if (m.price_source) td.title = m.price_source;
+  }
+  if (!m.price_is_verified) {
+    td.style.opacity = '0.7';
+    td.title = (m.price_source || '') +
+      '\nЦена не подтверждена: стоимость в логах помечается как estimated.';
+  }
+  if (m.price_checked_at) td.title = (td.title || '') + `\nПроверено: ${m.price_checked_at}`;
+  return td;
+}
+
+function statusCell(m) {
+  const td = document.createElement('td');
+  if (m.is_active) {
+    td.textContent = 'активна';
+    if (m.last_seen_at) td.title = `Последняя сверка с каталогом: ${m.last_seen_at}`;
+  } else {
+    td.textContent = 'снята';
+    td.style.color = 'var(--warn, #b45309)';
+    td.title = m.deprecated_at
+      ? `Пропала из каталога поставщика ${m.deprecated_at}`
+      : 'Отключена';
+  }
+  return td;
 }
 
 async function loadModels() {
@@ -93,6 +166,8 @@ async function loadModels() {
       `<td>${m.modalities.join(',')}</td><td>${m.tier}</td>` +
       `<td class="num">${pricePerMillion(m.prompt_price)}</td>` +
       `<td class="num">${pricePerMillion(m.completion_price)}</td><td>${m.source}</td>`;
+    tr.appendChild(priceOriginCell(m));
+    tr.appendChild(statusCell(m));
     const td = document.createElement('td');
     if (m.source === 'manual') {
       const btn = document.createElement('button');
@@ -121,6 +196,7 @@ async function addModel() {
     image_price: parseFloat(document.getElementById('m-ip').value) || 0,
     audio_price_per_second: parseFloat(document.getElementById('m-ap').value) || 0,
     pricing_mode: document.getElementById('m-mode').value,
+    price_source: document.getElementById('m-psrc').value.trim() || null,
   };
   if (!body.service_provider_id || !body.model_id) { toast('Укажите поставщика и model_id', true); return; }
   await api('/api/registry/models', { method: 'POST', body });
@@ -128,6 +204,7 @@ async function addModel() {
 }
 
 document.getElementById('reload').addEventListener('click', loadModels);
+document.getElementById('sync').addEventListener('click', syncCatalogs);
 document.getElementById('m-add').addEventListener('click', addModel);
 loadProviders(); loadModels();
 </script>

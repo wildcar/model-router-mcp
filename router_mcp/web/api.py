@@ -7,13 +7,14 @@ and adds registry-admin CRUD. Shares the same AppCore as the MCP tools.
 from __future__ import annotations
 
 import base64
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile
 from pydantic import BaseModel
 
 from router_mcp.domain.errors import RouterError
-from router_mcp.domain.messages import Attachment, RouterRequest
+from router_mcp.domain.messages import Attachment, FallbackPolicy, RouterRequest
 from router_mcp.domain.modality import Modality
 from router_mcp.mcp_server.serialize import (
     attachments_web,
@@ -27,6 +28,14 @@ api_router = APIRouter()
 blob_router = APIRouter()
 
 
+def parse_fallback(value: Any) -> FallbackPolicy | None:
+    """A bad policy name is the caller's mistake, so answer 400, not 502."""
+    try:
+        return FallbackPolicy.parse(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 class ChatBody(BaseModel):
     external_user_id: str = "web-tester"
     text: str | None = None
@@ -35,6 +44,9 @@ class ChatBody(BaseModel):
     tier: str | None = None
     provider: str | None = None
     params: dict[str, Any] | None = None
+    # {"policy": "same"|"cheaper"|"pricier", "max_steps": 1, "scope": ...}
+    # or just the policy name. See FallbackPolicy.
+    fallback: dict[str, Any] | str | None = None
 
 
 class ImageBody(BaseModel):
@@ -43,6 +55,7 @@ class ImageBody(BaseModel):
     model_id: str | None = None
     provider: str | None = None
     params: dict[str, Any] | None = None
+    fallback: dict[str, Any] | str | None = None
 
 
 class TtsBody(BaseModel):
@@ -51,6 +64,7 @@ class TtsBody(BaseModel):
     voice: str | None = None
     model_id: str | None = None
     provider: str | None = None
+    fallback: dict[str, Any] | str | None = None
 
 
 class CliBody(BaseModel):
@@ -76,6 +90,10 @@ class ManualModelBody(BaseModel):
     context_length: int = 0
     pricing_mode: str = "per_request"
     subscription_id: int | None = None
+    # Where the price came from. Defaults to "manual" (a human typed it in);
+    # pass the vendor's price page in `price_source` so the number stays traceable.
+    price_source: str | None = None
+    price_source_kind: str = "manual"
 
 
 class ProviderPatch(BaseModel):
@@ -103,6 +121,7 @@ async def api_chat(body: ChatBody) -> dict[str, Any]:
         text=body.text,
         messages=body.messages,
         params=body.params or {},
+        fallback=parse_fallback(body.fallback),
     )
     try:
         result = await core.router.dispatch(request)
@@ -126,6 +145,7 @@ async def api_image(body: ImageBody) -> dict[str, Any]:
         provider_hint=body.provider,
         text=body.prompt,
         params=body.params or {},
+        fallback=parse_fallback(body.fallback),
     )
     try:
         result = await core.router.dispatch(request)
@@ -174,6 +194,7 @@ async def api_tts(body: TtsBody) -> dict[str, Any]:
         provider_hint=body.provider,
         text=body.text,
         params=params,
+        fallback=parse_fallback(body.fallback),
     )
     try:
         result = await core.router.dispatch(request)
@@ -234,6 +255,14 @@ async def api_usage(user: str | None = None, since: str | None = None) -> list[d
 
 
 # --- registry admin -----------------------------------------------------
+async def _provider_pricing_url(core, provider_id: str) -> str | None:
+    """Fall back to the provider's price page when a manual row names no source."""
+    for p in await core.db.get_service_providers():
+        if p.id == provider_id:
+            return p.pricing_url
+    return None
+
+
 @api_router.get("/registry/providers")
 async def api_providers() -> list[dict[str, Any]]:
     core = get_core()
@@ -248,6 +277,7 @@ async def api_providers() -> list[dict[str, Any]]:
             # restarts even when the adapter has lost its key/binary.
             "configured": p.id in core.adapters and core.adapters[p.id].is_configured(),
             "base_url": p.base_url,
+            "pricing_url": p.pricing_url,
         }
         for p in providers
     ]
@@ -258,6 +288,22 @@ async def api_patch_provider(provider_id: str, body: ProviderPatch) -> dict[str,
     core = get_core()
     await core.db.set_provider_enabled(provider_id, body.enabled)
     return {"id": provider_id, "enabled": body.enabled}
+
+
+@api_router.post("/registry/refresh")
+async def api_refresh_catalog(provider: str | None = None) -> dict[str, Any]:
+    """Re-read provider catalogs now. Without `provider`, every provider that
+    has one. Reports what changed, including models deprecated upstream."""
+    core = get_core()
+    try:
+        reports = (
+            [await core.registry.sync_provider(provider)]
+            if provider
+            else await core.registry.sync_all(force=True)
+        )
+    except RouterError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"providers": [r.as_dict() for r in reports]}
 
 
 @api_router.get("/registry/models")
@@ -293,6 +339,9 @@ async def api_add_manual_model(body: ManualModelBody) -> dict[str, Any]:
         source="manual",
         pricing_mode=body.pricing_mode,
         subscription_id=body.subscription_id,
+        price_source=body.price_source or await _provider_pricing_url(core, body.service_provider_id),
+        price_source_kind=body.price_source_kind,
+        price_checked_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
     )
     await core.db.upsert_registry_model(model)
     return model_to_dict(model)

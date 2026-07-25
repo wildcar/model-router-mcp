@@ -15,7 +15,7 @@ from typing import Any
 
 import httpx
 
-from router_mcp.adapters.base import ProviderAdapter, RetryClientMixin
+from router_mcp.adapters.base import ProviderAdapter, RetryClientMixin, truncated_error
 from router_mcp.domain.errors import ProviderError, ProviderUnavailable
 from router_mcp.domain.messages import RouterRequest, RouterResponse, Usage
 from router_mcp.domain.modality import Modality
@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 
 ANTHROPIC_VERSION = "2023-06-01"
 DEFAULT_MAX_TOKENS = 4096
+# /v1/models returns ids and display names, no prices.
+PRICING_PAGE = "https://claude.com/pricing#api"
 
 
 class ClaudeApiAdapter(RetryClientMixin, ProviderAdapter):
@@ -72,7 +74,7 @@ class ClaudeApiAdapter(RetryClientMixin, ProviderAdapter):
         except json.JSONDecodeError as exc:
             raise ProviderUnavailable("Anthropic returned invalid JSON") from exc
 
-        text, usage = self._parse(data)
+        text, usage = self._parse(data, max_tokens=payload["max_tokens"])
         return RouterResponse(
             modality=Modality.CHAT,
             provider=self.name,
@@ -81,6 +83,37 @@ class ClaudeApiAdapter(RetryClientMixin, ProviderAdapter):
             text=text,
             raw_meta={"stop_reason": data.get("stop_reason") if isinstance(data, dict) else None},
         )
+
+    async def list_catalog(self) -> list[RegistryModel] | None:
+        if not self.is_configured():
+            return None
+        response = await self._request_with_retry("GET", "/v1/models?limit=1000")
+        try:
+            payload = response.json()
+        except json.JSONDecodeError as exc:
+            raise ProviderUnavailable("Anthropic returned invalid JSON") from exc
+        raw = payload.get("data", []) if isinstance(payload, dict) else []
+        models: list[RegistryModel] = []
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            model_id = str(item.get("id") or "").strip()
+            if not model_id:
+                continue
+            models.append(
+                RegistryModel(
+                    service_provider_id="anthropic-api",
+                    model_provider="anthropic",
+                    model_id=model_id,
+                    display_name=str(item.get("display_name") or model_id),
+                    modalities=(Modality.CHAT,),
+                    source="catalog",
+                    is_active=True,
+                    price_source=PRICING_PAGE,
+                    price_source_kind="unknown",
+                )
+            )
+        return models
 
     @staticmethod
     def _build_messages(request: RouterRequest) -> tuple[str | None, list[dict[str, Any]]]:
@@ -101,7 +134,7 @@ class ClaudeApiAdapter(RetryClientMixin, ProviderAdapter):
         raise ProviderError("Request has neither `text` nor `messages`")
 
     @classmethod
-    def _parse(cls, data: Any) -> tuple[str, Usage]:
+    def _parse(cls, data: Any, max_tokens: Any = None) -> tuple[str, Usage]:
         if not isinstance(data, dict):
             raise ProviderError("Anthropic returned an unexpected payload")
         if data.get("type") == "error":
@@ -114,9 +147,15 @@ class ClaudeApiAdapter(RetryClientMixin, ProviderAdapter):
             if isinstance(b, dict) and b.get("type") == "text"
         ]
         text = "".join(parts).strip()
-        if not text:
-            raise ProviderError("Anthropic returned an empty response")
         raw_usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+        if not text:
+            if data.get("stop_reason") == "max_tokens":
+                raise truncated_error(
+                    "Anthropic",
+                    max_tokens=max_tokens,
+                    completion_tokens=raw_usage.get("output_tokens"),
+                )
+            raise ProviderError("Anthropic returned an empty response")
         prompt = raw_usage.get("input_tokens")
         completion = raw_usage.get("output_tokens")
         total = (prompt or 0) + (completion or 0) if (prompt or completion) else None

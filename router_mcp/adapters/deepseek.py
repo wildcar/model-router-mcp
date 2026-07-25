@@ -13,13 +13,18 @@ from typing import Any
 
 import httpx
 
-from router_mcp.adapters.base import ProviderAdapter, RetryClientMixin
+from router_mcp.adapters.base import ProviderAdapter, RetryClientMixin, truncated_error
 from router_mcp.domain.errors import ProviderError, ProviderUnavailable
 from router_mcp.domain.messages import RouterRequest, RouterResponse, Usage
 from router_mcp.domain.modality import Modality
 from router_mcp.registry.models import RegistryModel
 
 logger = logging.getLogger(__name__)
+
+# DeepSeek's /models lists ids only; prices live on the docs page and have to be
+# transcribed by hand, so catalog rows carry the page as their price source and
+# never claim to know a number.
+PRICING_PAGE = "https://api-docs.deepseek.com/quick_start/pricing"
 
 
 class DeepSeekAdapter(RetryClientMixin, ProviderAdapter):
@@ -60,7 +65,7 @@ class DeepSeekAdapter(RetryClientMixin, ProviderAdapter):
         except json.JSONDecodeError as exc:
             raise ProviderUnavailable("DeepSeek returned invalid JSON") from exc
 
-        text, usage = self._parse(data)
+        text, usage = self._parse(data, max_tokens=payload.get("max_tokens"))
         return RouterResponse(
             modality=Modality.CHAT,
             provider=self.name,
@@ -68,6 +73,36 @@ class DeepSeekAdapter(RetryClientMixin, ProviderAdapter):
             usage=usage,
             text=text,
             raw_meta={"finish_reason": self._finish_reason(data)},
+        )
+
+    async def list_catalog(self) -> list[RegistryModel] | None:
+        if not self.is_configured():
+            return None
+        response = await self._request_with_retry("GET", "/models")
+        try:
+            payload = response.json()
+        except json.JSONDecodeError as exc:
+            raise ProviderUnavailable("DeepSeek returned invalid JSON") from exc
+        raw = payload.get("data", []) if isinstance(payload, dict) else []
+        return [m for m in (self._parse_catalog_model(item) for item in raw) if m is not None]
+
+    @classmethod
+    def _parse_catalog_model(cls, raw: Any) -> RegistryModel | None:
+        if not isinstance(raw, dict):
+            return None
+        model_id = str(raw.get("id") or "").strip()
+        if not model_id:
+            return None
+        return RegistryModel(
+            service_provider_id="deepseek",
+            model_provider=str(raw.get("owned_by") or "deepseek"),
+            model_id=model_id,
+            display_name=model_id,
+            modalities=(Modality.CHAT,),
+            source="catalog",
+            is_active=True,
+            price_source=PRICING_PAGE,
+            price_source_kind="unknown",
         )
 
     @staticmethod
@@ -84,7 +119,7 @@ class DeepSeekAdapter(RetryClientMixin, ProviderAdapter):
         return choices[0].get("finish_reason") if choices and isinstance(choices[0], dict) else None
 
     @classmethod
-    def _parse(cls, data: Any) -> tuple[str, Usage]:
+    def _parse(cls, data: Any, max_tokens: Any = None) -> tuple[str, Usage]:
         if not isinstance(data, dict):
             raise ProviderError("DeepSeek returned an unexpected payload")
         choices = data.get("choices") or []
@@ -93,9 +128,17 @@ class DeepSeekAdapter(RetryClientMixin, ProviderAdapter):
         message = choices[0].get("message") or {}
         content = message.get("content")
         text = content.strip() if isinstance(content, str) else ""
-        if not text:
-            raise ProviderError("DeepSeek returned an empty response")
         raw_usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+        if not text:
+            # finish_reason=length with empty content means the ceiling was hit
+            # during reasoning, not that the model had nothing to say.
+            if cls._finish_reason(data) == "length":
+                raise truncated_error(
+                    "DeepSeek",
+                    max_tokens=max_tokens,
+                    completion_tokens=raw_usage.get("completion_tokens"),
+                )
+            raise ProviderError("DeepSeek returned an empty response")
         usage = Usage(
             prompt_tokens=raw_usage.get("prompt_tokens"),
             completion_tokens=raw_usage.get("completion_tokens"),

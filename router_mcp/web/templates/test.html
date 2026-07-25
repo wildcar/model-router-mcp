@@ -30,6 +30,14 @@
         <option value="expensive">expensive</option>
       </select>
     </label>
+    <label>Если модель снята
+      <select id="fallback" title="Что делать, когда выбранной модели нет или она не отвечает">
+        <option value="">— ошибка —</option>
+        <option value="same">та же цена</option>
+        <option value="cheaper">на шаг дешевле</option>
+        <option value="pricier">на шаг дороже</option>
+      </select>
+    </label>
   </div>
 
   <!-- Cascading model picker: service provider → model vendor → model → version. -->
@@ -198,6 +206,9 @@ function onModalityChange() {
 function showMeta(res) {
   const u = res.usage || {};
   const bits = [`Провайдер: <b>${res.provider}</b>`, `Модель: <b>${res.model_id}</b>`];
+  if (res.requested_model_id) {
+    bits.push(`<b>Подмена</b>: запрошена ${res.requested_model_id} (${res.fallback_reason})`);
+  }
   if (u.total_tokens != null) {
     bits.push(`Токены (промпт/ответ): ${u.prompt_tokens ?? '–'}/${u.completion_tokens ?? '–'}`);
   }
@@ -223,13 +234,14 @@ async function send() {
     const model_id = $('model').value || null;
     const tier = $('tier').value || null;
     const provider = $('sel-provider').value || null;
+    const fallback = $('fallback').value || null;
     let res;
 
     if (m === 'chat') {
-      res = await api('/api/chat', { method: 'POST', body: { external_user_id: user, text: $('prompt').value, model_id, tier, provider } });
+      res = await api('/api/chat', { method: 'POST', body: { external_user_id: user, text: $('prompt').value, model_id, tier, provider, fallback } });
       resetResult(); $('answer').hidden = false; $('answer').textContent = res.text || '(пусто)';
     } else if (m === 'image') {
-      res = await api('/api/image', { method: 'POST', body: { external_user_id: user, prompt: $('prompt').value, model_id, provider } });
+      res = await api('/api/image', { method: 'POST', body: { external_user_id: user, prompt: $('prompt').value, model_id, provider, fallback } });
       resetResult();
       for (const url of (res.image_urls || [])) addImage(url);
       for (const ref of (res.image_refs || [])) addImage('/blobs/' + ref);
@@ -237,7 +249,7 @@ async function send() {
       res = await api('/api/cli', { method: 'POST', body: { external_user_id: user, prompt: $('prompt').value, engine: $('engine').value } });
       resetResult(); $('answer').hidden = false; $('answer').textContent = res.text || '(пусто)';
     } else if (m === 'tts') {
-      res = await api('/api/tts', { method: 'POST', body: { external_user_id: user, text: $('prompt').value, model_id, provider } });
+      res = await api('/api/tts', { method: 'POST', body: { external_user_id: user, text: $('prompt').value, model_id, provider, fallback } });
       resetResult();
       if (res.audio_ref) { const a = $('audio-out'); a.src = '/blobs/' + res.audio_ref; a.hidden = false; }
     } else if (m === 'stt') {

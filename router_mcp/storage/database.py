@@ -38,6 +38,7 @@ class ServiceProviderRecord:
     enabled: bool
     base_url: str | None
     created_at: str
+    pricing_url: str | None = None
 
 
 @dataclass(slots=True)
@@ -71,9 +72,13 @@ class RequestLogRecord:
     images: int | None = None
     usage_raw: dict[str, Any] = field(default_factory=dict)
     cost_usd: float = 0.0
-    cost_source: str = "computed"  # "computed" | "manual" | "amortized" | "provider"
+    # "computed" | "estimated" | "manual" | "amortized" | "provider"
+    cost_source: str = "computed"
     pricing_mode: str = "per_request"
     latency_ms: int | None = None
+    finish_reason: str | None = None  # provider stop reason, verbatim
+    requested_model_id: str | None = None  # set when a fallback substituted a model
+    fallback_reason: str | None = None
 
 
 @dataclass(slots=True)
@@ -102,6 +107,12 @@ def _model_to_row(m: RegistryModel) -> dict[str, Any]:
         "is_active": 1 if m.is_active else 0,
         "pricing_mode": m.pricing_mode,
         "subscription_id": m.subscription_id,
+        "last_seen_at": m.last_seen_at,
+        "deprecated_at": m.deprecated_at,
+        "replaced_by": m.replaced_by,
+        "price_source": m.price_source,
+        "price_source_kind": m.price_source_kind,
+        "price_checked_at": m.price_checked_at,
     }
 
 
@@ -129,6 +140,12 @@ def _row_to_model(row: aiosqlite.Row) -> RegistryModel:
         is_active=bool(row["is_active"]),
         pricing_mode=row["pricing_mode"],
         subscription_id=row["subscription_id"],
+        last_seen_at=row["last_seen_at"],
+        deprecated_at=row["deprecated_at"],
+        replaced_by=row["replaced_by"],
+        price_source=row["price_source"],
+        price_source_kind=row["price_source_kind"] or "estimate",
+        price_checked_at=row["price_checked_at"],
     )
 
 
@@ -169,6 +186,7 @@ class Database:
                     adapter TEXT NOT NULL,
                     enabled BOOLEAN NOT NULL DEFAULT 1,
                     base_url TEXT,
+                    pricing_url TEXT,
                     created_at DATETIME NOT NULL
                 );
 
@@ -201,6 +219,12 @@ class Database:
                     is_active BOOLEAN NOT NULL DEFAULT 1,
                     pricing_mode TEXT NOT NULL DEFAULT 'per_request',
                     subscription_id INTEGER,
+                    last_seen_at DATETIME,
+                    deprecated_at DATETIME,
+                    replaced_by TEXT,
+                    price_source TEXT,
+                    price_source_kind TEXT NOT NULL DEFAULT 'estimate',
+                    price_checked_at DATETIME,
                     created_at DATETIME NOT NULL,
                     updated_at DATETIME NOT NULL,
                     UNIQUE(service_provider_id, model_id),
@@ -230,6 +254,9 @@ class Database:
                     cost_source TEXT NOT NULL DEFAULT 'computed',
                     pricing_mode TEXT NOT NULL DEFAULT 'per_request',
                     latency_ms INTEGER,
+                    finish_reason TEXT,
+                    requested_model_id TEXT,
+                    fallback_reason TEXT,
                     created_at DATETIME NOT NULL
                 );
 
@@ -240,6 +267,45 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_request_logs_provider ON request_logs(service_provider_id, created_at);
                 """
             )
+            await conn.commit()
+        await self._add_missing_columns()
+
+    # Columns added after the first release. `CREATE TABLE IF NOT EXISTS` above
+    # covers fresh databases; deployed ones are patched here (SQLite has no
+    # `ADD COLUMN IF NOT EXISTS`). Keep both lists in sync.
+    _ADDED_COLUMNS: dict[str, dict[str, str]] = {
+        "service_providers": {"pricing_url": "TEXT"},
+        "registry_models": {
+            "last_seen_at": "DATETIME",
+            "deprecated_at": "DATETIME",
+            "replaced_by": "TEXT",
+            "price_source": "TEXT",
+            "price_source_kind": "TEXT NOT NULL DEFAULT 'estimate'",
+            "price_checked_at": "DATETIME",
+        },
+        "request_logs": {
+            "finish_reason": "TEXT",
+            "requested_model_id": "TEXT",
+            "fallback_reason": "TEXT",
+        },
+    }
+
+    async def _add_missing_columns(self) -> None:
+        conn = await self._get_conn()
+        async with self._write_lock:
+            for table, columns in self._ADDED_COLUMNS.items():
+                async with conn.execute(f"PRAGMA table_info({table})") as cur:
+                    existing = {row["name"] for row in await cur.fetchall()}
+                for name, ddl in columns.items():
+                    if name not in existing:
+                        await conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+                        if table == "registry_models" and name == "price_source_kind":
+                            # Rows an admin created already carry a human-checked
+                            # price; only the seeded/catalog ones are guesses.
+                            await conn.execute(
+                                "UPDATE registry_models SET price_source_kind = 'manual' "
+                                "WHERE source = 'manual'"
+                            )
             await conn.commit()
 
     # --- helpers --------------------------------------------------------
@@ -261,19 +327,25 @@ class Database:
         adapter: str,
         base_url: str | None = None,
         enabled: bool = True,
+        pricing_url: str | None = None,
     ) -> None:
         conn = await self._get_conn()
         async with self._write_lock:
             await conn.execute(
                 """
-                INSERT INTO service_providers (id, display_name, adapter, enabled, base_url, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO service_providers
+                    (id, display_name, adapter, enabled, base_url, pricing_url, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     display_name=excluded.display_name,
                     adapter=excluded.adapter,
-                    base_url=excluded.base_url
+                    base_url=excluded.base_url,
+                    pricing_url=excluded.pricing_url
                 """,
-                (provider_id, display_name, adapter, 1 if enabled else 0, base_url, _now()),
+                (
+                    provider_id, display_name, adapter, 1 if enabled else 0,
+                    base_url, pricing_url, _now(),
+                ),
             )
             await conn.commit()
 
@@ -296,6 +368,7 @@ class Database:
                 enabled=bool(r["enabled"]),
                 base_url=r["base_url"],
                 created_at=r["created_at"],
+                pricing_url=r["pricing_url"],
             )
             for r in rows
         ]
@@ -319,6 +392,48 @@ class Database:
                     updated_at=excluded.updated_at
                 """,
                 (*row.values(), _now(), _now()),
+            )
+            await conn.commit()
+
+    async def seed_registry_model(self, model: RegistryModel) -> bool:
+        """Insert a bootstrap seed only if the row was never created.
+
+        Seeds must not resurrect a model the provider has retired (or an admin
+        has corrected), so an existing row is left exactly as it is. Returns True
+        when a row was actually inserted.
+        """
+        row = _model_to_row(model)
+        cols = list(row.keys())
+        conn = await self._get_conn()
+        async with self._write_lock:
+            cur = await conn.execute(
+                f"""
+                INSERT INTO registry_models ({", ".join(cols)}, created_at, updated_at)
+                VALUES ({", ".join("?" for _ in cols)}, ?, ?)
+                ON CONFLICT(service_provider_id, model_id) DO NOTHING
+                """,
+                (*row.values(), _now(), _now()),
+            )
+            await conn.commit()
+            return cur.rowcount > 0
+
+    async def deprecate_registry_model(
+        self, service_provider_id: str, model_id: str, *, replaced_by: str | None = None
+    ) -> None:
+        """Mark a model as gone from its provider's catalog (never delete it:
+        request logs and cost history point at the row)."""
+        conn = await self._get_conn()
+        async with self._write_lock:
+            await conn.execute(
+                """
+                UPDATE registry_models
+                SET is_active = 0,
+                    deprecated_at = COALESCE(deprecated_at, ?),
+                    replaced_by = COALESCE(?, replaced_by),
+                    updated_at = ?
+                WHERE service_provider_id = ? AND model_id = ?
+                """,
+                (_now(), replaced_by, _now(), service_provider_id, model_id),
             )
             await conn.commit()
 
@@ -367,11 +482,18 @@ class Database:
         )
         return [_row_to_model(r) for r in rows]
 
-    async def get_registry_model_by_id(self, model_id: str) -> RegistryModel | None:
-        """Look up a model by its native id across providers (first active match)."""
+    async def get_registry_model_by_id(
+        self, model_id: str, *, active_only: bool = True
+    ) -> RegistryModel | None:
+        """Look up a model by its native id across providers (first match).
+
+        `active_only=False` is how routing tells "never heard of it" apart from
+        "the provider retired it", which are different answers for the caller.
+        """
+        active_clause = "AND is_active = 1" if active_only else ""
         row = await self._fetchone(
-            "SELECT * FROM registry_models WHERE model_id = ? AND is_active = 1 "
-            "ORDER BY service_provider_id LIMIT 1",
+            f"SELECT * FROM registry_models WHERE model_id = ? {active_clause} "
+            "ORDER BY is_active DESC, service_provider_id LIMIT 1",
             (model_id,),
         )
         return _row_to_model(row) if row is not None else None
@@ -425,8 +547,9 @@ class Database:
                     modality, status, error_message, request_text, request_ref,
                     response_text, response_ref, prompt_tokens, completion_tokens,
                     total_tokens, audio_seconds, images, usage_raw, cost_usd,
-                    cost_source, pricing_mode, latency_ms, created_at
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    cost_source, pricing_mode, latency_ms, finish_reason,
+                    requested_model_id, fallback_reason, created_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     rec.external_user_id,
@@ -450,6 +573,9 @@ class Database:
                     rec.cost_source,
                     rec.pricing_mode,
                     rec.latency_ms,
+                    rec.finish_reason,
+                    rec.requested_model_id,
+                    rec.fallback_reason,
                     _now(),
                 ),
             )

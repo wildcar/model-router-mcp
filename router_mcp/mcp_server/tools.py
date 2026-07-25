@@ -16,7 +16,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from router_mcp.domain.messages import Attachment, RouterRequest
+from router_mcp.domain.messages import Attachment, FallbackPolicy, RouterRequest
 from router_mcp.domain.modality import Modality
 from router_mcp.mcp_server.serialize import (
     attachments_b64,
@@ -51,12 +51,18 @@ async def chat(
     tier: str | None = None,
     provider: str | None = None,
     params: dict[str, Any] | None = None,
+    fallback: dict[str, Any] | str | None = None,
 ) -> dict[str, Any]:
     """Route a chat request to a model and return its text response with usage/cost.
 
     Provide either `text` (a single user message) or `messages` (OpenAI-shaped
     history). `model_id` pins a specific model; otherwise the router picks one by
     `tier`/`provider` hints.
+
+    `fallback` covers the case where the pinned model was retired or is down:
+    `{"policy": "same"|"cheaper"|"pricier", "max_steps": 1, "scope":
+    "provider"|"vendor"|"any"}` (or just the policy name). The reply then carries
+    `requested_model_id` and `fallback_reason` alongside the model actually used.
     """
     core = get_core()
     request = RouterRequest(
@@ -68,6 +74,7 @@ async def chat(
         text=text,
         messages=messages,
         params=params or {},
+        fallback=FallbackPolicy.parse(fallback),
     )
     result = await core.router.dispatch(request)
     out = dispatch_summary(result)
@@ -84,9 +91,10 @@ async def generate_image(
     model_id: str | None = None,
     provider: str | None = None,
     params: dict[str, Any] | None = None,
+    fallback: dict[str, Any] | str | None = None,
 ) -> dict[str, Any]:
     """Generate an image from a text prompt. Returns image(s) as base64 and/or
-    URLs, with usage and cost."""
+    URLs, with usage and cost. `fallback` works as in `chat`."""
     core = get_core()
     request = RouterRequest(
         modality=Modality.IMAGE,
@@ -95,6 +103,7 @@ async def generate_image(
         provider_hint=provider,
         text=prompt,
         params=params or {},
+        fallback=FallbackPolicy.parse(fallback),
     )
     result = await core.router.dispatch(request)
     out = dispatch_summary(result)
@@ -109,8 +118,10 @@ async def transcribe(
     mime: str = "audio/ogg",
     model_id: str | None = None,
     provider: str | None = None,
+    fallback: dict[str, Any] | str | None = None,
 ) -> dict[str, Any]:
-    """Transcribe base64-encoded audio to text (speech-to-text)."""
+    """Transcribe base64-encoded audio to text (speech-to-text).
+    `fallback` works as in `chat`."""
     core = get_core()
     request = RouterRequest(
         modality=Modality.STT,
@@ -118,6 +129,7 @@ async def transcribe(
         model_id=model_id,
         provider_hint=provider,
         attachments=[Attachment(kind="audio", mime=mime, data=base64.b64decode(audio_b64))],
+        fallback=FallbackPolicy.parse(fallback),
     )
     result = await core.router.dispatch(request)
     out = dispatch_summary(result)
@@ -133,8 +145,10 @@ async def synthesize_speech(
     model_id: str | None = None,
     provider: str | None = None,
     params: dict[str, Any] | None = None,
+    fallback: dict[str, Any] | str | None = None,
 ) -> dict[str, Any]:
-    """Synthesize speech from text (text-to-speech). Returns base64 audio."""
+    """Synthesize speech from text (text-to-speech). Returns base64 audio.
+    `fallback` works as in `chat`."""
     core = get_core()
     merged = dict(params or {})
     if voice:
@@ -146,6 +160,7 @@ async def synthesize_speech(
         provider_hint=provider,
         text=text,
         params=merged,
+        fallback=FallbackPolicy.parse(fallback),
     )
     result = await core.router.dispatch(request)
     out = dispatch_summary(result)

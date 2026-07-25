@@ -6,7 +6,7 @@ import pytest
 
 from router_mcp.adapters.claude_api import ClaudeApiAdapter
 from router_mcp.adapters.deepseek import DeepSeekAdapter
-from router_mcp.domain.errors import ProviderError
+from router_mcp.domain.errors import ProviderError, ResponseTruncated
 from router_mcp.domain.messages import RouterRequest
 from router_mcp.domain.modality import Modality
 
@@ -24,6 +24,25 @@ def test_deepseek_parse_text_and_usage():
 def test_deepseek_parse_empty_raises():
     with pytest.raises(ProviderError):
         DeepSeekAdapter._parse({"choices": [{"message": {"content": ""}}]})
+
+
+def test_deepseek_truncated_reports_the_ceiling():
+    """finish_reason=length with empty content is a max_tokens problem, and the
+    message must say so — the alternative is another prompt-debugging session."""
+    data = {
+        "choices": [{"message": {"content": ""}, "finish_reason": "length"}],
+        "usage": {"prompt_tokens": 900, "completion_tokens": 1000},
+    }
+    with pytest.raises(ResponseTruncated) as exc:
+        DeepSeekAdapter._parse(data, max_tokens=1000)
+    assert "max_tokens=1000" in str(exc.value)
+    assert "1000 completion tokens" in str(exc.value)
+
+
+def test_claude_truncated_on_max_tokens_stop_reason():
+    data = {"content": [], "stop_reason": "max_tokens", "usage": {"output_tokens": 512}}
+    with pytest.raises(ResponseTruncated):
+        ClaudeApiAdapter._parse(data, max_tokens=512)
 
 
 def test_claude_parse_blocks_and_usage_mapping():

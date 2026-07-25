@@ -52,12 +52,38 @@ it as a managed service on this host.
   `enabled` admin toggle: `/api/registry/providers` + «Доступен» column in the
   registry console. `enabled` is seeded from configured state on first insert only
   and never downgraded by restarts; dispatch re-checks `is_configured()` live.
-- ✅ Tests green: `pytest` (29 passed).
+- ✅ Registry freshness pack (2026-07-25, from user feedback after the DeepSeek
+  v4-pro incident), four changes in the agreed order:
+  1. Truncation is its own error: `ResponseTruncated` when a provider returns no
+     content with `finish_reason=length` / `stop_reason=max_tokens`, message names
+     the ceiling and the tokens produced. `request_logs.finish_reason` added.
+  2. Per-provider catalog sync: `ProviderAdapter.list_catalog()` (OpenRouter with
+     prices, DeepSeek and Anthropic ids-only), `RegistryService.sync_all/sync_provider`,
+     background timer (`CATALOG_SYNC_INTERVAL_SECONDS`, default 6h) plus
+     `POST /api/registry/refresh`. Missing models are deprecated, never deleted;
+     seeds are insert-if-absent; the hardcoded `deepseek-chat`/`deepseek-reasoner`
+     rows are gone.
+  3. Price provenance: `price_source`/`price_source_kind`/`price_checked_at` on
+     models, `pricing_url` on providers, unverified prices logged as
+     `cost_source='estimated'` and marked in the console.
+  3b. Guard found during live verification: a model from a priceless catalog
+     stores zeros, which made it look like the cheapest row in the registry.
+     `RegistryModel.price_is_unknown` now pushes such models last in automatic
+     selection and keeps them off the fallback price ladder.
+  4. Fallback policy per request: `{policy: same|cheaper|pricier, max_steps, scope}`
+     on chat/image/tts/stt (API + MCP), substitutions reported via
+     `requested_model_id` / `fallback_reason` in the response and the log.
+- ✅ Tests green: `pytest` (48 passed). Note: `tests/test_web.py` now clears every
+  provider key explicitly — Settings still reads the repo `.env`, and a configured
+  adapter made the sync call the live DeepSeek API during tests.
 - ✅ Process: humanizer-ru skill vendored to `.claude/skills/humanizer-ru/` and made
   mandatory for all agent-produced Russian prose (AGENTS.md → Language Rules).
 
 ## Next
 
+- Deploy the registry-freshness pack to prod, run `POST /api/registry/refresh`
+  there, and fill real prices for the live DeepSeek models in `/registry`
+  (they arrive from the catalog with `price_source_kind='unknown'`).
 - Phase 5 (cont.): subscription/amortization UI; tune seed prices.
 - Phase 6: hardening, optional streaming for long CLI/chat runs.
 

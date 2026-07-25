@@ -35,7 +35,7 @@ async def _core(tmp_path, provider_id, model: RegistryModel, response):
     await db.init()
     await db.upsert_service_provider(provider_id, provider_id, provider_id, None, enabled=True)
     await db.upsert_registry_model(model)
-    registry = RegistryService(db, None, "http://x")
+    registry = RegistryService(db, adapters={})
     blobs = BlobStore(str(tmp_path / "blobs"))
     adapter = StubAdapter(provider_id, model.modalities[0], response)
     router = ModelRouter(db, registry, {provider_id: adapter}, blobs)

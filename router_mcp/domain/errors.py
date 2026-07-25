@@ -27,3 +27,21 @@ class AccessDenied(RouterError):
 
 class ProviderError(RouterError):
     """Application-level error reported by the provider (bad request, refusal)."""
+
+
+class ResponseTruncated(ProviderError):
+    """Generation hit the output-token ceiling before producing usable content.
+
+    Providers signal this as `finish_reason="length"` / `stop_reason="max_tokens"`
+    and often return an empty content block, which reads like "the model said
+    nothing". Raising a distinct error (and naming the ceiling in the message)
+    points the caller at `max_tokens` instead of at the prompt.
+    """
+
+
+class ModelUnavailable(ProviderError):
+    """The requested model cannot serve the request (unknown/retired upstream).
+
+    Distinct from ProviderError because it is the one provider-side failure a
+    fallback policy may retry on a different model.
+    """

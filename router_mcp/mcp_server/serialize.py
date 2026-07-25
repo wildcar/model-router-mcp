@@ -26,6 +26,16 @@ def model_to_dict(m: RegistryModel) -> dict[str, Any]:
         "context_length": m.context_length,
         "source": m.source,
         "pricing_mode": m.pricing_mode,
+        "is_active": m.is_active,
+        "last_seen_at": m.last_seen_at,
+        "deprecated_at": m.deprecated_at,
+        "replaced_by": m.replaced_by,
+        # Price provenance: a caller comparing costs needs to know which numbers
+        # are confirmed and which are guesses.
+        "price_source": m.price_source,
+        "price_source_kind": m.price_source_kind,
+        "price_checked_at": m.price_checked_at,
+        "price_is_verified": m.price_is_verified,
     }
 
 
@@ -103,10 +113,17 @@ def attachments_web(attachments: list[Attachment]) -> dict[str, Any]:
 
 
 def dispatch_summary(result: DispatchResult) -> dict[str, Any]:
-    """The common envelope returned by chat/image/stt/tts/cli tools."""
+    """The common envelope returned by chat/image/stt/tts/cli tools.
+
+    `requested_model_id` / `fallback_reason` are non-null only when a fallback
+    policy substituted a model: a caller must never discover a substitution by
+    reading its bill.
+    """
     return {
         "provider": result.response.provider,
         "model_id": result.response.model_id,
+        "requested_model_id": result.requested_model_id,
+        "fallback_reason": result.fallback_reason,
         "modality": result.response.modality.value,
         "usage": usage_to_dict(result),
         "cost_usd": result.cost.cost_usd,

@@ -29,11 +29,45 @@ class RegistryModel:
     image_price: float = 0.0  # USD per image
     audio_price_per_second: float = 0.0  # USD per second
     context_length: int = 0
-    source: str = "manual"  # "catalog" | "manual"
+    source: str = "manual"  # "catalog" | "seed" | "manual"
     is_active: bool = True
     pricing_mode: str = "per_request"  # "per_request" | "amortized_subscription"
     subscription_id: int | None = None
+    # Catalog freshness. `last_seen_at` is the last sync that found the model
+    # upstream; `deprecated_at` is set when a sync stopped finding it. Retired
+    # rows stay in the table because request logs reference them.
+    last_seen_at: str | None = None
+    deprecated_at: str | None = None
+    replaced_by: str | None = None
+    # Price provenance: where the number came from and when it was last checked.
+    # "api"   — read from the provider's own catalog, trustworthy;
+    # "page"  — copied from the vendor's price page (URL in price_source);
+    # "manual"— entered by an admin;
+    # "estimate" — a guess nobody has confirmed (default, flagged in costs);
+    # "unknown"  — the catalog lists the model but publishes no price.
+    price_source: str | None = None
+    price_source_kind: str = "estimate"
+    price_checked_at: str | None = None
     extra: dict = field(default_factory=dict)
+
+    @property
+    def price_is_verified(self) -> bool:
+        return self.price_source_kind in ("api", "page", "manual")
+
+    @property
+    def price_is_unknown(self) -> bool:
+        """True when the zeros in this row mean "nobody filled the price in".
+
+        A catalog that lists ids without prices (DeepSeek, Anthropic) leaves the
+        columns at zero, which would otherwise make the model look like the
+        cheapest thing in the registry and win every automatic selection.
+        """
+        return self.price_source_kind == "unknown" and (
+            self.prompt_price == 0.0
+            and self.completion_price == 0.0
+            and self.image_price == 0.0
+            and self.audio_price_per_second == 0.0
+        )
 
     @property
     def is_free(self) -> bool:
