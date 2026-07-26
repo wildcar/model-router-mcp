@@ -29,3 +29,6 @@ venv/
 # Runtime data & logs
 data/
 logs/
+
+# Playwright's browser cache and any stray node install from the e2e harness
+node_modules/

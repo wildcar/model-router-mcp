@@ -143,13 +143,37 @@ it as a managed service on this host.
      providers and the sync report; the MCP tab names itself as wave 2.
   9. ADR-0005 supersedes §18 of the concept: plain ES modules, no htmx/Alpine, no
      build step. Reasoning and reversal conditions are in the ADR.
-- ✅ Tests green: `pytest` (98 passed). One app per test session (`tests/conftest.py`):
-  FastMCP's session manager runs once per process. `Settings` still reads the repo
-  `.env`, so the fixture clears every provider key explicitly. `tests/js/` runs the
-  page modules against a stub DOM under node (skipped when node is absent) — it
-  catches mistyped element ids and API-shape drift without a browser.
-- ✅ Process: humanizer-ru skill vendored to `.claude/skills/humanizer-ru/` and made
-  mandatory for all agent-produced Russian prose (AGENTS.md → Language Rules).
+- ✅ Console wave 2 shipped (2026-07-26), all eight items of §21:
+  1. The three accounting defects of §7 are closed. A missing rate is `unpriced`,
+     not zero; a zero somebody confirmed is still free (`price_is_unknown` and
+     `is_free` turn on price provenance). TTS is billed per character.
+     Cache/reasoning tokens have their own rates, with `Usage` carrying one
+     documented contract every adapter normalizes to.
+  2. `compute_cost` returns the sum by its terms, so the inspector can print the
+     arithmetic. `provider_notional` keeps subscription money out of real totals
+     (`CLAUDE_CLI_SUBSCRIPTION`); OpenRouter's own `usage.cost` is captured
+     beside the registry figure as the staleness signal.
+  3. `GET /api/v1/usage` groups five ways, splits the totals by price source,
+     sets `is_lower_bound`, and exports CSV with the columns kept apart.
+     «Расход» is a tab of «Журнал», with a sparkline and links into the log.
+  4. `GET /api/v1/health/summary` behind the gate; «Обзор» is built on it —
+     tiles, an actionable work list, first-run steps.
+  5. `POST /api/v1/providers/{id}/probe` answers whether a key still works,
+     cached ten minutes.
+  6. `GET /api/v1/mcp/summary` — tool schemas joined with per-tool and
+     per-client statistics from the log; MCP tab with a self-probe and a config
+     snippet. No sessions screen (ADR-0003 makes it empty by construction).
+  7. «Модели»: facet counts returned with the rows, mass deprecation with the
+     affected models listed and a real undo behind the window.
+  8. Twelve acceptance scenarios of §20 in a real Chromium
+     (`tests/test_acceptance.py`, `pip install -e ".[e2e]"`), driving a uvicorn
+     subprocess. They found the «Прогон» form rendering no parameters at all
+     when no provider is configured.
+- ✅ Tests green: `pytest` (145 passed). Three harnesses: pytest for the service,
+  `tests/js/` for the page modules under node against a stub DOM, and Playwright
+  for the acceptance list. The last two skip when node or the browser is absent —
+  the production host needs neither.
+
 
 ## Next
 
@@ -165,13 +189,15 @@ it as a managed service on this host.
   long CLI request to confirm the 504 is gone.
 - Deploy wave 0 and watch the first restart: `_add_missing_columns` grows
   sixteen columns on the live `request_logs` in one pass.
-- Deploy wave 1 and look at the console on prod with real data — the page
-  modules are verified against a stub DOM, not a browser.
-- Wave 2 of `docs/UI_CONCEPT_v2.md`: fix the three accounting defects before
-  drawing the «Расход» screen (zero seed rates for image/stt/tts, no per-character
-  price for ElevenLabs, cache/reasoning tokens missing from `Usage` and the cost),
-  then «Модели» with facets, mass edits, provider key probes, the MCP tab with the
-  tool inventory, «Обзор» health summary, «Расход» as a tab, and Playwright.
+- Deploy wave 2 and fill real prices for the models that now report `unpriced`
+  (three of five modalities have no rates at all — the «Обзор» work list names
+  them). Cache rates for DeepSeek and Anthropic are worth entering too: without
+  them a cached conversation is priced at the prompt rate and marked estimated.
+- Wave 3 of `docs/UI_CONCEPT_v2.md`: in-process run registry with progress and
+  cancellation, line-by-line CLI output, `running`/`interrupted` recovery on
+  restart, the multi-model mode of «Прогон», `plan_json` replay in the log,
+  attachments by reference, and a retention policy for the log and the files
+  (nothing is ever deleted today).
 - Phase 5 (cont.): subscription/amortization UI; tune seed prices.
 - Phase 6: hardening, optional streaming for long CLI/chat runs.
 

@@ -33,13 +33,18 @@ function paramSpecs() {
   const modality = $('modality').value;
   const provider = currentProvider();
   const byProvider = caps.params[modality] || {};
-  // With no provider pinned the router picks one, so show the parameters the
-  // configured providers agree on rather than a union nobody accepts.
-  const entries = provider
-    ? [byProvider[provider]].filter(Boolean)
-    : Object.entries(byProvider)
-        .filter(([id]) => caps.providers.find((p) => p.id === id)?.configured)
-        .map(([, spec]) => spec);
+  if (provider) return byProvider[provider]?.params || [];
+
+  // With no provider pinned the router will choose one, so the form shows the
+  // parameters every candidate accepts — a union would offer fields the chosen
+  // adapter drops. Configured providers are the candidates; if none is
+  // configured we fall back to all of them, because the form still has to
+  // describe what the request would take. The plan says separately that nothing
+  // can run.
+  const configured = Object.entries(byProvider)
+    .filter(([id]) => caps.providers.find((p) => p.id === id)?.configured)
+    .map(([, spec]) => spec);
+  const entries = configured.length ? configured : Object.values(byProvider);
   if (!entries.length) return [];
   const [first, ...rest] = entries;
   return first.params.filter(

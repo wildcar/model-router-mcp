@@ -31,8 +31,8 @@ MCP client ─┐                         ┌─ adapters/* (one per provider):
 Web browser ┘   ├─ /mcp  (FastMCP …)  │    claude_api (chat), codex_image (image),
                 │                     │    deepgram (stt), elevenlabs (tts),
                 │                     └    codex_cli & claude_cli (cli)
-                ├─ /api/* (JSON API for the web UI)
-                ├─ /, /registry, /logs (Jinja2 pages)
+                ├─ /api/v1/* (JSON API; also mounted at /api for old pages)
+                ├─ /, /overview, /models, /logs, /connections (Jinja2 frames)
                 └─ /blobs/{ref} (binary payload serving)
                          │
                          ▼
@@ -72,6 +72,9 @@ on it; adapters never touch storage/mcp directly.
 21. ✅ Capabilities: the parameter matrix is derived from adapters (`SUPPORTED_PARAMS`), served with the glossary and the server-fixed settings. [console wave 1]
 22. ✅ Dry run: `POST /api/v1/plan` explains what would happen without touching the network, and answers even when nothing can run.
 23. ✅ Console screens: five-item navigation, the «Прогон» form built from capabilities, one inspector with a two-level timeline over the `Run` envelope, partial price editing with provenance-based protection.
+24. ✅ Accounting tells a missing rate from a zero: `unpriced`, per-character TTS, cache/reasoning tokens at their own rates, notional subscription money kept apart. [console wave 2]
+25. ✅ Spend with groupings and a price-source split; the total is labelled a lower bound whenever it cannot be complete.
+26. ✅ Closed health summary, live provider key probes, MCP tool inventory with call statistics.
 
 ## Catalog freshness, price provenance, fallback
 
@@ -283,6 +286,55 @@ the provider asked for.
 Frontend stack: native ES modules, no htmx, no Alpine, no build step — see
 ADR-0005, which supersedes §18 of the concept.
 
+## Accounting and operations (24–26)
+
+Wave 2 of `docs/UI_CONCEPT_v2.md`.
+
+### Money
+
+`Usage` has one documented contract that every adapter normalizes to:
+`prompt_tokens` is the whole prompt *including* cache, and
+`cache_read_tokens` / `cache_write_tokens` are the parts of it that were.
+Providers disagree — DeepSeek and the OpenAI-shaped APIs count cache inside the
+prompt total, Anthropic reports it alongside — so the adapter does the adding
+and accounting has one rule.
+
+`compute_cost` returns the sum by its terms, each with its own rate, and a
+`cost_source` that distinguishes:
+
+| Source | Meaning |
+|---|---|
+| `computed` | every rate behind the number is confirmed |
+| `estimated` | some rate is a guess — including a cache rate we had to assume |
+| `provider` | the provider named the sum and charged it |
+| `provider_notional` | the provider named the sum, a subscription paid for it, no money moved |
+| `unpriced` | the request consumed something no rate covers. Not zero: zero is a claim |
+| `amortized` | spread across a subscription pool |
+| `cost_unknown` | a read timeout: probably executed and billed, never reported |
+
+A zero somebody confirmed (a `:free` model) is a price. A zero nobody filled in
+is a gap — `price_is_unknown` and `is_free` turn on price provenance, not on the
+digits, which is what kept three of the five modalities billing at nothing.
+
+`GET /api/v1/usage` groups by user, model, provider, channel or day and returns
+the totals split along those lines, with `is_lower_bound` set whenever the
+selection contains unpriced or timed-out requests. CSV export keeps the columns
+separate.
+
+### Operations
+
+`GET /api/v1/health/summary` (behind the gate) carries uptime, disk usage,
+provider state, registry counts, the last 24 hours and a work list where every
+line links to where it is fixed. `POST /api/v1/providers/{id}/probe` answers
+whether a key still works — `configured` only sees that one is present — and
+caches for ten minutes.
+
+`GET /api/v1/mcp/summary` lists the tools with their schemas joined to what the
+log saw: calls, errors and p50 per tool, and the clients that made them. Tools
+the log knows and the build no longer exposes are reported separately. There is
+no sessions screen: ADR-0003 makes the server stateless, so it would be empty by
+construction.
+
 ## Project structure
 
 ```
@@ -305,19 +357,24 @@ router_mcp/
   mcp_server/          tools (FastMCP), serialize
   web/                 api (JSON, mounted at /api/v1 and /api), views (Run and
                        error envelopes), capabilities (matrix from adapters),
-                       labels (the glossary), pages (Jinja2 frames), templates/,
+                       labels (the glossary), health (summary + key probes),
+                       mcp_summary (tool inventory), pages (Jinja2 frames), templates/,
                        static/{app.css, css/tokens.css,
                        js/core/{api,dom,format,state,keys}.js,
                        js/components/{json-view,inspector,timeline}.js,
-                       js/pages/{run,models,logs,overview,connections}.js}
+                       js/pages/{run,models,logs,spend,overview,connections}.js}
 tests/                 conftest (one app per session), test_smoke (chain),
                        test_web (app), test_web_views (envelope parity),
                        test_api_filters (log filters/cursor), test_blobs
                        (file-serving headers), test_escaping (no innerHTML),
                        test_capabilities (matrix matches the adapters),
                        test_plan (dry run stays offline), test_registry_patch
-                       (partial edit, price survives sync), test_pages_js
-                       (page modules against a stub DOM, skipped without node),
+                       (partial edit, price survives sync), test_accounting
+                       (a gap is not a zero), test_spend (kinds of money stay
+                       apart), test_health_mcp (summary, probe, inventory),
+                       test_pages_js (page modules against a stub DOM, skipped
+                       without node), test_acceptance (§20 in a real browser,
+                       skipped without playwright),
                        test_modalities, test_adapters_parse, test_cli,
                        test_fallback, test_registry_sync, test_auth;
                        js/ (DOM stub + API fixtures), mcp_probe.py (manual)
@@ -327,6 +384,21 @@ Frontend rule: templates are markup only; behaviour lives in native ES modules
 under `static/js/`, pages get their module from `page_script`, and static links
 carry `?v=<app version>` so a restart cannot leave an old client talking to a
 new API.
+
+## Testing the console
+
+Two harnesses, because a browser is not always available and a stub cannot see
+everything.
+
+- `tests/js/` runs each page module against a hand-written DOM stub with real
+  API fixtures under node. It catches mistyped element ids, handlers bound to
+  missing nodes, and pages reading fields the API does not send. Skipped when
+  node is absent — the production host has none.
+- `tests/test_acceptance.py` drives Chromium through the twelve acceptance
+  points of §20 against a uvicorn in its own subprocess (the session manager
+  runs once per process, and the rest of the suite already has an app in this
+  one). Install with `pip install -e ".[e2e]" && playwright install chromium`;
+  skipped when playwright is missing.
 
 ## Deployment
 
