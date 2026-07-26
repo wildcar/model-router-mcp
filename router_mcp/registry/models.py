@@ -1,8 +1,13 @@
 """RegistryModel: a single row of the model registry.
 
 Carries the three-level mapping (service_provider -> model_provider -> model_id)
-plus pricing, modality and tier metadata. The cost-bucket / tier logic is lifted
+plus pricing, task and tier metadata. The cost-bucket / tier logic is lifted
 from ort_bot/services/model_cache.py:CachedModel so tiering stays consistent.
+
+`tasks` is what routing matches on (ADR-0006); `modalities` is the billing group
+each of those tasks falls into, kept because the prices below are per group and
+because `registry_models.modality` still stores it. The two are derived from each
+other, so a row built either way loads.
 """
 
 from __future__ import annotations
@@ -10,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from router_mcp.domain.modality import Modality
+from router_mcp.domain.task import DEFAULT_TASK, Task
 
 # Per-1K-token threshold below which a text model counts as "cheap".
 CHEAP_THRESHOLD_PER_1K = 0.001
@@ -21,7 +27,11 @@ class RegistryModel:
     model_provider: str
     model_id: str
     display_name: str
+    # The billing groups this row can be charged in. Derived from `tasks` when
+    # only tasks were given; kept as the stored form of `registry_models.modality`.
     modalities: tuple[Modality, ...]
+    # What this model can actually be asked to do. This is the routing key.
+    tasks: tuple[Task, ...] = ()
     capabilities: tuple[str, ...] = ()
     tier: str = "cheap"  # "free" | "cheap" | "expensive"
     prompt_price: float = 0.0  # USD per token
@@ -37,6 +47,13 @@ class RegistryModel:
     # an estimate rather than quietly making the request look cheap.
     cache_read_price: float = 0.0  # USD per cached prompt token
     cache_write_price: float = 0.0  # USD per token written to cache
+    # Seconds of *provider compute*, which is not seconds of audio: Replicate
+    # bills a hosted model by how long its hardware ran, and that quantity has
+    # nothing to do with the length of the file it produced. Two different
+    # seconds in one column would make every spend report unreadable, so this
+    # rate is its own. Metered from the provider's own figure
+    # (`Usage.compute_seconds`), never from our wall clock.
+    compute_price_per_second: float = 0.0  # USD per second of provider compute
     context_length: int = 0
     source: str = "manual"  # "catalog" | "seed" | "manual"
     is_active: bool = True
@@ -69,6 +86,25 @@ class RegistryModel:
     # say a model costs nothing; a guess cannot.
     _CONFIRMED_PROVENANCE = ("api", "page", "manual")
 
+    def __post_init__(self) -> None:
+        """Fill whichever axis the caller did not give.
+
+        A catalog adapter knows the tasks; a hand-written seed and every row
+        written before ADR-0006 know only the group. Deriving both ways keeps one
+        constructor for both, and keeps a row written by the previous build
+        loadable.
+        """
+        if self.tasks and not self.modalities:
+            groups: list[Modality] = []
+            for task in self.tasks:
+                if task.billing_group not in groups:
+                    groups.append(task.billing_group)
+            self.modalities = tuple(groups)
+        elif self.modalities and not self.tasks:
+            self.tasks = tuple(
+                DEFAULT_TASK[group] for group in self.modalities if group in DEFAULT_TASK
+            )
+
     @property
     def price_is_verified(self) -> bool:
         return self.price_source_kind in self._CONFIRMED_PROVENANCE
@@ -82,7 +118,7 @@ class RegistryModel:
         bootstrap seed for a provider with no catalog at all (image, stt, tts)
         stores them as `estimate`. Both used to read as "free", which made them
         the cheapest thing in the registry and won every automatic selection —
-        and made three of the five modalities bill at exactly zero.
+        and made three of the five billing groups bill at exactly zero.
 
         A zero that somebody confirmed is a different thing and stays free.
         """
@@ -96,6 +132,10 @@ class RegistryModel:
             and self.image_price == 0.0
             and self.audio_price_per_second == 0.0
             and self.character_price == 0.0
+            # Without this a model whose only rate is per second of compute would
+            # read as "price unknown" forever, and stay last in every selection
+            # even after an operator had priced it.
+            and self.compute_price_per_second == 0.0
         )
 
     @property
@@ -103,12 +143,12 @@ class RegistryModel:
         """Free as a fact, not as a gap: confirmed provenance and zero rates."""
         return self._all_prices_zero and self.price_is_verified
 
-    def has_rate_for(self, modality: Modality) -> bool:
-        """Whether this row can price that modality at all.
+    def has_unit_rate_for(self, modality: Modality) -> bool:
+        """Whether a per-unit rate exists for that billing group.
 
-        `unpriced` on a run means exactly this returning False while the run
-        consumed something: there is no methodology, and a zero would be a
-        statement rather than a gap (§2, §7.2).
+        Separate from `has_rate_for` because a provider that bills per second of
+        its own compute can price a run of *any* group, while a per-unit rate is
+        the more specific answer and wins when both exist.
         """
         if modality is Modality.IMAGE:
             return self.image_price > 0.0
@@ -116,8 +156,42 @@ class RegistryModel:
             return self.character_price > 0.0 or self.audio_price_per_second > 0.0
         if modality is Modality.STT:
             return self.audio_price_per_second > 0.0
+        if modality in (Modality.AUDIO, Modality.VIDEO):
+            # Generated sound and video have no per-unit rate of their own: the
+            # providers hosting them charge for compute time.
+            return False
         # chat and cli are token-billed; either rate being set is enough.
         return self.prompt_price > 0.0 or self.completion_price > 0.0
+
+    def has_rate_for(self, modality: Modality) -> bool:
+        """Whether this row can price that group at all.
+
+        `unpriced` on a run means exactly this returning False while the run
+        consumed something: there is no methodology, and a zero would be a
+        statement rather than a gap (§2, §7.2).
+        """
+        return self.has_unit_rate_for(modality) or self.compute_price_per_second > 0.0
+
+    def ladder_price(self, modality: Modality) -> float:
+        """The rate the fallback ladder orders candidates by, for that group.
+
+        The ladder used to sort by `prompt_price + completion_price`, which is
+        zero for every image, stt, tts, audio and video row — so for most groups
+        it was really sorted by `model_id`, and «дешевле» meant nothing.
+        """
+        if modality is Modality.IMAGE:
+            rate = self.image_price
+        elif modality is Modality.TTS:
+            rate = self.character_price or self.audio_price_per_second
+        elif modality is Modality.STT:
+            rate = self.audio_price_per_second
+        elif modality in (Modality.AUDIO, Modality.VIDEO):
+            rate = self.compute_price_per_second
+        else:
+            rate = self.prompt_price + self.completion_price
+        # A group with no rate of its own still has to order somehow, and compute
+        # time is the only figure left. Unpriced rows never reach the ladder.
+        return rate or self.compute_price_per_second
 
     @property
     def is_cheap(self) -> bool:
@@ -131,5 +205,14 @@ class RegistryModel:
             return "cheap"
         return "expensive"
 
-    def supports(self, modality: Modality) -> bool:
-        return modality in self.modalities
+    def supports(self, what: Task | Modality) -> bool:
+        """Whether this row can serve that task (or anything in that group).
+
+        Accepts a `Modality` too, because the per-group defaults from settings and
+        the pinned endpoints only know the group. A group match is deliberately
+        weaker than a task match: it says "this row bills here", not "it can do
+        this". Routing asks with a `Task`.
+        """
+        if isinstance(what, Task):
+            return what in self.tasks
+        return what in self.modalities

@@ -6,8 +6,9 @@ with reality (update before code when the contract changes).
 ## Purpose
 
 An MCP server that routes a request to an appropriate AI model and returns the
-response, across multiple modalities (chat, image, speech-to-text, text-to-speech,
-CLI) and multiple providers. It maintains a registry of known/connected models
+response, across multiple *tasks* (text-to-text, image-to-text, text-to-image,
+image-to-image, speech-to-text, text-to-speech, text-to-audio, text-to-video,
+image-to-video, cli) and multiple providers. It maintains a registry of known/connected models
 (service-provider → model-provider → model) with cost tiers, logs every request
 and response keyed by an *external* user id (users are managed elsewhere; only the
 id arrives, for per-user statistics), and computes per-request cost from registry
@@ -49,10 +50,10 @@ on it; adapters never touch storage/mcp directly.
 
 ## Functional requirements
 
-1. ✅ Normalized provider-adapter interface (`generate(request, model)`), modality-aware.
+1. ✅ Normalized provider-adapter interface (`generate(request, model)`), task-aware.
 2. ✅ Model registry with 3-level mapping, cost tiers (free/cheap/expensive), manual + catalog rows.
 3. ✅ OpenRouter live catalog merge into the registry (TTL-cached).
-4. ✅ Routing: explicit `model_id`, or modality + tier/provider hints, or per-modality default.
+4. ✅ Routing: explicit `model_id`, or task + tier/provider hints, or a per-billing-group default.
 5. ✅ Per-request/response logging by `external_user_id` with token usage and cost.
 6. ✅ Cost computation from registry prices; amortized-subscription hook (table + field).
 7. ✅ MCP tools over Streamable HTTP: `list_models`, `chat`, `generate_image`, `transcribe`, `synthesize_speech`, `run_cli`, `get_usage`.
@@ -78,6 +79,47 @@ on it; adapters never touch storage/mcp directly.
 27. ✅ Runs have identity and a lifecycle: submitted, polled, cancellable, idempotent by `client_request_id`, grouped by `batch_id`; the log row exists from the start and a restart closes it as `interrupted`. [console wave 3]
 28. ✅ CLI output is read line by line and reported as it arrives; cancelling a run kills the process.
 29. ✅ Retention: configurable lifetimes for log rows and response files, a preview, a purge and an orphan sweep. Unset means keep forever, which is the previous behaviour.
+30. ✅ Tasks and media are two declared axes; `Modality` is the billing/endpoint group. A model declares the set of tasks it supports, so "produces images but cannot edit one" is expressible. [ADR-0006]
+
+## Tasks, media and billing groups (30)
+
+Contract for requirement 30. Reasoning and rejected alternatives: `docs/adr/0006-task-and-media-axes.md`.
+
+**`Media`** — what a payload is: `text`, `image`, `audio`, `video`, `file`. Types a
+task; never routes. `file` never appears in a signature's `requires`.
+
+**`Task`** — the operation asked for, in HuggingFace `pipeline_tag` wording. Each
+task has a static signature (`requires` / `optional` / `produces` sets of media)
+and belongs to exactly one billing group:
+
+| Task | requires | optional | produces | group |
+|---|---|---|---|---|
+| `text-to-text` | text | | text | `chat` |
+| `image-to-text` | image | text | text | `chat` |
+| `text-to-image` | text | | image | `image` |
+| `image-to-image` | image, text | | image | `image` |
+| `speech-to-text` | audio | text | text | `stt` |
+| `text-to-speech` | text | | audio | `tts` |
+| `text-to-audio` | text | | audio | `audio` |
+| `text-to-video` | text | | video | `video` |
+| `image-to-video` | image | text | video | `video` |
+| `cli` | text | | text | `cli` |
+
+`domain/task.py` owns the table. `validate_task_inputs()` is the single check that
+a request carries what its task needs, and it names the missing medium.
+
+**`Modality`** is the billing group and the endpoint name. Tasks outnumber groups
+because `text-to-image` and `image-to-image` bill identically. `accounting/`
+takes only `Modality`; callers pass `task.billing_group`. That is why log rows
+written before tasks existed price exactly as they did.
+
+Declarations: `RegistryModel.tasks` (stored in `registry_models.tasks`, comma
+joined), `ProviderAdapter.supported_tasks`, `SUPPORTED_PARAMS` keyed by task.
+`supported_modalities` is a derived read-only view. A request carries `task`;
+`modality` is still accepted on the API and MCP and maps through `Task.from_str`,
+where `chat` means `text-to-text`, `image` means `text-to-image` (the old
+`generate_image` had no way to send an input image), `stt`/`tts`/`cli` map to
+their obvious task. `request_logs` stores both `task` and `modality`.
 
 ## Catalog freshness, price provenance, fallback
 
@@ -132,12 +174,14 @@ Requests may carry `fallback = {policy, max_steps, scope}`:
 - `scope`: `provider` (default, same service provider) | `vendor` (same
   model_provider anywhere) | `any`.
 
-Candidates are the active models of the same modality inside the scope, ordered
-by `prompt_price + completion_price`; `same` takes the nearest neighbour,
-`cheaper`/`pricier` step down/up that ladder. Fallback triggers on: unknown
-model id, `is_active = 0`, provider disabled or unconfigured, and provider errors
-that mean "this model cannot serve the request" (model not found, unavailable).
-It never crosses modality and never retries a prompt-level rejection. The
+Candidates are the active models of the same **task** inside the scope, ordered by
+the rate of that task's billing group (`RegistryModel.ladder_price`) — a token sum
+orders nothing for image, audio or video rows, where it is zero by construction.
+`same` takes the nearest neighbour, `cheaper`/`pricier` step down/up that ladder.
+Fallback triggers on: unknown model id, `is_active = 0`, provider disabled or
+unconfigured, and provider errors that mean "this model cannot serve the request"
+(model not found, unavailable).
+It never leaves the task and never retries a prompt-level rejection. The
 substitution is explicit in the response (`requested_model_id`, `model_id`,
 `fallback_reason`) and in `request_logs`.
 
@@ -223,7 +267,7 @@ as a `Run`.
 
 ### Adapter parameter declarations
 
-`ProviderAdapter.SUPPORTED_PARAMS` maps modality → the `request.params` keys the
+`ProviderAdapter.SUPPORTED_PARAMS` maps task → the `request.params` keys the
 adapter reads. The adapter builds its payload from that same tuple, and anything
 the caller sent outside it comes back as `ignored_params` on the run: silently
 dropping `tools` or `seed` lets a caller pay for a request that ignored half of

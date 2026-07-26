@@ -23,6 +23,7 @@ from typing import Any
 import aiosqlite
 
 from router_mcp.domain.modality import Modality
+from router_mcp.domain.task import Task
 from router_mcp.registry.models import RegistryModel
 
 
@@ -55,7 +56,8 @@ class SubscriptionRecord:
 @dataclass(slots=True)
 class RequestLogRecord:
     external_user_id: str
-    modality: str
+    modality: str  # the billing group; what the money was counted in
+    task: str | None = None  # what was asked for (ADR-0006); null on older rows
     service_provider_id: str | None = None
     model_provider: str | None = None
     model_id: str | None = None
@@ -78,6 +80,9 @@ class RequestLogRecord:
     cache_write_tokens: int | None = None
     reasoning_tokens: int | None = None
     audio_seconds: float | None = None
+    # Seconds of provider compute, the billable figure the provider itself
+    # reported. Not our wall clock, and not the length of what came back.
+    compute_seconds: float | None = None
     images: int | None = None
     characters: int | None = None
     usage_raw: dict[str, Any] = field(default_factory=dict)
@@ -114,12 +119,40 @@ class UsageRow:
     total_cost_usd: float
 
 
+def _col(row: aiosqlite.Row, name: str, default: Any = None) -> Any:
+    """A column that may be absent — a projected SELECT, or a row read before
+    `_add_missing_columns` had run. `aiosqlite.Row` raises on a missing key."""
+    try:
+        return row[name]
+    except (IndexError, KeyError):
+        return default
+
+
+def _token_clause(column: str) -> str:
+    """Match one whole token of a comma-joined column.
+
+    Four alternatives instead of `LIKE '%x%'` because a substring match would let
+    `text-to-text` answer a query for `image-to-text`.
+    """
+    return (
+        f"({column} = ? OR {column} LIKE ? OR {column} LIKE ? OR {column} LIKE ?)"
+    )
+
+
+def _token_params(token: str) -> list[str]:
+    return [token, f"{token},%", f"%,{token}", f"%,{token},%"]
+
+
 def _model_to_row(m: RegistryModel) -> dict[str, Any]:
     return {
         "service_provider_id": m.service_provider_id,
         "model_provider": m.model_provider,
         "model_id": m.model_id,
         "display_name": m.display_name,
+        # Two columns, two questions: `tasks` is what the model can be asked to
+        # do and is what routing filters on; `modality` is the group it bills in
+        # and is what the spend reports group by (ADR-0006).
+        "tasks": ",".join(task.value for task in m.tasks),
         "modality": ",".join(mod.value for mod in m.modalities),
         "capabilities": ",".join(m.capabilities),
         "tier": m.tier,
@@ -130,6 +163,7 @@ def _model_to_row(m: RegistryModel) -> dict[str, Any]:
         "character_price": m.character_price,
         "cache_read_price": m.cache_read_price,
         "cache_write_price": m.cache_write_price,
+        "compute_price_per_second": m.compute_price_per_second,
         "context_length": m.context_length,
         "source": m.source,
         "is_active": 1 if m.is_active else 0,
@@ -150,6 +184,14 @@ def _row_to_model(row: aiosqlite.Row) -> RegistryModel:
         for part in str(row["modality"]).split(",")
         if part.strip()
     )
+    # A row written before the column existed reads as empty here, and
+    # `RegistryModel.__post_init__` then derives the tasks from the groups. Which
+    # is why the migration's backfill and this fallback say the same thing.
+    tasks = tuple(
+        Task.from_str(part)
+        for part in str(_col(row, "tasks") or "").split(",")
+        if part.strip()
+    )
     caps = tuple(part for part in str(row["capabilities"]).split(",") if part.strip())
     return RegistryModel(
         service_provider_id=row["service_provider_id"],
@@ -157,6 +199,7 @@ def _row_to_model(row: aiosqlite.Row) -> RegistryModel:
         model_id=row["model_id"],
         display_name=row["display_name"],
         modalities=modalities,
+        tasks=tasks,
         capabilities=caps,
         tier=row["tier"],
         prompt_price=row["prompt_price"],
@@ -166,6 +209,7 @@ def _row_to_model(row: aiosqlite.Row) -> RegistryModel:
         character_price=row["character_price"],
         cache_read_price=row["cache_read_price"],
         cache_write_price=row["cache_write_price"],
+        compute_price_per_second=_col(row, "compute_price_per_second") or 0.0,
         context_length=row["context_length"],
         source=row["source"],
         is_active=bool(row["is_active"]),
@@ -241,6 +285,7 @@ class Database:
                     model_id TEXT NOT NULL,
                     display_name TEXT NOT NULL DEFAULT '',
                     modality TEXT NOT NULL,
+                    tasks TEXT NOT NULL DEFAULT '',
                     capabilities TEXT NOT NULL DEFAULT '',
                     tier TEXT NOT NULL DEFAULT 'cheap',
                     prompt_price REAL NOT NULL DEFAULT 0,
@@ -250,6 +295,7 @@ class Database:
                     character_price REAL NOT NULL DEFAULT 0,
                     cache_read_price REAL NOT NULL DEFAULT 0,
                     cache_write_price REAL NOT NULL DEFAULT 0,
+                    compute_price_per_second REAL NOT NULL DEFAULT 0,
                     context_length INTEGER NOT NULL DEFAULT 0,
                     source TEXT NOT NULL DEFAULT 'manual',
                     is_active BOOLEAN NOT NULL DEFAULT 1,
@@ -278,6 +324,7 @@ class Database:
                     model_provider TEXT,
                     model_id TEXT,
                     modality TEXT NOT NULL,
+                    task TEXT,
                     status TEXT NOT NULL DEFAULT 'ok',
                     error_message TEXT,
                     request_text TEXT,
@@ -292,6 +339,7 @@ class Database:
                     cache_write_tokens INTEGER,
                     reasoning_tokens INTEGER,
                     audio_seconds REAL,
+                    compute_seconds REAL,
                     images INTEGER,
                     characters INTEGER,
                     usage_raw TEXT,
@@ -337,12 +385,17 @@ class Database:
         "CREATE INDEX IF NOT EXISTS idx_request_logs_id ON request_logs(id DESC)",
         "CREATE INDEX IF NOT EXISTS idx_request_logs_status ON request_logs(status, id DESC)",
         "CREATE INDEX IF NOT EXISTS idx_request_logs_modality ON request_logs(modality, id DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_request_logs_task ON request_logs(task, id DESC)",
         "CREATE INDEX IF NOT EXISTS idx_request_logs_channel ON request_logs(channel, id DESC)",
         "CREATE INDEX IF NOT EXISTS idx_request_logs_model ON request_logs(model_id, id DESC)",
         # Looked up on every run that carries an idempotency key, i.e. on the
         # hot path of the multi-model mode.
         "CREATE INDEX IF NOT EXISTS idx_request_logs_client_request "
         "ON request_logs(client_request_id)",
+        # Not on request_logs, but it belongs in this batch rather than in the
+        # CREATE TABLE script: on a deployed database the column it covers only
+        # appears during `_add_missing_columns`, which runs after that script.
+        "CREATE INDEX IF NOT EXISTS idx_registry_models_tasks ON registry_models(tasks)",
     )
 
     async def _create_log_indexes(self) -> None:
@@ -371,6 +424,11 @@ class Database:
             "character_price": "REAL NOT NULL DEFAULT 0",
             "cache_read_price": "REAL NOT NULL DEFAULT 0",
             "cache_write_price": "REAL NOT NULL DEFAULT 0",
+            # ADR-0006: what the model can be asked to do, as opposed to the
+            # group it bills in. Backfilled from `modality` below.
+            "tasks": "TEXT NOT NULL DEFAULT ''",
+            # Seconds of provider compute, which is not seconds of audio.
+            "compute_price_per_second": "REAL NOT NULL DEFAULT 0",
         },
         "request_logs": {
             "finish_reason": "TEXT",
@@ -399,7 +457,23 @@ class Database:
             # The request side of the inspector: rows written before this column
             # existed keep showing `request_text` alone.
             "request_json": "TEXT",
+            # ADR-0006. `modality` is deliberately left exactly as written: it is
+            # the only record of what was billed, and the accounting code reads
+            # it. `task` is the finer fact, backfilled below.
+            "task": "TEXT",
+            "compute_seconds": "REAL",
         },
+    }
+
+    # `modality` -> the task that value could only have meant. Four are exact;
+    # `image` maps to generation because the tool that wrote those rows had no way
+    # to send an input image, so no historical row can have meant editing.
+    _TASK_BACKFILL: dict[str, str] = {
+        "chat": "text-to-text",
+        "image": "text-to-image",
+        "stt": "speech-to-text",
+        "tts": "text-to-speech",
+        "cli": "cli",
     }
 
     async def _add_missing_columns(self) -> None:
@@ -418,6 +492,24 @@ class Database:
                                 "UPDATE registry_models SET price_source_kind = 'manual' "
                                 "WHERE source = 'manual'"
                             )
+                        elif table == "registry_models" and name == "tasks":
+                            # A registry row can carry several groups (a vision
+                            # chat model is tagged chat and image today), so the
+                            # comma-joined list is rewritten term by term.
+                            for group, task in self._TASK_BACKFILL.items():
+                                await conn.execute(
+                                    "UPDATE registry_models SET tasks = TRIM("
+                                    "  CASE WHEN tasks = '' THEN ? ELSE tasks || ',' || ? END"
+                                    ") WHERE (',' || modality || ',') LIKE ?",
+                                    (task, task, f"%,{group},%"),
+                                )
+                        elif table == "request_logs" and name == "task":
+                            # One value per row here, so a plain map is enough.
+                            for group, task in self._TASK_BACKFILL.items():
+                                await conn.execute(
+                                    "UPDATE request_logs SET task = ? WHERE modality = ?",
+                                    (task, group),
+                                )
             await conn.commit()
 
     # --- helpers --------------------------------------------------------
@@ -585,6 +677,7 @@ class Database:
         self,
         *,
         modality: str | None = None,
+        task: str | None = None,
         tier: str | None = None,
         service_provider_id: str | None = None,
         source: str | None = None,
@@ -594,12 +687,15 @@ class Database:
         params: list[Any] = []
         if active_only:
             clauses.append("is_active = 1")
+        if task:
+            # Routing filters on this one. Token-exact even for hyphenated values,
+            # so `text-to-text` does not match `image-to-text`.
+            clauses.append(_token_clause("tasks"))
+            params.extend(_token_params(task))
         if modality:
-            # modality column is a comma-joined list; match a whole token.
-            clauses.append(
-                "(modality = ? OR modality LIKE ? OR modality LIKE ? OR modality LIKE ?)"
-            )
-            params.extend([modality, f"{modality},%", f"%,{modality}", f"%,{modality},%"])
+            # The billing group. Same comma-joined shape as `tasks`.
+            clauses.append(_token_clause("modality"))
+            params.extend(_token_params(modality))
         if tier:
             clauses.append("tier = ?")
             params.append(tier)
@@ -634,9 +730,12 @@ class Database:
         {
             "display_name", "tier", "prompt_price", "completion_price",
             "image_price", "audio_price_per_second", "character_price",
-            "cache_read_price", "cache_write_price", "context_length",
-            "pricing_mode", "subscription_id", "price_source",
+            "cache_read_price", "cache_write_price", "compute_price_per_second",
+            "context_length", "pricing_mode", "subscription_id", "price_source",
             "price_source_kind", "price_checked_at",
+            # Editable because a model's task set is sometimes only knowable by
+            # hand: Replicate publishes an input schema, not a task name.
+            "tasks",
         }
     )
 
@@ -827,11 +926,11 @@ class Database:
     # those to draw a table of numbers is the difference between a 6 KB and a
     # 300 KB response.
     LOG_LIST_COLUMNS = (
-        "id", "created_at", "external_user_id", "modality", "service_provider_id",
+        "id", "created_at", "external_user_id", "modality", "task", "service_provider_id",
         "model_provider", "model_id", "requested_model_id", "fallback_reason",
         "status", "error_message", "channel", "tool", "client_id", "batch_id",
         "prompt_tokens", "completion_tokens", "total_tokens", "cache_read_tokens",
-        "reasoning_tokens", "audio_seconds", "images", "characters",
+        "reasoning_tokens", "audio_seconds", "compute_seconds", "images", "characters",
         "cost_usd", "cost_source", "pricing_mode",
         "latency_ms", "attempts", "finish_reason", "request_text",
     )
@@ -844,6 +943,7 @@ class Database:
         external_user_id: str | None,
         status: str | None,
         modality: str | None,
+        task: str | None,
         model_id: str | None,
         channel: str | None,
         batch_id: str | None,
@@ -864,6 +964,9 @@ class Database:
         if modality:
             clauses.append("modality = ?")
             params.append(modality)
+        if task:
+            clauses.append("task = ?")
+            params.append(task)
         if model_id:
             clauses.append("model_id = ?")
             params.append(model_id)
@@ -895,6 +998,7 @@ class Database:
         external_user_id: str | None = None,
         status: str | None = None,
         modality: str | None = None,
+        task: str | None = None,
         model_id: str | None = None,
         channel: str | None = None,
         batch_id: str | None = None,
@@ -915,6 +1019,7 @@ class Database:
             external_user_id=external_user_id,
             status=status,
             modality=modality,
+            task=task,
             model_id=model_id,
             channel=channel,
             batch_id=batch_id,
@@ -942,6 +1047,7 @@ class Database:
         external_user_id: str | None = None,
         status: str | None = None,
         modality: str | None = None,
+        task: str | None = None,
         model_id: str | None = None,
         channel: str | None = None,
         batch_id: str | None = None,
@@ -955,6 +1061,7 @@ class Database:
             external_user_id=external_user_id,
             status=status,
             modality=modality,
+            task=task,
             model_id=model_id,
             channel=channel,
             batch_id=batch_id,

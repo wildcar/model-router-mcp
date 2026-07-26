@@ -80,6 +80,17 @@ class Settings(BaseSettings):
     elevenlabs_tts_voice_name: str = Field(default="Nadia", alias="ELEVENLABS_TTS_VOICE_NAME")
     elevenlabs_tts_voice_id: str | None = Field(default=None, alias="ELEVENLABS_TTS_VOICE_ID")
 
+    # --- Replicate (predictions; mostly billed per second of compute) ----
+    replicate_api_token: str | None = Field(default=None, alias="REPLICATE_API_TOKEN")
+    replicate_base_url: str = Field(
+        default="https://api.replicate.com/v1", alias="REPLICATE_BASE_URL"
+    )
+    # Which models the registry carries, comma separated `owner/name` or
+    # `owner/name:task`. Replicate publishes thousands; a registry is a curated
+    # list, not a mirror. Empty means the adapter reports no catalog at all —
+    # never an empty one, which the sync would read as "deprecate everything".
+    replicate_models: str = Field(default="", alias="REPLICATE_MODELS")
+
     # --- Codex (OAuth image generation) ---------------------------------
     codex_auth_path: str | None = Field(default=None, alias="CODEX_AUTH_PATH")
     codex_base_url: str = Field(
