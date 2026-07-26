@@ -19,7 +19,7 @@ from router_mcp.adapters.base import ProviderAdapter
 from router_mcp.domain import progress
 from router_mcp.domain.errors import ProviderError
 from router_mcp.domain.messages import RouterRequest, RouterResponse, Usage
-from router_mcp.domain.modality import Modality
+from router_mcp.domain.task import Task
 from router_mcp.registry.models import RegistryModel
 
 logger = logging.getLogger(__name__)
@@ -28,8 +28,8 @@ logger = logging.getLogger(__name__)
 class ClaudeCliAdapter(ProviderAdapter):
     name = "claude-cli"
     env_var = "CLAUDE_COMMAND"
-    supported_modalities = {Modality.CLI}
-    SUPPORTED_PARAMS = {Modality.CLI: ("cwd", "timeout_sec", "model")}
+    supported_tasks = {Task.CLI}
+    SUPPORTED_PARAMS = {Task.CLI: ("cwd", "timeout_sec", "model")}
 
     def __init__(
         self,
@@ -85,7 +85,7 @@ class ClaudeCliAdapter(ProviderAdapter):
         usage = self._usage(data.get("usage"))
         cost = data.get("total_cost_usd")
         return RouterResponse(
-            modality=Modality.CLI,
+            task=Task.CLI,
             provider=self.name,
             model_id=str(requested_model or model.model_id),
             usage=usage,

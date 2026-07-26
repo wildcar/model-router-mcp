@@ -19,6 +19,7 @@ from router_mcp.domain.messages import (
     Usage,
 )
 from router_mcp.domain.modality import Modality
+from router_mcp.domain.task import Task
 from router_mcp.registry.models import RegistryModel
 from router_mcp.registry.service import RegistryService
 from router_mcp.routing.router import ModelRouter
@@ -29,7 +30,7 @@ class ScriptedAdapter(ProviderAdapter):
     """Answers normally unless a model id is listed in `broken`."""
 
     name = "vendor"
-    supported_modalities = {Modality.CHAT}
+    supported_tasks = {Task.TEXT_TO_TEXT}
 
     def __init__(self, broken: dict[str, Exception] | None = None) -> None:
         self.broken = broken or {}
@@ -43,7 +44,7 @@ class ScriptedAdapter(ProviderAdapter):
         if model.model_id in self.broken:
             raise self.broken[model.model_id]
         return RouterResponse(
-            modality=Modality.CHAT,
+            task=Task.TEXT_TO_TEXT,
             provider=self.name,
             model_id=model.model_id,
             usage=Usage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
@@ -94,7 +95,7 @@ async def test_retired_model_without_policy_still_fails(tmp_path):
     db, router = await _core(tmp_path, ScriptedAdapter(), _ladder() + [_model("old", 2e-7, active=False)])
     try:
         req = RouterRequest(
-            modality=Modality.CHAT, external_user_id="u", model_id="old", text="hi"
+            task=Task.TEXT_TO_TEXT, external_user_id="u", model_id="old", text="hi"
         )
         with pytest.raises(RouterError, match="retired"):
             await router.dispatch(req)
@@ -108,7 +109,7 @@ async def test_same_policy_picks_the_nearest_price(tmp_path):
     db, router = await _core(tmp_path, adapter, _ladder() + [_model("old", 3.5e-7, active=False)])
     try:
         req = RouterRequest(
-            modality=Modality.CHAT,
+            task=Task.TEXT_TO_TEXT,
             external_user_id="u",
             model_id="old",
             text="hi",
@@ -136,7 +137,7 @@ async def test_cheaper_and_pricier_step_one_rung(tmp_path):
         )
         try:
             req = RouterRequest(
-                modality=Modality.CHAT,
+                task=Task.TEXT_TO_TEXT,
                 external_user_id="u",
                 model_id="old",
                 text="hi",
@@ -156,7 +157,7 @@ async def test_runtime_model_not_found_falls_back(tmp_path):
     db, router = await _core(tmp_path, adapter, _ladder())
     try:
         req = RouterRequest(
-            modality=Modality.CHAT,
+            task=Task.TEXT_TO_TEXT,
             external_user_id="u",
             model_id="pro",
             text="hi",
@@ -189,7 +190,7 @@ async def test_prompt_level_errors_are_not_retried_elsewhere(tmp_path):
     db, router = await _core(tmp_path, adapter, _ladder())
     try:
         req = RouterRequest(
-            modality=Modality.CHAT,
+            task=Task.TEXT_TO_TEXT,
             external_user_id="u",
             model_id="pro",
             text="hi",
@@ -210,7 +211,7 @@ async def test_max_steps_bounds_the_walk(tmp_path):
     db, router = await _core(tmp_path, adapter, _ladder())
     try:
         req = RouterRequest(
-            modality=Modality.CHAT,
+            task=Task.TEXT_TO_TEXT,
             external_user_id="u",
             model_id="pro",
             text="hi",
@@ -229,7 +230,7 @@ async def test_unknown_model_id_falls_back_to_cheapest(tmp_path):
     db, router = await _core(tmp_path, adapter, _ladder())
     try:
         req = RouterRequest(
-            modality=Modality.CHAT,
+            task=Task.TEXT_TO_TEXT,
             external_user_id="u",
             model_id="never-existed",
             text="hi",
@@ -261,14 +262,14 @@ async def test_unpriced_models_are_not_treated_as_cheapest(tmp_path):
     try:
         # Automatic selection: the cheapest *known* price wins.
         picked = await router.dispatch(
-            RouterRequest(modality=Modality.CHAT, external_user_id="u", text="hi")
+            RouterRequest(task=Task.TEXT_TO_TEXT, external_user_id="u", text="hi")
         )
         assert picked.response.model_id == "flash"
 
         # Fallback ladder: never steps onto the unpriced row.
         result = await router.dispatch(
             RouterRequest(
-                modality=Modality.CHAT,
+                task=Task.TEXT_TO_TEXT,
                 external_user_id="u",
                 model_id="flash",
                 text="hi",

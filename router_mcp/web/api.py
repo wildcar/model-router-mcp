@@ -24,6 +24,12 @@ from pydantic import BaseModel
 from router_mcp.domain.errors import BadRequest, Conflict, NotFound
 from router_mcp.domain.messages import Attachment, FallbackPolicy, RouterRequest
 from router_mcp.domain.modality import Modality
+from router_mcp.domain.task import (
+    Task,
+    media_of,
+    resolve_task,
+    validate_task_inputs,
+)
 from router_mcp.mcp_server.serialize import model_to_dict
 from router_mcp.registry.models import RegistryModel
 from router_mcp.runtime import get_core
@@ -120,6 +126,9 @@ class ManualModelBody(BaseModel):
     model_id: str
     display_name: str = ""
     model_provider: str | None = None
+    # What the model can be asked to do. `modalities` is the older field and is
+    # used only when `tasks` is absent; the groups are derived either way.
+    tasks: list[str] = []
     modalities: list[str] = ["chat"]
     capabilities: list[str] = []
     tier: str | None = None
@@ -155,6 +164,9 @@ async def api_capabilities() -> dict[str, Any]:
 
 
 class PlanBody(BaseModel):
+    # `task` is the field; `modality` is what callers written before ADR-0006
+    # send, and it still resolves (`chat` means `text-to-text`).
+    task: str | None = None
     modality: str = "chat"
     external_user_id: str = "web-tester"
     text: str | None = None
@@ -175,11 +187,11 @@ async def api_plan(body: PlanBody) -> dict[str, Any]:
     the console with nothing to render.
     """
     try:
-        modality = Modality.from_str(body.modality)
+        task = resolve_task(body.task, fallback=body.modality)
     except ValueError as exc:
         raise BadRequest(str(exc)) from exc
     request = RouterRequest(
-        modality=modality,
+        task=task,
         external_user_id=body.external_user_id,
         model_id=body.model_id,
         tier=body.tier,
@@ -228,10 +240,15 @@ async def api_mcp_probe() -> dict[str, Any]:
 
 @api_router.get("/models")
 async def api_models(
-    modality: str | None = None, tier: str | None = None, provider: str | None = None
+    task: str | None = None,
+    modality: str | None = None,
+    tier: str | None = None,
+    provider: str | None = None,
 ) -> dict[str, Any]:
     core = get_core()
-    models = await core.registry.get_models(modality=modality, tier=tier, provider=provider)
+    models = await core.registry.get_models(
+        task=task, modality=modality, tier=tier, provider=provider
+    )
     items = [model_to_dict(m) for m in models]
     return page(items, total=len(items))
 
@@ -241,7 +258,7 @@ async def api_chat(body: ChatBody, http_request: Request) -> dict[str, Any]:
     channel, client_id = _channel(http_request)
     return await _run(
         RouterRequest(
-            modality=Modality.CHAT,
+            task=Task.TEXT_TO_TEXT,
             external_user_id=body.external_user_id,
             model_id=body.model_id,
             tier=body.tier,
@@ -261,7 +278,7 @@ async def api_image(body: ImageBody, http_request: Request) -> dict[str, Any]:
     channel, client_id = _channel(http_request)
     return await _run(
         RouterRequest(
-            modality=Modality.IMAGE,
+            task=Task.TEXT_TO_IMAGE,
             external_user_id=body.external_user_id,
             model_id=body.model_id,
             provider_hint=body.provider,
@@ -286,7 +303,7 @@ async def api_transcribe(
     channel, client_id = _channel(http_request)
     return await _run(
         RouterRequest(
-            modality=Modality.STT,
+            task=Task.SPEECH_TO_TEXT,
             external_user_id=external_user_id,
             model_id=model_id,
             provider_hint=provider,
@@ -307,7 +324,7 @@ async def api_tts(body: TtsBody, http_request: Request) -> dict[str, Any]:
     channel, client_id = _channel(http_request)
     return await _run(
         RouterRequest(
-            modality=Modality.TTS,
+            task=Task.TEXT_TO_SPEECH,
             external_user_id=body.external_user_id,
             model_id=body.model_id,
             provider_hint=body.provider,
@@ -333,7 +350,7 @@ async def api_cli(body: CliBody, http_request: Request) -> dict[str, Any]:
     channel, client_id = _channel(http_request)
     return await _run(
         RouterRequest(
-            modality=Modality.CLI,
+            task=Task.CLI,
             external_user_id=body.external_user_id,
             provider_hint=f"{engine}-cli",
             text=body.prompt,
@@ -345,15 +362,23 @@ async def api_cli(body: CliBody, http_request: Request) -> dict[str, Any]:
 
 
 # --- runs in flight -----------------------------------------------------
+class Attached(BaseModel):
+    """One uploaded file, by reference. `kind` is `image` | `audio` | `file`."""
+
+    ref: str
+    kind: str = "file"
+
+
 class RunBody(BaseModel):
-    """One run of any modality, submitted without waiting for it.
+    """One run of any task, submitted without waiting for it.
 
     The fields are the union of the five synchronous bodies rather than a
-    per-modality endpoint set: the console builds this object from the
-    capability matrix, and a second dispatch tree here would be a second place
-    to forget a parameter.
+    per-task endpoint set: the console builds this object from the capability
+    matrix, and a second dispatch tree here would be a second place to forget a
+    parameter.
     """
 
+    task: str | None = None
     modality: str = "chat"
     external_user_id: str = "web-tester"
     text: str | None = None
@@ -368,8 +393,11 @@ class RunBody(BaseModel):
     timeout_sec: int | None = None
     params: dict[str, Any] | None = None
     fallback: dict[str, Any] | str | None = None
-    # An uploaded file, by reference. Attachments do not travel through JSON:
-    # POST /api/v1/blobs first, send the ref here.
+    # Uploaded files, by reference. Attachments do not travel through JSON:
+    # POST /api/v1/blobs first, send the refs here. Editing an image with a mask
+    # needs two, and asking about two photographs needs two, so the list is the
+    # field; `attachment_ref` stays for callers that predate it and is folded in.
+    attachments: list[Attached] | None = None
     attachment_ref: str | None = None
     attachment_kind: str = "audio"
     # Idempotency and grouping. The same key twice returns the first run instead
@@ -392,16 +420,16 @@ def _attachment_from_ref(ref: str, kind: str) -> Attachment:
 
 def _router_request(body: RunBody, http_request: Request | None) -> RouterRequest:
     try:
-        modality = Modality.from_str(body.modality)
+        task = resolve_task(body.task, fallback=body.modality)
     except ValueError as exc:
         raise BadRequest(str(exc)) from exc
     channel, client_id = _channel(http_request)
 
     params: dict[str, Any] = dict(body.params or {})
     provider = body.provider
-    if modality is Modality.TTS and body.voice:
+    if task is Task.TEXT_TO_SPEECH and body.voice:
         params["voice"] = body.voice
-    if modality is Modality.CLI:
+    if task is Task.CLI:
         engine = (body.engine or "codex").strip().lower()
         if engine not in ("codex", "claude"):
             raise BadRequest("engine must be 'codex' or 'claude'")
@@ -411,21 +439,30 @@ def _router_request(body: RunBody, http_request: Request | None) -> RouterReques
         if body.timeout_sec:
             params["timeout_sec"] = body.timeout_sec
 
-    attachments = (
-        [_attachment_from_ref(body.attachment_ref, body.attachment_kind)]
-        if body.attachment_ref
-        else []
-    )
-    if modality is Modality.STT and not attachments:
-        raise BadRequest("Для распознавания нужен файл: сначала POST /api/v1/blobs")
+    refs: list[tuple[str, str]] = [(a.ref, a.kind) for a in body.attachments or []]
+    if body.attachment_ref and body.attachment_ref not in {r for r, _ in refs}:
+        refs.append((body.attachment_ref, body.attachment_kind))
+    attachments = [_attachment_from_ref(ref, kind) for ref, kind in refs]
+
+    text = body.text if body.text is not None else body.prompt
+    # One check for every task, from the task's own signature. The old hard-coded
+    # "распознавание needs a file" left image-to-image with no message at all.
+    try:
+        validate_task_inputs(
+            task, has_text=bool(text or body.messages), media=media_of(attachments)
+        )
+    except ValueError as exc:
+        raise BadRequest(
+            f"{exc}. Файлы передаются ссылкой: сначала POST /api/v1/blobs"
+        ) from exc
 
     return RouterRequest(
-        modality=modality,
+        task=task,
         external_user_id=body.external_user_id,
         model_id=body.model_id,
         tier=body.tier,
         provider_hint=provider,
-        text=body.text if body.text is not None else body.prompt,
+        text=text,
         messages=body.messages,
         attachments=attachments,
         params=params,
@@ -450,7 +487,7 @@ async def api_submit_run(body: RunBody, http_request: Request) -> dict[str, Any]
     if registry is None:  # pragma: no cover - always wired in build_core
         raise Conflict("Реестр прогонов недоступен")
     run = await registry.submit(
-        request, label=body.model_id or request.provider_hint or body.modality
+        request, label=body.model_id or request.provider_hint or request.task.value
     )
     return run.as_dict()
 
@@ -506,6 +543,7 @@ async def api_logs(
     user: str | None = None,
     status: str | None = None,
     modality: str | None = None,
+    task: str | None = None,
     model_id: str | None = None,
     channel: str | None = None,
     batch_id: str | None = None,
@@ -528,6 +566,7 @@ async def api_logs(
         external_user_id=user,
         status=status,
         modality=modality,
+        task=task,
         model_id=model_id,
         channel=channel,
         batch_id=batch_id,
@@ -710,6 +749,7 @@ def _facets(models: list[RegistryModel]) -> dict[str, Any]:
         return dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
 
     return {
+        "task": _tally(lambda m: [t.value for t in m.tasks]),
         "modality": _tally(lambda m: [mod.value for mod in m.modalities]),
         "provider": _tally(lambda m: [m.service_provider_id]),
         "source": _tally(lambda m: [m.source]),
@@ -723,6 +763,7 @@ def _facets(models: list[RegistryModel]) -> dict[str, Any]:
 async def api_registry_models(
     source: str | None = None,
     modality: str | None = None,
+    task: str | None = None,
     provider: str | None = None,
     tier: str | None = None,
     state: str | None = None,
@@ -733,6 +774,7 @@ async def api_registry_models(
     models = await core.db.list_registry_models(
         source=source,
         modality=modality,
+        task=task,
         service_provider_id=provider,
         tier=tier,
         active_only=False,
@@ -801,7 +843,9 @@ async def api_bulk_models(body: BulkModelsBody) -> dict[str, Any]:
 
 
 @api_router.get("/registry/tree")
-async def api_registry_tree(modality: str | None = None) -> dict[str, Any]:
+async def api_registry_tree(
+    task: str | None = None, modality: str | None = None
+) -> dict[str, Any]:
     """The cascade the picker needs: provider → vendor → model → variant.
 
     Built here because the identifier split is domain knowledge. The client used
@@ -809,7 +853,9 @@ async def api_registry_tree(modality: str | None = None) -> dict[str, Any]:
     already stores — `model_provider` is its own column.
     """
     core = get_core()
-    models = await core.db.list_registry_models(modality=modality, active_only=True)
+    models = await core.db.list_registry_models(
+        task=task, modality=modality, active_only=True
+    )
     enabled = await core.db.get_enabled_provider_ids()
 
     providers: dict[str, dict[str, Any]] = {}
@@ -943,7 +989,7 @@ async def api_patch_model(
             # the origin of the *price*, not the origin of the *row*. Keyed on
             # the row, a price typed into a catalog row was wiped by the next
             # sync; keyed on the price, the row stays a catalog row and keeps
-            # receiving name, context and modality updates.
+            # receiving name, context and task updates.
             fields.setdefault("price_source_kind", body.price_source_kind or "manual")
             fields["price_checked_at"] = datetime.now(timezone.utc).isoformat(
                 timespec="seconds"
@@ -967,7 +1013,10 @@ async def api_patch_model(
 async def api_add_manual_model(body: ManualModelBody) -> dict[str, Any]:
     core = get_core()
     try:
-        modalities = tuple(Modality.from_str(m) for m in body.modalities)
+        tasks = tuple(Task.from_str(t) for t in body.tasks)
+        # Only fall back to the groups when no task was named: given both, the
+        # tasks win and the groups are derived from them.
+        modalities = () if tasks else tuple(Modality.from_str(m) for m in body.modalities)
     except ValueError as exc:
         raise BadRequest(str(exc)) from exc
     tier = body.tier or RegistryModel.compute_tier(body.prompt_price, body.completion_price)
@@ -977,6 +1026,7 @@ async def api_add_manual_model(body: ManualModelBody) -> dict[str, Any]:
         model_id=body.model_id,
         display_name=body.display_name or body.model_id,
         modalities=modalities,
+        tasks=tasks,
         capabilities=tuple(body.capabilities),
         tier=tier,
         prompt_price=body.prompt_price,

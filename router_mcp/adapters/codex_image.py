@@ -27,7 +27,7 @@ import httpx
 from router_mcp.adapters.base import ProviderAdapter
 from router_mcp.domain.errors import AccessDenied, NotConfigured, ProviderError, ProviderUnavailable
 from router_mcp.domain.messages import Attachment, RouterRequest, RouterResponse, Usage
-from router_mcp.domain.modality import Modality
+from router_mcp.domain.task import Task
 from router_mcp.registry.models import RegistryModel
 
 logger = logging.getLogger(__name__)
@@ -39,10 +39,16 @@ CODEX_TOKEN_REFRESH_URL = "https://auth.openai.com/oauth/token"
 class CodexImageAdapter(ProviderAdapter):
     name = "codex-oauth"
     env_var = "CODEX_AUTH_PATH"
-    supported_modalities = {Modality.IMAGE}
+    # Generation only, on purpose. The same backend answers text prompts and
+    # reads images, and that branch is a separate piece of work; declaring the
+    # capability before the code exists would lie to the router. Editing an
+    # existing image it cannot do at all, so `image-to-image` will never appear
+    # here and a request for it gets a clear refusal instead of quietly landing
+    # on gpt-image-2 (ADR-0006).
+    supported_tasks = {Task.TEXT_TO_IMAGE}
     # Size, quality and both model ids are fixed by configuration; the caller
     # only supplies the prompt.
-    SUPPORTED_PARAMS = {Modality.IMAGE: ()}
+    SUPPORTED_PARAMS = {Task.TEXT_TO_IMAGE: ()}
 
     def __init__(
         self,
@@ -84,7 +90,7 @@ class CodexImageAdapter(ProviderAdapter):
         raw_b64 = data_uri.split(",", 1)[1]
         image_bytes = base64.b64decode(raw_b64)
         return RouterResponse(
-            modality=Modality.IMAGE,
+            task=Task.TEXT_TO_IMAGE,
             provider=self.name,
             model_id=model.model_id or self._image_model,
             usage=Usage(images=1, raw={"size": self._size, "quality": self._quality}),

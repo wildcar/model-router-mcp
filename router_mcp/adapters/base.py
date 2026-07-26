@@ -29,6 +29,7 @@ from router_mcp.domain.errors import (
 )
 from router_mcp.domain.messages import RouterRequest, RouterResponse
 from router_mcp.domain.modality import Modality
+from router_mcp.domain.task import Task
 from router_mcp.registry.models import RegistryModel
 
 logger = logging.getLogger(__name__)
@@ -145,7 +146,7 @@ def truncated_error(
 
 
 def ignored_params(
-    adapter: "ProviderAdapter", modality: Modality, params: dict[str, Any] | None
+    adapter: "ProviderAdapter", task: Task, params: dict[str, Any] | None
 ) -> list[str]:
     """Params the caller sent that this adapter will not read.
 
@@ -156,7 +157,7 @@ def ignored_params(
     """
     if not params or adapter.SUPPORTED_PARAMS is None:
         return []
-    supported = adapter.SUPPORTED_PARAMS.get(modality)
+    supported = adapter.SUPPORTED_PARAMS.get(task)
     if supported is None:
         return []
     return sorted(key for key in params if key not in supported)
@@ -166,18 +167,34 @@ class ProviderAdapter(abc.ABC):
     """Common interface every provider adapter implements."""
 
     name: str  # service-provider id, e.g. "openrouter"
-    supported_modalities: set[Modality]
+    # What this provider can be asked to do (ADR-0006). This is the declaration
+    # routing checks; it is not derivable from the media the provider handles.
+    supported_tasks: set[Task]
     # Environment variable that configures this adapter, if any. Shown by name
     # (never by value) when a request fails with "provider not configured": the
     # operator's next action is to set it.
     env_var: str | None = None
 
-    # Which `request.params` keys this adapter actually reads, per modality.
+    # Which `request.params` keys this adapter actually reads, per task.
     # One tuple, two consumers: the adapter builds its payload from it and the
     # console renders exactly these fields — a hand-written copy in web/ drifts
     # from the code on the first new adapter. `None` means "not declared yet",
     # which suppresses the "ignored parameter" warning rather than guessing.
-    SUPPORTED_PARAMS: dict[Modality, tuple[str, ...]] | None = None
+    #
+    # Keyed by task rather than by group because the knobs genuinely differ:
+    # `size` and `quality` belong to generating an image, `strength` and `mask`
+    # to editing one, and both are billed the same way.
+    SUPPORTED_PARAMS: dict[Task, tuple[str, ...]] | None = None
+
+    @property
+    def supported_modalities(self) -> set[Modality]:
+        """The billing groups this provider can be charged in.
+
+        Derived, never declared: a second declaration would drift from the first
+        one, and the parameter matrix in `web/` exists precisely because that kind
+        of copy always does (see the addendum to ADR-0001).
+        """
+        return {task.billing_group for task in self.supported_tasks}
 
     @abc.abstractmethod
     def is_configured(self) -> bool:

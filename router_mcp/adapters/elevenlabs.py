@@ -17,7 +17,7 @@ import httpx
 from router_mcp.adapters.base import ProviderAdapter, RetryClientMixin
 from router_mcp.domain.errors import ProviderError
 from router_mcp.domain.messages import Attachment, RouterRequest, RouterResponse, Usage
-from router_mcp.domain.modality import Modality
+from router_mcp.domain.task import Task
 from router_mcp.registry.models import RegistryModel
 
 logger = logging.getLogger(__name__)
@@ -33,8 +33,8 @@ _CLEAN_RE = [
 class ElevenLabsAdapter(RetryClientMixin, ProviderAdapter):
     name = "elevenlabs"
     env_var = "ELEVENLABS_API_KEY"
-    supported_modalities = {Modality.TTS}
-    SUPPORTED_PARAMS = {Modality.TTS: ("voice", "language")}
+    supported_tasks = {Task.TEXT_TO_SPEECH}
+    SUPPORTED_PARAMS = {Task.TEXT_TO_SPEECH: ("voice", "language")}
 
     def __init__(
         self,
@@ -78,7 +78,7 @@ class ElevenLabsAdapter(RetryClientMixin, ProviderAdapter):
             raise ProviderError("ElevenLabs returned empty audio")
 
         return RouterResponse(
-            modality=Modality.TTS,
+            task=Task.TEXT_TO_SPEECH,
             provider=self.name,
             model_id=model_id,
             # Characters, not seconds: ElevenLabs bills the text it was given,

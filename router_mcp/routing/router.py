@@ -2,9 +2,9 @@
 
 Routing is deliberately simple in v1 but structured for extension:
   - explicit model_id wins;
-  - else filter the registry by modality (+ provider/tier hints), order by tier
+  - else filter the registry by task (+ provider/tier hints), order by tier
     preference then cheapest, pick the first whose adapter is configured+enabled;
-  - else fall back to a per-modality default model id from settings.
+  - else fall back to a per-billing-group default model id from settings.
 
 Adding a provider later requires no change here: register an adapter + a
 service_providers row + registry rows.
@@ -20,7 +20,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
-from router_mcp.accounting.cost import CostResult, compute_cost
+from router_mcp.accounting.cost import (
+    BILLING_UNITS,
+    PER_UNIT_GROUPS,
+    CostResult,
+    compute_cost,
+)
 from router_mcp.adapters.base import (
     ProviderAdapter,
     ignored_params,
@@ -150,7 +155,7 @@ class Candidate:
     model: RegistryModel
     verdict: str  # "eligible" | "filtered"
     why: str
-    price: float  # prompt + completion, USD per token
+    price: float  # the billing group's rate, USD per its unit
     rank: int | None = None  # position on the ladder, for eligible ones
 
 
@@ -232,11 +237,13 @@ class ModelRouter:
                 request.model_id, active_only=False
             )
             reference = model
-            if model is not None and not model.supports(request.modality):
-                # A modality mismatch is a caller mistake, not a dead model:
-                # substituting would silently answer a different question.
+            if model is not None and not model.supports(request.task):
+                # A task mismatch is a caller mistake, not a dead model:
+                # substituting would silently answer a different question. This is
+                # the check that refuses to edit an image with a model that can
+                # only draw one (ADR-0006).
                 raise RouterError(
-                    f"Model {model.model_id!r} does not support modality {request.modality.value}"
+                    f"Model {model.model_id!r} does not support task {request.task.value}"
                 )
             problem = self._problem_with(model, request.model_id, enabled)
             if problem is None:
@@ -250,7 +257,7 @@ class ModelRouter:
             model = await self._pick_by_hints(request, enabled, allow_sync=allow_sync)
             if model is None:
                 raise RouterError(
-                    f"No configured provider available for modality {request.modality.value}"
+                    f"No configured provider available for task {request.task.value}"
                 )
             reference = model
             attempts.append(Attempt(self._adapters[model.service_provider_id], model))
@@ -283,9 +290,9 @@ class ModelRouter:
     async def _pick_by_hints(
         self, request: RouterRequest, enabled: set[str], *, allow_sync: bool = True
     ) -> RegistryModel | None:
-        """Modality (+ tier/provider hints) selection, then the per-modality default."""
+        """Task (+ tier/provider hints) selection, then the per-group default."""
         candidates = await self._registry.get_models(
-            modality=request.modality.value,
+            task=request.task.value,
             tier=request.tier,
             provider=request.provider_hint,
             allow_sync=allow_sync,
@@ -376,20 +383,20 @@ class ModelRouter:
         """
         enabled = await self._db.get_enabled_provider_ids()
         pool = await self._registry.get_models(
-            modality=request.modality.value, allow_sync=allow_sync
+            task=request.task.value, allow_sync=allow_sync
         )
-        ref = (
-            reference.prompt_price + reference.completion_price
-            if reference is not None
-            else None
-        )
+        # The ladder is ordered by the rate of *this task's* billing group. A sum
+        # of the two token rates is zero for every image, audio and video row, so
+        # ordering by it meant «дешевле» ranked by model_id.
+        group = request.task.billing_group
+        ref = reference.ladder_price(group) if reference is not None else None
 
         considered: list[Candidate] = []
         eligible: list[Candidate] = []
         for model in pool:
             if model.model_id in exclude:
                 continue
-            price = model.prompt_price + model.completion_price
+            price = model.ladder_price(group)
             adapter = self._adapters.get(model.service_provider_id)
             if model.price_is_unknown:
                 # A price ladder cannot place a model whose price nobody knows,
@@ -503,7 +510,7 @@ class ModelRouter:
             requested = await self._db.get_registry_model_by_id(
                 request.model_id, active_only=False
             )
-            if requested is not None and not requested.supports(request.modality):
+            if requested is not None and not requested.supports(request.task):
                 problem = _Problem(
                     f"модель {request.model_id!r} не поддерживает модальность "
                     f"{request.modality.value}",
@@ -527,10 +534,11 @@ class ModelRouter:
         will_call = attempts[0].model if attempts else None
         pool_total = len(
             await self._registry.get_models(
-                modality=request.modality.value, allow_sync=False
+                task=request.task.value, allow_sync=False
             )
         )
         return {
+            "task": request.task.value,
             "modality": request.modality.value,
             "requested": _pair(requested) if requested else (
                 {"provider": request.provider_hint, "model_id": request.model_id}
@@ -587,24 +595,20 @@ class ModelRouter:
                 "source": "unpriced",
                 "assumption": "у модели нет цены в реестре",
             }
-        if request.modality in (Modality.IMAGE, Modality.STT, Modality.TTS, Modality.CLI):
-            per_unit = {
-                Modality.IMAGE: model.image_price,
-                Modality.STT: model.audio_price_per_second,
-                Modality.TTS: model.audio_price_per_second,
-                Modality.CLI: 0.0,
-            }[request.modality]
+        group = request.modality
+        if group in PER_UNIT_GROUPS:
+            spec = BILLING_UNITS[group]
+            per_unit = spec.rate(model)
             if not per_unit:
                 return {
                     "value": None,
                     "source": "unpriced",
-                    "assumption": "для этой модальности ставки в реестре нет",
+                    "assumption": "для этой группы тарификации ставки в реестре нет",
                 }
-            unit = "изображение" if request.modality is Modality.IMAGE else "секунду"
             return {
                 "value": per_unit,
                 "source": "computed" if model.price_is_verified else "estimated",
-                "assumption": f"за одну {unit}",
+                "assumption": spec.per_unit,
             }
         text = request.text or json.dumps(request.messages or [], ensure_ascii=False)
         # Four characters to a token is the usual rule of thumb; it is a rough
@@ -668,6 +672,7 @@ class ModelRouter:
             RequestLogRecord(
                 external_user_id=request.external_user_id,
                 modality=request.modality.value,
+                task=request.task.value,
                 service_provider_id=request.provider_hint,
                 model_id=request.model_id,
                 status="running",
@@ -704,6 +709,7 @@ class ModelRouter:
                 RequestLogRecord(
                     external_user_id=request.external_user_id,
                     modality=request.modality.value,
+                    task=request.task.value,
                     service_provider_id=request.provider_hint,
                     model_id=request.model_id,
                     status="cancelled",
@@ -856,6 +862,7 @@ class ModelRouter:
         rec = RequestLogRecord(
             external_user_id=request.external_user_id,
             modality=request.modality.value,
+            task=request.task.value,
             service_provider_id=model.service_provider_id,
             model_provider=model.model_provider,
             model_id=model.model_id,
@@ -872,6 +879,7 @@ class ModelRouter:
             cache_write_tokens=response.usage.cache_write_tokens,
             reasoning_tokens=response.usage.reasoning_tokens,
             audio_seconds=response.usage.audio_seconds,
+            compute_seconds=response.usage.compute_seconds,
             images=response.usage.images,
             characters=response.usage.characters,
             usage_raw=response.usage.raw,
@@ -911,7 +919,7 @@ class ModelRouter:
             provider_request_id=rec.provider_request_id,
             finish_reason=rec.finish_reason,
             steps=steps,
-            ignored_params=ignored_params(used_adapter, request.modality, request.params),
+            ignored_params=ignored_params(used_adapter, request.task, request.params),
             finished_at=finished_at,
             request_ref=request_ref,
             request_snapshot=request_json or {},
@@ -963,6 +971,7 @@ class ModelRouter:
 
         fallback = request.fallback
         return {
+            "task": request.task.value,
             "modality": request.modality.value,
             "external_user_id": request.external_user_id,
             # What the caller asked for, before routing had its say. The model
@@ -1036,6 +1045,7 @@ class ModelRouter:
         rec = RequestLogRecord(
             external_user_id=request.external_user_id,
             modality=request.modality.value,
+            task=request.task.value,
             service_provider_id=model.service_provider_id if model else request.provider_hint,
             model_provider=model.model_provider if model else None,
             model_id=model.model_id if model else request.model_id,

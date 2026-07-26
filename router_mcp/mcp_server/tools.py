@@ -18,7 +18,7 @@ from mcp.server.fastmcp import FastMCP
 
 from router_mcp.domain.errors import BadRequest, RouterError
 from router_mcp.domain.messages import Attachment, FallbackPolicy, RouterRequest
-from router_mcp.domain.modality import Modality
+from router_mcp.domain.task import Task
 from router_mcp.mcp_server.serialize import (
     attachments_b64,
     dispatch_summary,
@@ -58,13 +58,23 @@ async def dispatch_tool(request: RouterRequest):
 
 @mcp.tool()
 async def list_models(
+    task: str | None = None,
     modality: str | None = None,
     tier: str | None = None,
     provider: str | None = None,
 ) -> list[dict[str, Any]]:
-    """List registered models, optionally filtered by modality/tier/provider."""
+    """List registered models, optionally filtered by task/tier/provider.
+
+    `task` is what a model can be asked to do: `text-to-text`, `image-to-text`,
+    `text-to-image`, `image-to-image`, `speech-to-text`, `text-to-speech`,
+    `text-to-audio`, `text-to-video`, `image-to-video`, `cli`. `modality` is the
+    coarser billing group (`chat`/`image`/`stt`/`tts`/`audio`/`video`/`cli`) and
+    is kept for callers written before tasks existed.
+    """
     core = get_core()
-    models = await core.registry.get_models(modality=modality, tier=tier, provider=provider)
+    models = await core.registry.get_models(
+        task=task, modality=modality, tier=tier, provider=provider
+    )
     return [model_to_dict(m) for m in models]
 
 
@@ -91,7 +101,7 @@ async def chat(
     `requested_model_id` and `fallback_reason` alongside the model actually used.
     """
     request = RouterRequest(
-        modality=Modality.CHAT,
+        task=Task.TEXT_TO_TEXT,
         external_user_id=external_user_id,
         model_id=model_id,
         tier=tier,
@@ -124,7 +134,7 @@ async def generate_image(
     URLs, with usage and cost. `fallback` works as in `chat`."""
     core = get_core()
     request = RouterRequest(
-        modality=Modality.IMAGE,
+        task=Task.TEXT_TO_IMAGE,
         external_user_id=external_user_id,
         model_id=model_id,
         provider_hint=provider,
@@ -152,7 +162,7 @@ async def transcribe(
     """Transcribe base64-encoded audio to text (speech-to-text).
     `fallback` works as in `chat`."""
     request = RouterRequest(
-        modality=Modality.STT,
+        task=Task.SPEECH_TO_TEXT,
         external_user_id=external_user_id,
         model_id=model_id,
         provider_hint=provider,
@@ -184,7 +194,7 @@ async def synthesize_speech(
     if voice:
         merged["voice"] = voice
     request = RouterRequest(
-        modality=Modality.TTS,
+        task=Task.TEXT_TO_SPEECH,
         external_user_id=external_user_id,
         model_id=model_id,
         provider_hint=provider,
@@ -222,7 +232,7 @@ async def run_cli(
     if timeout_sec:
         params["timeout_sec"] = timeout_sec
     request = RouterRequest(
-        modality=Modality.CLI,
+        task=Task.CLI,
         external_user_id=external_user_id,
         provider_hint=f"{engine}-cli",
         text=prompt,

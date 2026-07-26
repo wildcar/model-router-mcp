@@ -21,7 +21,7 @@ from router_mcp.adapters.base import (
 )
 from router_mcp.domain.errors import ProviderError, ProviderUnavailable
 from router_mcp.domain.messages import RouterRequest, RouterResponse, Usage
-from router_mcp.domain.modality import Modality
+from router_mcp.domain.task import Task
 from router_mcp.registry.models import RegistryModel
 
 logger = logging.getLogger(__name__)
@@ -35,8 +35,8 @@ PRICING_PAGE = "https://api-docs.deepseek.com/quick_start/pricing"
 class DeepSeekAdapter(RetryClientMixin, ProviderAdapter):
     name = "deepseek"
     env_var = "DEEPSEEK_API_KEY"
-    supported_modalities = {Modality.CHAT}
-    SUPPORTED_PARAMS = {Modality.CHAT: ("temperature", "max_tokens", "top_p")}
+    supported_tasks = {Task.TEXT_TO_TEXT}
+    SUPPORTED_PARAMS = {Task.TEXT_TO_TEXT: ("temperature", "max_tokens", "top_p")}
 
     def __init__(
         self,
@@ -62,7 +62,7 @@ class DeepSeekAdapter(RetryClientMixin, ProviderAdapter):
     async def generate(self, request: RouterRequest, model: RegistryModel) -> RouterResponse:
         messages = self._build_messages(request)
         payload: dict[str, Any] = {"model": model.model_id, "messages": messages}
-        for key in self.SUPPORTED_PARAMS[Modality.CHAT]:
+        for key in self.SUPPORTED_PARAMS[Task.TEXT_TO_TEXT]:
             if key in request.params:
                 payload[key] = request.params[key]
 
@@ -74,7 +74,7 @@ class DeepSeekAdapter(RetryClientMixin, ProviderAdapter):
 
         text, usage = self._parse(data, max_tokens=payload.get("max_tokens"))
         return RouterResponse(
-            modality=Modality.CHAT,
+            task=Task.TEXT_TO_TEXT,
             provider=self.name,
             model_id=model.model_id,
             usage=usage,
@@ -105,7 +105,7 @@ class DeepSeekAdapter(RetryClientMixin, ProviderAdapter):
             model_provider=str(raw.get("owned_by") or "deepseek"),
             model_id=model_id,
             display_name=model_id,
-            modalities=(Modality.CHAT,),
+            tasks=(Task.TEXT_TO_TEXT,),
             source="catalog",
             is_active=True,
             price_source=PRICING_PAGE,

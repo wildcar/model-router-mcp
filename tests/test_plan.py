@@ -14,6 +14,7 @@ from router_mcp.adapters.base import ProviderAdapter
 from router_mcp.blobs.store import BlobStore
 from router_mcp.domain.messages import FallbackPolicy, RouterRequest
 from router_mcp.domain.modality import Modality
+from router_mcp.domain.task import Task
 from router_mcp.registry.models import RegistryModel
 from router_mcp.registry.service import RegistryService
 from router_mcp.routing.router import ModelRouter
@@ -23,8 +24,8 @@ from router_mcp.storage.database import Database
 class CountingAdapter(ProviderAdapter):
     """Configured, and loudly unhappy if anyone tries to use it."""
 
-    supported_modalities = {Modality.CHAT}
-    SUPPORTED_PARAMS = {Modality.CHAT: ("temperature",)}
+    supported_tasks = {Task.TEXT_TO_TEXT}
+    SUPPORTED_PARAMS = {Task.TEXT_TO_TEXT: ("temperature",)}
 
     def __init__(self, name: str) -> None:
         self.name = name
@@ -75,7 +76,7 @@ async def core(tmp_path):
 @pytest.mark.asyncio
 async def test_plan_never_leaves_the_host(core):
     router, adapters, _db = core
-    await router.explain(RouterRequest(Modality.CHAT, "u", text="hi"))
+    await router.explain(RouterRequest(Task.TEXT_TO_TEXT, "u", text="hi"))
     assert all(a.catalog_calls == 0 for a in adapters.values())
     assert all(a.generate_calls == 0 for a in adapters.values())
 
@@ -84,7 +85,7 @@ async def test_plan_never_leaves_the_host(core):
 async def test_plan_answers_when_nothing_can_run(core):
     router, _adapters, db = core
     await db.set_provider_enabled("alpha", False)
-    plan = await router.explain(RouterRequest(Modality.CHAT, "u", text="hi"))
+    plan = await router.explain(RouterRequest(Task.TEXT_TO_TEXT, "u", text="hi"))
     # No exception, no empty screen: the reason is in the answer.
     assert plan["will_call"] is None
     assert plan["blocked"]
@@ -98,7 +99,7 @@ async def test_plan_names_the_problem_with_the_requested_model(core):
     await db.deprecate_registry_model("alpha", "alpha/mid")
     plan = await router.explain(
         RouterRequest(
-            Modality.CHAT, "u", text="hi", model_id="alpha/mid",
+            Task.TEXT_TO_TEXT, "u", text="hi", model_id="alpha/mid",
             fallback=FallbackPolicy(policy="cheaper"),
         )
     )
@@ -111,7 +112,7 @@ async def test_ladder_explains_every_rejection(core):
     router, _adapters, _db = core
     plan = await router.explain(
         RouterRequest(
-            Modality.CHAT, "u", text="hi", model_id="alpha/mid",
+            Task.TEXT_TO_TEXT, "u", text="hi", model_id="alpha/mid",
             fallback=FallbackPolicy(policy="cheaper"),
         )
     )
@@ -128,7 +129,7 @@ async def test_ladder_explains_every_rejection(core):
 async def test_estimate_states_its_assumption(core):
     router, _adapters, _db = core
     plan = await router.explain(
-        RouterRequest(Modality.CHAT, "u", text="x" * 400, model_id="alpha/cheap")
+        RouterRequest(Task.TEXT_TO_TEXT, "u", text="x" * 400, model_id="alpha/cheap")
     )
     estimate = plan["estimate"]
     assert estimate["value"] > 0
@@ -144,7 +145,7 @@ async def test_estimate_refuses_to_invent_a_zero(core):
     zero is how a screen lies (§7.5)."""
     router, _adapters, _db = core
     plan = await router.explain(
-        RouterRequest(Modality.CHAT, "u", text="hi", model_id="alpha/priceless")
+        RouterRequest(Task.TEXT_TO_TEXT, "u", text="hi", model_id="alpha/priceless")
     )
     assert plan["estimate"]["value"] is None
     assert plan["estimate"]["source"] == "unpriced"

@@ -18,7 +18,7 @@ import httpx
 from router_mcp.adapters.base import ProviderAdapter, RetryClientMixin, truncated_error
 from router_mcp.domain.errors import ProviderError, ProviderUnavailable
 from router_mcp.domain.messages import RouterRequest, RouterResponse, Usage
-from router_mcp.domain.modality import Modality
+from router_mcp.domain.task import Task
 from router_mcp.registry.models import RegistryModel
 
 logger = logging.getLogger(__name__)
@@ -40,10 +40,13 @@ def _int(value: Any) -> int | None:
 class ClaudeApiAdapter(RetryClientMixin, ProviderAdapter):
     name = "anthropic-api"
     env_var = "ANTHROPIC_API_KEY"
-    supported_modalities = {Modality.CHAT}
+    # Anthropic's Messages API takes images in a user turn, so vision is real
+    # here. It never produces one, so no image task is declared.
+    supported_tasks = {Task.TEXT_TO_TEXT, Task.IMAGE_TO_TEXT}
     # max_tokens is mandatory here (unlike the OpenAI-shaped providers) and has
     # a default, so it is listed even though it is never merely passed through.
-    SUPPORTED_PARAMS = {Modality.CHAT: ("temperature", "top_p", "max_tokens")}
+    _CHAT_PARAMS = ("temperature", "top_p", "max_tokens")
+    SUPPORTED_PARAMS = {Task.TEXT_TO_TEXT: _CHAT_PARAMS, Task.IMAGE_TO_TEXT: _CHAT_PARAMS}
 
     def __init__(
         self,
@@ -88,7 +91,7 @@ class ClaudeApiAdapter(RetryClientMixin, ProviderAdapter):
 
         text, usage = self._parse(data, max_tokens=payload["max_tokens"])
         return RouterResponse(
-            modality=Modality.CHAT,
+            task=request.task,
             provider=self.name,
             model_id=model.model_id,
             usage=usage,
@@ -118,7 +121,7 @@ class ClaudeApiAdapter(RetryClientMixin, ProviderAdapter):
                     model_provider="anthropic",
                     model_id=model_id,
                     display_name=str(item.get("display_name") or model_id),
-                    modalities=(Modality.CHAT,),
+                    tasks=(Task.TEXT_TO_TEXT,),
                     source="catalog",
                     is_active=True,
                     price_source=PRICING_PAGE,

@@ -25,7 +25,7 @@ from router_mcp.adapters.base import (
 )
 from router_mcp.domain.errors import ProviderError, ProviderUnavailable
 from router_mcp.domain.messages import Attachment, RouterRequest, RouterResponse, Usage
-from router_mcp.domain.modality import Modality
+from router_mcp.domain.task import Task
 from router_mcp.registry.models import RegistryModel
 
 logger = logging.getLogger(__name__)
@@ -40,10 +40,14 @@ PRICE_SOURCE = "api:openrouter GET /models (pricing)"
 class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
     name = "openrouter"
     env_var = "OPENROUTER_API_KEY"
-    supported_modalities = {Modality.CHAT, Modality.IMAGE}
+    # Everything goes through /chat/completions, including the models that answer
+    # with an image, so the knobs are the same for all three.
+    supported_tasks = {Task.TEXT_TO_TEXT, Task.IMAGE_TO_TEXT, Task.TEXT_TO_IMAGE}
+    _CHAT_PARAMS = ("temperature", "max_tokens", "top_p", "reasoning")
     SUPPORTED_PARAMS = {
-        Modality.CHAT: ("temperature", "max_tokens", "top_p", "reasoning"),
-        Modality.IMAGE: ("temperature", "max_tokens", "top_p", "reasoning"),
+        Task.TEXT_TO_TEXT: _CHAT_PARAMS,
+        Task.IMAGE_TO_TEXT: _CHAT_PARAMS,
+        Task.TEXT_TO_IMAGE: _CHAT_PARAMS,
     }
 
     def __init__(
@@ -78,7 +82,7 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
             # on a registry price having gone stale.
             "usage": {"include": True},
         }
-        for key in self.SUPPORTED_PARAMS[Modality.CHAT]:
+        for key in self._CHAT_PARAMS:
             if key in request.params:
                 payload[key] = request.params[key]
 
@@ -127,7 +131,7 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
 
         raw_usage = data.get("usage") if isinstance(data, dict) else None
         return RouterResponse(
-            modality=request.modality,
+            task=request.task,
             provider=self.name,
             model_id=model.model_id,
             usage=usage,
@@ -178,27 +182,52 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
             return model_id.split("/", 1)[0]
         return "other"
 
+    @staticmethod
+    def _media_set(raw: Any) -> set[str]:
+        """`{"text", "image", ...}` out of one of OpenRouter's modality lists."""
+        found: set[str] = set()
+        for item in raw or []:
+            value = str(item).lower()
+            for medium in ("text", "image", "audio", "video", "file"):
+                if medium in value:
+                    found.add(medium)
+        return found
+
     @classmethod
-    def _extract_modalities(cls, raw: dict[str, Any]) -> tuple[Modality, ...]:
-        mods: set[Modality] = set()
-        architecture = raw.get("architecture")
-        if isinstance(architecture, dict):
-            modality = architecture.get("modality")
-            if isinstance(modality, str) and "image" in modality.lower():
-                mods.add(Modality.IMAGE)
-            for item in architecture.get("input_modalities", []) or []:
-                value = str(item).lower()
-                if "image" in value:
-                    mods.add(Modality.IMAGE)
-                if "text" in value:
-                    mods.add(Modality.CHAT)
-            for item in architecture.get("output_modalities", []) or []:
-                value = str(item).lower()
-                if "image" in value:
-                    mods.add(Modality.IMAGE)
-        if not mods:
-            mods.add(Modality.CHAT)
-        return tuple(sorted(mods, key=lambda m: m.value))
+    def _extract_tasks(cls, raw: dict[str, Any]) -> tuple[Task, ...]:
+        """The tasks a catalog entry can serve, from its input and output media.
+
+        This used to read the media and answer in *billing groups*, which meant
+        every vision chat model in the catalog came back tagged `image` — because
+        `image` appeared in its inputs. Those rows then joined the candidate pool
+        for image generation and were priced at `image_price`, which for a chat
+        model is zero. So the direction of the mapping matters: a medium on the
+        *input* side can only ever produce a `*-to-text` task here, because
+        /chat/completions answers with text unless the model is one of the few
+        that emits an image.
+        """
+        architecture = raw.get("architecture") if isinstance(raw.get("architecture"), dict) else {}
+        inputs = cls._media_set(architecture.get("input_modalities"))
+        outputs = cls._media_set(architecture.get("output_modalities"))
+        # The older `architecture.modality` field is a string like "text+image->text".
+        legacy = str(architecture.get("modality") or "").lower()
+        if "->" in legacy:
+            left, _, right = legacy.partition("->")
+            inputs |= cls._media_set(left.split("+"))
+            outputs |= cls._media_set(right.split("+"))
+
+        tasks: list[Task] = []
+        if "image" in outputs:
+            tasks.append(Task.TEXT_TO_IMAGE)
+        # Text out, or nothing declared at all: this is a chat model, and the
+        # catalog has plenty of entries with an empty architecture block.
+        if "text" in outputs or not outputs:
+            tasks.append(Task.TEXT_TO_TEXT)
+            if "image" in inputs:
+                tasks.append(Task.IMAGE_TO_TEXT)
+        if not tasks:
+            tasks.append(Task.TEXT_TO_TEXT)
+        return tuple(tasks)
 
     @classmethod
     def _parse_catalog_model(
@@ -215,16 +244,19 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
             context_length = int(raw.get("context_length") or 0)
         except (ValueError, TypeError):
             context_length = 0
-        modalities = cls._extract_modalities(raw)
+        tasks = cls._extract_tasks(raw)
         caps: list[str] = []
-        if Modality.IMAGE in modalities:
+        if Task.IMAGE_TO_TEXT in tasks:
             caps.append("vision")
         return RegistryModel(
             service_provider_id="openrouter",
             model_provider=cls._extract_provider(model_id),
             model_id=model_id,
             display_name=str(raw.get("name") or model_id),
-            modalities=modalities,
+            # Groups are derived from the tasks, so a vision chat model is no
+            # longer tagged as an image producer.
+            modalities=(),
+            tasks=tasks,
             capabilities=tuple(caps),
             tier=RegistryModel.compute_tier(prompt_price, completion_price),
             prompt_price=prompt_price,

@@ -1,4 +1,4 @@
-"""Pure-function tests for the DeepSeek and Claude response parsers (no network)."""
+"""Pure-function tests for the response and catalog parsers (no network)."""
 
 from __future__ import annotations
 
@@ -6,9 +6,11 @@ import pytest
 
 from router_mcp.adapters.claude_api import ClaudeApiAdapter
 from router_mcp.adapters.deepseek import DeepSeekAdapter
+from router_mcp.adapters.openrouter import OpenRouterAdapter
 from router_mcp.domain.errors import ProviderError, ResponseTruncated
 from router_mcp.domain.messages import RouterRequest
 from router_mcp.domain.modality import Modality
+from router_mcp.domain.task import Task
 
 
 def test_deepseek_parse_text_and_usage():
@@ -64,7 +66,7 @@ def test_claude_error_payload_raises():
 
 def test_claude_build_messages_splits_system():
     req = RouterRequest(
-        modality=Modality.CHAT,
+        task=Task.TEXT_TO_TEXT,
         external_user_id="u",
         messages=[
             {"role": "system", "content": "be brief"},
@@ -74,3 +76,55 @@ def test_claude_build_messages_splits_system():
     system, turns = ClaudeApiAdapter._build_messages(req)
     assert system == "be brief"
     assert turns == [{"role": "user", "content": "hi"}]
+
+
+# --- the catalog tagging that put chat models into image generation --------
+def _entry(**architecture) -> dict:
+    return {
+        "id": "vendor/model",
+        "name": "Model",
+        "pricing": {"prompt": "0.000001", "completion": "0.000002"},
+        "architecture": architecture,
+    }
+
+
+def test_a_vision_chat_model_is_not_offered_for_drawing():
+    """The defect: `image` in the *input* modalities used to tag the row as an
+    image producer, so every vision chat model in the catalog became a candidate
+    for `generate_image` — priced at `image_price`, which for those rows is zero.
+    """
+    model = OpenRouterAdapter._parse_catalog_model(
+        _entry(input_modalities=["text", "image"], output_modalities=["text"])
+    )
+    assert model.tasks == (Task.TEXT_TO_TEXT, Task.IMAGE_TO_TEXT)
+    assert Task.TEXT_TO_IMAGE not in model.tasks
+    # Its billing group follows from the tasks, so it is a chat row.
+    assert model.modalities == (Modality.CHAT,)
+    assert "vision" in model.capabilities
+
+
+def test_a_model_that_emits_images_gets_the_drawing_task():
+    model = OpenRouterAdapter._parse_catalog_model(
+        _entry(input_modalities=["text"], output_modalities=["image"])
+    )
+    assert Task.TEXT_TO_IMAGE in model.tasks
+
+
+def test_a_plain_text_model_is_text_to_text():
+    model = OpenRouterAdapter._parse_catalog_model(
+        _entry(input_modalities=["text"], output_modalities=["text"])
+    )
+    assert model.tasks == (Task.TEXT_TO_TEXT,)
+
+
+def test_an_empty_architecture_block_is_a_chat_model():
+    """Plenty of catalog entries carry no architecture at all, and guessing
+    anything but chat there would put them on the wrong screen."""
+    model = OpenRouterAdapter._parse_catalog_model({"id": "vendor/model", "pricing": {}})
+    assert model.tasks == (Task.TEXT_TO_TEXT,)
+
+
+def test_the_legacy_modality_string_is_understood():
+    """Older entries describe themselves as `text+image->text` in one string."""
+    model = OpenRouterAdapter._parse_catalog_model(_entry(modality="text+image->text"))
+    assert model.tasks == (Task.TEXT_TO_TEXT, Task.IMAGE_TO_TEXT)

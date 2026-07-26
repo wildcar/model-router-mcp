@@ -20,6 +20,7 @@ from router_mcp.domain.messages import (
     Usage,
 )
 from router_mcp.domain.modality import Modality
+from router_mcp.domain.task import Task
 from router_mcp.registry.models import RegistryModel
 from router_mcp.registry.service import RegistryService
 from router_mcp.routing.router import ModelRouter
@@ -29,15 +30,15 @@ from router_mcp.web.views import error_envelope, run_from_dispatch, run_from_log
 
 class StubAdapter(ProviderAdapter):
     name = "stub"
-    supported_modalities = {Modality.CHAT}
-    SUPPORTED_PARAMS = {Modality.CHAT: ("temperature",)}
+    supported_tasks = {Task.TEXT_TO_TEXT}
+    SUPPORTED_PARAMS = {Task.TEXT_TO_TEXT: ("temperature",)}
 
     def is_configured(self) -> bool:
         return True
 
     async def generate(self, request, model):
         return RouterResponse(
-            Modality.CHAT, "stub", model.model_id,
+            Task.TEXT_TO_TEXT, "stub", model.model_id,
             Usage(prompt_tokens=10, completion_tokens=5, total_tokens=15, cache_read_tokens=4),
             text="hi",
             raw_meta={"finish_reason": "stop", "request_id": "req-42"},
@@ -56,7 +57,7 @@ async def _dispatch(tmp_path, *, text="ping", **request_kwargs):
     registry = RegistryService(db, adapters={})
     router = ModelRouter(db, registry, {"stub": StubAdapter()}, BlobStore(str(tmp_path / "b")))
     request = RouterRequest(
-        Modality.CHAT, "u", model_id="stub/model", text=text, **request_kwargs
+        Task.TEXT_TO_TEXT, "u", model_id="stub/model", text=text, **request_kwargs
     )
     result = await router.dispatch(request)
     return db, request, result

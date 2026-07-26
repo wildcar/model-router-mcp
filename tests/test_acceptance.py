@@ -267,7 +267,12 @@ def test_mcp_tab_lists_tools_with_schemas(page, live_server):
     # The seeded MCP error was logged against the tts tool-less call, but the
     # client table must still render.
     assert page.locator("#clients tbody tr").count() >= 1
-    chat_row = page.locator("#tools tbody tr", has_text="chat").first
+    # Exact cell match, not a substring of the whole row: several tool
+    # descriptions mention "chat" in prose, and `has_text` would pick whichever
+    # of them sorts first.
+    chat_row = page.locator("#tools tbody tr").filter(
+        has=page.get_by_role("cell", name="chat", exact=True)
+    ).first
     chat_row.get_by_text("схема").click()
     # The schema next to the handle is the point of the tab.
     assert "external_user_id" in page.locator("#tools").inner_text()

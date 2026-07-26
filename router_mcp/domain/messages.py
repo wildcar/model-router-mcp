@@ -1,9 +1,14 @@
 """Normalized request/response/usage types that cross the adapter boundary.
 
 Every adapter consumes a RouterRequest and produces a RouterResponse, regardless
-of provider or modality. Modality asymmetries (audio in for STT, audio out for
-TTS, images for IMAGE, token usage for CHAT) are all expressed through the same
-shapes: bytes/urls live in Attachment, metering lives in Usage.
+of provider or task. Task asymmetries (audio in for speech-to-text, audio out for
+text-to-speech, images for generation, token usage for chat) are all expressed
+through the same shapes: bytes/urls live in Attachment, metering lives in Usage.
+
+Both types carry `task` and expose `modality` as a property over it. That is
+deliberate: the ~20 places that log a request or price it want the *billing
+group*, and they keep reading `request.modality` — correctly — while routing and
+capability checks read `request.task` (ADR-0006).
 """
 
 from __future__ import annotations
@@ -12,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from router_mcp.domain.modality import Modality
+from router_mcp.domain.task import Task
 
 
 @dataclass(slots=True)
@@ -60,6 +66,14 @@ class Usage:
     audio_seconds: float | None = None
     images: int | None = None
     characters: int | None = None  # TTS is billed per character, not per token
+    # Seconds of the provider's own compute, as the provider reported them
+    # (Replicate's `metrics.predict_time`). Deliberately not `audio_seconds`:
+    # those are seconds of a *file*, priced by a different rate, and one column
+    # holding both would make every spend report ambiguous.
+    compute_seconds: float | None = None
+    # How long the audio or video that came back actually is. Metering only —
+    # never a billing quantity, because no provider here charges by it.
+    duration_seconds: float | None = None
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -114,7 +128,7 @@ class FallbackPolicy:
 
 @dataclass(slots=True)
 class RouterRequest:
-    modality: Modality
+    task: Task
     external_user_id: str  # opaque id supplied by the caller; stats key only
     model_id: str | None = None  # explicit model override
     tier: str | None = None  # "free" | "cheap" | "expensive" preference
@@ -136,10 +150,15 @@ class RouterRequest:
     # which cannot tell two runs of one batch from two batches a second apart.
     batch_id: str | None = None
 
+    @property
+    def modality(self) -> Modality:
+        """The group this request is billed in."""
+        return self.task.billing_group
+
 
 @dataclass(slots=True)
 class RouterResponse:
-    modality: Modality
+    task: Task
     provider: str  # service-provider id actually used
     model_id: str  # model actually used
     usage: Usage
@@ -153,3 +172,8 @@ class RouterResponse:
     # run went against a subscription and no money moved. Notional money must
     # never be added to real money in a total (§7.3).
     cost_is_notional: bool = False
+
+    @property
+    def modality(self) -> Modality:
+        """The group this response is billed in."""
+        return self.task.billing_group

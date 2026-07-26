@@ -162,3 +162,64 @@ def test_openai_shaped_reasoning_tokens_are_picked_up():
     })
     assert details["cache_read"] == 64
     assert details["reasoning"] == 512
+
+
+# --- the compute-second unit (Replicate and anything hosted like it) ------
+def test_compute_seconds_are_their_own_term():
+    """A hosted model bills for how long its hardware ran. That is a different
+    quantity from the length of the file it produced, and a different rate."""
+    model = _model(
+        modalities=(Modality.VIDEO,),
+        compute_price_per_second=0.002,
+        price_source_kind="manual",
+    )
+    result = compute_cost(model, Modality.VIDEO, Usage(compute_seconds=42.5))
+    assert result.cost_usd == pytest.approx(42.5 * 0.002)
+    assert result.cost_source == "computed"
+    assert [t["kind"] for t in result.breakdown] == ["compute"]
+    assert result.breakdown[0]["label"] == "секунды расчёта"
+
+
+def test_seconds_of_audio_do_not_pay_for_seconds_of_compute():
+    """The reason the rate needed its own column: a row priced per second of
+    *audio* must not silently price a video by its GPU time."""
+    model = _model(
+        modalities=(Modality.VIDEO,),
+        audio_price_per_second=0.001,
+        price_source_kind="manual",
+    )
+    result = compute_cost(model, Modality.VIDEO, Usage(compute_seconds=30.0))
+    assert result.cost_source == "unpriced"
+    assert result.cost_usd == 0.0
+
+
+def test_a_per_unit_rate_wins_over_a_compute_rate():
+    """A provider that names a price per image has already said how it bills."""
+    model = _model(
+        modalities=(Modality.IMAGE,),
+        image_price=0.04,
+        compute_price_per_second=0.002,
+        price_source_kind="manual",
+    )
+    result = compute_cost(model, Modality.IMAGE, Usage(images=2, compute_seconds=99.0))
+    assert result.cost_usd == pytest.approx(0.08)
+    assert [t["kind"] for t in result.breakdown] == ["image"]
+
+
+def test_generated_music_with_no_rate_is_unpriced_not_free():
+    model = _model(modalities=(Modality.AUDIO,), price_source_kind="estimate")
+    result = compute_cost(model, Modality.AUDIO, Usage(compute_seconds=12.0))
+    assert result.cost_source == "unpriced"
+
+
+def test_only_a_compute_rate_still_counts_as_a_priced_row():
+    """Without this the row would read as «цены нет» forever and stay last in
+    every automatic selection, even after an operator had priced it."""
+    model = _model(
+        modalities=(Modality.VIDEO,),
+        compute_price_per_second=0.002,
+        price_source_kind="manual",
+    )
+    assert model.price_is_unknown is False
+    assert model.has_rate_for(Modality.VIDEO) is True
+    assert model.is_free is False

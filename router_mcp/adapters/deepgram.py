@@ -15,7 +15,7 @@ import httpx
 from router_mcp.adapters.base import ProviderAdapter, RetryClientMixin
 from router_mcp.domain.errors import ProviderError
 from router_mcp.domain.messages import RouterRequest, RouterResponse, Usage
-from router_mcp.domain.modality import Modality
+from router_mcp.domain.task import Task
 from router_mcp.registry.models import RegistryModel
 
 logger = logging.getLogger(__name__)
@@ -24,8 +24,8 @@ logger = logging.getLogger(__name__)
 class DeepgramAdapter(RetryClientMixin, ProviderAdapter):
     name = "deepgram"
     env_var = "DEEPGRAM_API_KEY"
-    supported_modalities = {Modality.STT}
-    SUPPORTED_PARAMS = {Modality.STT: ()}
+    supported_tasks = {Task.SPEECH_TO_TEXT}
+    SUPPORTED_PARAMS = {Task.SPEECH_TO_TEXT: ()}
 
     def __init__(
         self,
@@ -65,7 +65,7 @@ class DeepgramAdapter(RetryClientMixin, ProviderAdapter):
         transcript = self._extract_transcript(payload)
         duration = self._extract_duration(payload)
         return RouterResponse(
-            modality=Modality.STT,
+            task=Task.SPEECH_TO_TEXT,
             provider=self.name,
             model_id=requested_model,
             usage=Usage(audio_seconds=duration, raw=payload.get("metadata", {}) if isinstance(payload, dict) else {}),

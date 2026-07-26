@@ -19,7 +19,7 @@ from router_mcp.adapters.base import ProviderAdapter
 from router_mcp.domain import progress
 from router_mcp.domain.errors import ProviderError
 from router_mcp.domain.messages import RouterRequest, RouterResponse, Usage
-from router_mcp.domain.modality import Modality
+from router_mcp.domain.task import Task
 from router_mcp.registry.models import RegistryModel
 
 logger = logging.getLogger(__name__)
@@ -28,8 +28,8 @@ logger = logging.getLogger(__name__)
 class CodexCliAdapter(ProviderAdapter):
     name = "codex-cli"
     env_var = "CODEX_COMMAND"
-    supported_modalities = {Modality.CLI}
-    SUPPORTED_PARAMS = {Modality.CLI: ("cwd", "timeout_sec")}
+    supported_tasks = {Task.CLI}
+    SUPPORTED_PARAMS = {Task.CLI: ("cwd", "timeout_sec")}
 
     def __init__(
         self,
@@ -64,7 +64,7 @@ class CodexCliAdapter(ProviderAdapter):
             )
         usage = self._usage_from_token_info(token_info)
         return RouterResponse(
-            modality=Modality.CLI,
+            task=Task.CLI,
             provider=self.name,
             model_id=model.model_id,
             usage=usage,

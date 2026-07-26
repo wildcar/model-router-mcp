@@ -48,7 +48,8 @@ class Run:
     """One submitted run and everything the poller needs to draw it."""
 
     id: str
-    modality: str
+    task: str  # what was asked for, e.g. "text-to-image"
+    modality: str  # the group it is billed in
     label: str  # what the operator picked: a model id, or a provider hint
     external_user_id: str
     status: str = "queued"  # queued | running | ok | error | cancelled
@@ -61,7 +62,10 @@ class Run:
     steps: list[dict[str, Any]] = field(default_factory=list)
     result: dict[str, Any] | None = None  # the Run envelope, once finished
     error: dict[str, Any] | None = None  # the error envelope, if it failed
-    task: asyncio.Task | None = None
+    # The coroutine executing this run. Named `runner`, not `task`: `task` is the
+    # operation the caller asked for, and one name for both invited exactly the
+    # bug where the asyncio object was serialized into the poll response.
+    runner: asyncio.Task | None = None
 
     @property
     def log_id(self) -> int | None:
@@ -83,6 +87,7 @@ class Run:
         return {
             "run_id": self.id,
             "status": self.status,
+            "task": self.task,
             "modality": self.modality,
             "label": self.label,
             "external_user_id": self.external_user_id,
@@ -125,6 +130,7 @@ class RunRegistry:
 
         run = Run(
             id=uuid.uuid4().hex,
+            task=request.task.value,
             modality=request.modality.value,
             label=label,
             external_user_id=request.external_user_id,
@@ -135,7 +141,7 @@ class RunRegistry:
         if request.client_request_id:
             self._by_key[request.client_request_id] = run.id
         self._evict()
-        run.task = asyncio.create_task(self._execute(run, request))
+        run.runner = asyncio.create_task(self._execute(run, request))
         return run
 
     async def _execute(self, run: Run, request: RouterRequest) -> None:
@@ -167,7 +173,7 @@ class RunRegistry:
                 run.error = error_envelope(RouterError(str(exc)))
             finally:
                 run.finished_at = _now()
-                run.task = None
+                run.runner = None
 
     # --- reading ----------------------------------------------------------
     def get(self, run_id: str) -> Run:
@@ -193,7 +199,7 @@ class RunRegistry:
         run = self.get(run_id)
         if run.done:
             raise Conflict(f"Прогон уже завершён со статусом {run.status!r}")
-        task = run.task
+        task = run.runner
         if task is not None:
             task.cancel()
             # Wait for the task to finish unwinding: for a CLI run that is where
@@ -210,8 +216,8 @@ class RunRegistry:
     async def aclose(self) -> None:
         """Cancel everything still running, on shutdown."""
         for run in list(self._runs.values()):
-            if run.task is not None:
-                run.task.cancel()
+            if run.runner is not None:
+                run.runner.cancel()
 
     # --- internals --------------------------------------------------------
     async def _find_by_key(self, client_request_id: str) -> Run | None:
@@ -228,6 +234,7 @@ class RunRegistry:
 
         run = Run(
             id=uuid.uuid4().hex,
+            task=str(row.get("task") or ""),
             modality=str(row.get("modality") or ""),
             label=str(row.get("model_id") or ""),
             external_user_id=str(row.get("external_user_id") or ""),

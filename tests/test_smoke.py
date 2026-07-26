@@ -12,6 +12,7 @@ from router_mcp.adapters.base import ProviderAdapter
 from router_mcp.blobs.store import BlobStore
 from router_mcp.domain.messages import RouterRequest, RouterResponse, Usage
 from router_mcp.domain.modality import Modality
+from router_mcp.domain.task import Task
 from router_mcp.registry.models import RegistryModel
 from router_mcp.registry.service import RegistryService
 from router_mcp.routing.router import ModelRouter
@@ -20,14 +21,14 @@ from router_mcp.storage.database import Database
 
 class StubChatAdapter(ProviderAdapter):
     name = "stub"
-    supported_modalities = {Modality.CHAT}
+    supported_tasks = {Task.TEXT_TO_TEXT}
 
     def is_configured(self) -> bool:
         return True
 
     async def generate(self, request: RouterRequest, model: RegistryModel) -> RouterResponse:
         return RouterResponse(
-            modality=Modality.CHAT,
+            task=Task.TEXT_TO_TEXT,
             provider=self.name,
             model_id=model.model_id,
             usage=Usage(prompt_tokens=10, completion_tokens=5, total_tokens=15, raw={"x": 1}),
@@ -64,7 +65,7 @@ async def test_dispatch_logs_and_costs(tmp_path):
     db, registry, router = await _make_core(tmp_path)
     try:
         req = RouterRequest(
-            modality=Modality.CHAT, external_user_id="u1", model_id="stub/chat-1", text="hi"
+            task=Task.TEXT_TO_TEXT, external_user_id="u1", model_id="stub/chat-1", text="hi"
         )
         result = await router.dispatch(req)
 
@@ -109,7 +110,7 @@ async def test_unverified_price_is_logged_as_estimated(tmp_path):
             )
         )
         req = RouterRequest(
-            modality=Modality.CHAT, external_user_id="u4", model_id="stub/guessed", text="hi"
+            task=Task.TEXT_TO_TEXT, external_user_id="u4", model_id="stub/guessed", text="hi"
         )
         result = await router.dispatch(req)
 
@@ -126,7 +127,7 @@ async def test_unverified_price_is_logged_as_estimated(tmp_path):
 async def test_resolve_by_tier(tmp_path):
     db, registry, router = await _make_core(tmp_path)
     try:
-        req = RouterRequest(modality=Modality.CHAT, external_user_id="u2", tier="cheap", text="yo")
+        req = RouterRequest(task=Task.TEXT_TO_TEXT, external_user_id="u2", tier="cheap", text="yo")
         result = await router.dispatch(req)
         assert result.response.model_id == "stub/chat-1"
     finally:
@@ -141,7 +142,7 @@ async def test_unknown_model_errors_and_logs(tmp_path):
     db, registry, router = await _make_core(tmp_path)
     try:
         req = RouterRequest(
-            modality=Modality.CHAT, external_user_id="u3", model_id="nope/x", text="hi"
+            task=Task.TEXT_TO_TEXT, external_user_id="u3", model_id="nope/x", text="hi"
         )
         with pytest.raises(RouterError):
             await router.dispatch(req)

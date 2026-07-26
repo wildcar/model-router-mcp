@@ -18,6 +18,7 @@ from router_mcp.domain import progress
 from router_mcp.domain.errors import Conflict, NotFound, ProviderError
 from router_mcp.domain.messages import RouterRequest, RouterResponse, Usage
 from router_mcp.domain.modality import Modality
+from router_mcp.domain.task import Task
 from router_mcp.registry.models import RegistryModel
 from router_mcp.registry.service import RegistryService
 from router_mcp.routing.router import ModelRouter
@@ -29,7 +30,7 @@ class SlowAdapter(ProviderAdapter):
     """Reports two steps, then waits to be released (or cancelled)."""
 
     name = "vendor"
-    supported_modalities = {Modality.CHAT}
+    supported_tasks = {Task.TEXT_TO_TEXT}
 
     def __init__(self, *, fail: Exception | None = None) -> None:
         self.gate = asyncio.Event()
@@ -52,7 +53,7 @@ class SlowAdapter(ProviderAdapter):
             raise self.fail
         progress.emit("cli", "второй шаг")
         return RouterResponse(
-            modality=Modality.CHAT,
+            task=Task.TEXT_TO_TEXT,
             provider=self.name,
             model_id=model.model_id,
             usage=Usage(prompt_tokens=10, completion_tokens=5, total_tokens=15),
@@ -93,7 +94,7 @@ async def _setup(tmp_path, adapter: SlowAdapter):
 
 def _request(**kwargs) -> RouterRequest:
     return RouterRequest(
-        modality=Modality.CHAT,
+        task=Task.TEXT_TO_TEXT,
         external_user_id="u",
         model_id="m1",
         text="привет",
@@ -122,7 +123,7 @@ async def test_a_run_is_visible_in_the_log_before_it_finishes(tmp_path):
         assert any(step.get("title") == "первый шаг" for step in run.steps)
 
         adapter.gate.set()
-        await asyncio.wait_for(run.task, timeout=2)
+        await asyncio.wait_for(run.runner, timeout=2)
         assert run.status == "ok"
         rows = await db.list_request_logs(external_user_id="u")
         assert [r["status"] for r in rows] == ["ok"]
@@ -171,7 +172,7 @@ async def test_the_same_idempotency_key_does_not_run_twice(tmp_path):
         assert again.id == first.id
 
         adapter.gate.set()
-        await asyncio.wait_for(first.task, timeout=2)
+        await asyncio.wait_for(first.runner, timeout=2)
 
         # And once it is finished the key still returns the stored result, even
         # after the registry has forgotten the run (a restart, an eviction).
@@ -193,7 +194,7 @@ async def test_a_failed_run_closes_its_own_row(tmp_path):
         run = await runs.submit(_request(), label="m1")
         await asyncio.wait_for(adapter.started.wait(), timeout=2)
         adapter.gate.set()
-        await asyncio.wait_for(run.task, timeout=2)
+        await asyncio.wait_for(run.runner, timeout=2)
 
         assert run.status == "error"
         assert run.error["error"]["code"] == "provider_error"
@@ -224,8 +225,8 @@ async def test_a_restart_marks_live_rows_interrupted(tmp_path):
         assert rows[0]["status"] == "interrupted"
         assert rows[0]["cost_source"] == "cost_unknown"
 
-        run.task.cancel()
-        await asyncio.gather(run.task, return_exceptions=True)
+        run.runner.cancel()
+        await asyncio.gather(run.runner, return_exceptions=True)
     finally:
         await db.close()
 
@@ -239,7 +240,7 @@ async def test_the_timeline_survives_in_the_log(tmp_path):
         run = await runs.submit(_request(), label="m1")
         await asyncio.wait_for(adapter.started.wait(), timeout=2)
         adapter.gate.set()
-        await asyncio.wait_for(run.task, timeout=2)
+        await asyncio.wait_for(run.runner, timeout=2)
 
         from router_mcp.web.views import run_from_log
 

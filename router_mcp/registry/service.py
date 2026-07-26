@@ -157,7 +157,7 @@ class RegistryService:
         # *row*. Keyed on the row, a price typed into a catalog row was wiped by
         # the very next sync — which is where corrected prices went. Keyed on the
         # price, the row stays a catalog row and keeps receiving name, context
-        # and modality updates while the number a human vouched for survives.
+        # and task updates while the number a human vouched for survives.
         human_priced = old.price_source_kind in ("manual", "page")
         prices_authoritative = fresh.price_source_kind == "api" and not human_priced
         if prices_authoritative:
@@ -166,6 +166,14 @@ class RegistryService:
                 "completion_price": fresh.completion_price,
                 "image_price": fresh.image_price,
                 "audio_price_per_second": fresh.audio_price_per_second,
+                # These three were missing, so a catalog that publishes them would
+                # not have been believed. Not a live bug today (no catalog here is
+                # `api`-priced beyond OpenRouter, which publishes none of them),
+                # but the next one would have inherited the gap.
+                "character_price": fresh.character_price,
+                "cache_read_price": fresh.cache_read_price,
+                "cache_write_price": fresh.cache_write_price,
+                "compute_price_per_second": fresh.compute_price_per_second,
                 "tier": fresh.tier,
                 "price_source": fresh.price_source,
                 "price_source_kind": fresh.price_source_kind,
@@ -182,6 +190,10 @@ class RegistryService:
         return dataclasses.replace(
             old,
             display_name=old.display_name if old.source == "manual" else fresh.display_name,
+            # A catalog that now reports tasks correctly overwrites what the
+            # migration derived from the coarse group, which is how the OpenRouter
+            # rows heal themselves on the next sync.
+            tasks=fresh.tasks or old.tasks,
             modalities=fresh.modalities or old.modalities,
             capabilities=fresh.capabilities or old.capabilities,
             context_length=fresh.context_length or old.context_length,
@@ -198,6 +210,7 @@ class RegistryService:
         self,
         *,
         modality: str | None = None,
+        task: str | None = None,
         tier: str | None = None,
         provider: str | None = None,
         force_refresh: bool = False,
@@ -214,6 +227,7 @@ class RegistryService:
             await self.sync_all(force=force_refresh)
         return await self._db.list_registry_models(
             modality=modality,
+            task=task,
             tier=tier,
             service_provider_id=provider,
             active_only=active_only,

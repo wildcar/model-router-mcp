@@ -67,6 +67,7 @@ def _run(
     run_id: str | None,
     log_id: int | None,
     status: str,
+    task: str | None,
     modality: str | None,
     channel: str | None,
     tool: str | None,
@@ -97,6 +98,9 @@ def _run(
         "run_id": run_id,
         "log_id": log_id,
         "status": status,
+        # What was asked for, and the group it was billed in. Two facts, both on
+        # screen: «текст в картинку» and «картинка в картинку» are one group.
+        "task": task,
         "modality": modality,
         "channel": channel,
         "tool": tool,
@@ -232,6 +236,7 @@ def run_from_dispatch(
         run_id=None,
         log_id=result.log_id,
         status="ok",
+        task=response.task.value,
         modality=response.modality.value,
         channel=request.channel if request else None,
         tool=request.tool if request else None,
@@ -299,6 +304,7 @@ def run_from_log(row: dict[str, Any]) -> dict[str, Any]:
         run_id=None,
         log_id=row.get("id"),
         status=row.get("status") or "ok",
+        task=row.get("task"),
         modality=row.get("modality"),
         channel=row.get("channel"),
         tool=row.get("tool"),

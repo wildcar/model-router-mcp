@@ -12,6 +12,7 @@ import pytest
 from router_mcp.adapters.base import ProviderAdapter
 from router_mcp.domain.messages import RouterRequest, RouterResponse, Usage
 from router_mcp.domain.modality import Modality
+from router_mcp.domain.task import Task
 from router_mcp.registry.models import RegistryModel
 from router_mcp.registry.service import RegistryService
 from router_mcp.storage.database import Database
@@ -34,7 +35,7 @@ class FakeCatalogAdapter(ProviderAdapter):
     """A provider whose catalog the test controls."""
 
     name = "vendor"
-    supported_modalities = {Modality.CHAT}
+    supported_tasks = {Task.TEXT_TO_TEXT}
 
     def __init__(self, catalog: list[RegistryModel] | None) -> None:
         self.catalog = catalog
@@ -47,7 +48,7 @@ class FakeCatalogAdapter(ProviderAdapter):
 
     async def generate(self, request: RouterRequest, model: RegistryModel) -> RouterResponse:
         return RouterResponse(
-            modality=Modality.CHAT, provider=self.name, model_id=model.model_id, usage=Usage()
+            task=Task.TEXT_TO_TEXT, provider=self.name, model_id=model.model_id, usage=Usage()
         )
 
 

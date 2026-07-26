@@ -24,6 +24,7 @@ from router_mcp.adapters.openrouter import OpenRouterAdapter
 from router_mcp.blobs.store import BlobStore
 from router_mcp.config import Settings
 from router_mcp.domain.modality import Modality
+from router_mcp.domain.task import Task
 from router_mcp.registry.models import RegistryModel
 from router_mcp.registry.service import RegistryService
 from router_mcp.routing.router import ModelRouter
@@ -83,7 +84,7 @@ def _seed_model(
     provider: str,
     model_id: str,
     name: str,
-    modality: Modality,
+    task: Task,
     price_source: str | None = None,
     **prices,
 ) -> RegistryModel:
@@ -93,7 +94,8 @@ def _seed_model(
         model_provider=provider,
         model_id=model_id,
         display_name=name,
-        modalities=(modality,),
+        modalities=(),
+        tasks=(task,),
         tier=prices.pop("tier", "expensive"),
         source="seed",
         price_source=price_source,
@@ -117,7 +119,8 @@ def _chat_seed(
         model_provider=provider,
         model_id=model_id,
         display_name=name,
-        modalities=(Modality.CHAT,),
+        modalities=(),
+        tasks=(Task.TEXT_TO_TEXT,),
         tier=RegistryModel.compute_tier(prompt_price, completion_price),
         prompt_price=prompt_price,
         completion_price=completion_price,
@@ -161,7 +164,7 @@ def _build_adapters(settings: Settings) -> list[ProviderSpec]:
             seed_models=[
                 _seed_model(
                     "codex-oauth", "openai", settings.codex_image_tool_model,
-                    "Codex image generation", Modality.IMAGE, tier="expensive",
+                    "Codex image generation", Task.TEXT_TO_IMAGE, tier="expensive",
                 )
             ],
         ),
@@ -181,7 +184,7 @@ def _build_adapters(settings: Settings) -> list[ProviderSpec]:
             seed_models=[
                 _seed_model(
                     "deepgram", "deepgram", settings.deepgram_model,
-                    "Deepgram speech-to-text", Modality.STT, tier="cheap",
+                    "Deepgram speech-to-text", Task.SPEECH_TO_TEXT, tier="cheap",
                 )
             ],
         ),
@@ -203,7 +206,7 @@ def _build_adapters(settings: Settings) -> list[ProviderSpec]:
             seed_models=[
                 _seed_model(
                     "elevenlabs", "elevenlabs", settings.elevenlabs_tts_model,
-                    "ElevenLabs text-to-speech", Modality.TTS, tier="expensive",
+                    "ElevenLabs text-to-speech", Task.TEXT_TO_SPEECH, tier="expensive",
                 )
             ],
         ),
@@ -257,7 +260,7 @@ def _build_adapters(settings: Settings) -> list[ProviderSpec]:
                 default_cwd=settings.cli_default_cwd,
             ),
             seed_models=[
-                _seed_model("codex-cli", "openai", "codex", "Codex CLI", Modality.CLI, tier="expensive")
+                _seed_model("codex-cli", "openai", "codex", "Codex CLI", Task.CLI, tier="expensive")
             ],
         ),
         ProviderSpec(
@@ -273,7 +276,7 @@ def _build_adapters(settings: Settings) -> list[ProviderSpec]:
                 default_cwd=settings.cli_default_cwd,
             ),
             seed_models=[
-                _seed_model("claude-cli", "anthropic", "claude", "Claude CLI", Modality.CLI, tier="expensive")
+                _seed_model("claude-cli", "anthropic", "claude", "Claude CLI", Task.CLI, tier="expensive")
             ],
         ),
     ]

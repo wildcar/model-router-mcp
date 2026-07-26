@@ -2,7 +2,7 @@
 
 The rule the whole "Прогон" form rests on (§5 of `docs/UI_CONCEPT_v2.md`): a
 field exists on screen only when the adapter behind the chosen
-(modality, provider) pair reads it. That matrix is derived here from
+(task, provider) pair reads it. That matrix is derived here from
 `ProviderAdapter.SUPPORTED_PARAMS` — the same tuple the adapter builds its
 payload from — because a hand-written copy in `web/` diverges from the code on
 the first new adapter.
@@ -20,12 +20,16 @@ from router_mcp import __version__
 from router_mcp.adapters.base import ProviderAdapter
 from router_mcp.config import Settings
 from router_mcp.domain.modality import Modality
+from router_mcp.domain.task import TASKS, Task, tasks_for
 from router_mcp.web import labels
 
 # The envelope shape the console is written against. The browser sends it back,
 # so a page loaded before a restart cannot keep reading a newer API as if it
 # were the old one.
-SCHEMA_VERSION = 1
+# Version 2 added `tasks` and `params_by_task` (ADR-0006). `params`, keyed by
+# billing group, is still served so a page loaded before the restart keeps
+# working — which is the whole reason this field exists.
+SCHEMA_VERSION = 2
 
 
 def _param(
@@ -89,14 +93,14 @@ PARAM_SPECS: dict[str, dict[str, Any]] = {
 
 
 def _params_for(
-    adapter: ProviderAdapter, modality: Modality, settings: Settings
+    adapter: ProviderAdapter, task: Task, settings: Settings
 ) -> list[dict[str, Any]] | None:
-    """The parameter list for one (modality, provider) pair, or None if the
+    """The parameter list for one (task, provider) pair, or None if the
     adapter has not declared one (then the console shows no parameter block
     rather than inventing fields)."""
     if adapter.SUPPORTED_PARAMS is None:
         return None
-    names = adapter.SUPPORTED_PARAMS.get(modality)
+    names = adapter.SUPPORTED_PARAMS.get(task)
     if names is None:
         return None
     out: list[dict[str, Any]] = []
@@ -182,13 +186,13 @@ def build(
     enabled_ids: set[str],
 ) -> dict[str, Any]:
     """The full capabilities payload."""
-    params: dict[str, dict[str, Any]] = {}
-    for modality in Modality:
+    by_task: dict[str, dict[str, Any]] = {}
+    for task in Task:
         per_provider: dict[str, Any] = {}
         for provider_id, adapter in adapters.items():
-            if modality not in adapter.supported_modalities:
+            if task not in adapter.supported_tasks:
                 continue
-            spec = _params_for(adapter, modality, settings)
+            spec = _params_for(adapter, task, settings)
             if spec is None:
                 continue
             per_provider[provider_id] = {
@@ -196,7 +200,36 @@ def build(
                 "model_overrides": _model_overrides(provider_id),
             }
         if per_provider:
-            params[modality.value] = per_provider
+            by_task[task.value] = per_provider
+
+    # The group-keyed view, for a page loaded before this restart. A group can
+    # hold several tasks, so a provider's entry is whichever of its tasks in that
+    # group it declared first — good enough for one release of compatibility, and
+    # `schema_version` tells a current page to read `params_by_task` instead.
+    params: dict[str, dict[str, Any]] = {}
+    for group in Modality:
+        per_provider = {}
+        for task in tasks_for(group):
+            for provider_id, spec in by_task.get(task.value, {}).items():
+                per_provider.setdefault(provider_id, spec)
+        if per_provider:
+            params[group.value] = per_provider
+
+    task_rows = {
+        task.value: {
+            **labels.TASKS.get(task.value, {"label": task.value, "help": "", "code": task.value}),
+            "billing_group": sig.billing.value,
+            "requires": sorted(m.value for m in sig.requires),
+            "optional": sorted(m.value for m in sig.optional),
+            "produces": sorted(m.value for m in sig.produces),
+            "is_media_transform": sig.is_media_transform,
+            # Whether anything configured here can actually serve it. The console
+            # greys out a task nobody provides rather than hiding it, so the
+            # operator can see that the capability exists and is unconfigured.
+            "available": task.value in by_task,
+        }
+        for task, sig in TASKS.items()
+    }
 
     provider_rows = [
         {
@@ -207,6 +240,9 @@ def build(
             "configured": p.id in adapters and adapters[p.id].is_configured(),
             "env_var": adapters[p.id].env_var if p.id in adapters else None,
             "pricing_url": p.pricing_url,
+            "tasks": sorted(
+                t.value for t in adapters[p.id].supported_tasks
+            ) if p.id in adapters else [],
             "modalities": sorted(
                 m.value for m in adapters[p.id].supported_modalities
             ) if p.id in adapters else [],
@@ -218,6 +254,9 @@ def build(
         "schema_version": SCHEMA_VERSION,
         "app_version": __version__,
         "providers": provider_rows,
+        "tasks": task_rows,
+        "params_by_task": by_task,
+        # Deprecated in favour of `params_by_task`; see SCHEMA_VERSION.
         "params": params,
         "server": _server_settings(settings),
         "labels": labels.as_dict(),
