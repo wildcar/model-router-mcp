@@ -7,9 +7,10 @@ quotes a provider's error message. The console sits behind HTTP Basic auth, whic
 the browser replays automatically, so a stored payload would run with the
 operator's credentials against every /api route.
 
-The rule this test enforces: `innerHTML` may only be assigned a constant (in
-practice `''`, to clear a container). Anything data-driven goes through the
-`el()` / `row()` helpers in static/app.js, which set text as text.
+The rule this test enforces (§16.1 of docs/UI_CONCEPT_v2.md): `innerHTML` may
+only be assigned a constant (in practice `''`, to clear a container). Anything
+data-driven goes through the `el()` / `row()` helpers in
+`static/js/core/dom.js`, which set text as text.
 """
 
 from __future__ import annotations
@@ -26,7 +27,11 @@ CLEARING = re.compile(r"""innerHTML\s*=\s*(''|""|``)\s*;?\s*$""")
 
 def _js_sources() -> list[Path]:
     return sorted(
-        [*WEB_DIR.glob("templates/*.html"), *WEB_DIR.glob("static/*.js")]
+        [
+            *WEB_DIR.glob("templates/*.html"),
+            *WEB_DIR.glob("static/*.js"),
+            *WEB_DIR.glob("static/js/**/*.js"),
+        ]
     )
 
 
@@ -44,10 +49,26 @@ def test_no_data_driven_inner_html() -> None:
     )
 
 
-def test_helpers_are_available_to_every_page() -> None:
-    """The helpers live in app.js, which base.html loads before page scripts."""
-    app_js = (WEB_DIR / "static" / "app.js").read_text()
-    assert "function el(" in app_js
-    assert "function row(" in app_js
-    base = (WEB_DIR / "templates" / "base.html").read_text()
-    assert base.index("/static/app.js") < base.index("{% block script %}")
+def test_templates_carry_no_logic() -> None:
+    """Behaviour lives in ES modules, not in `<script>` blocks inside templates.
+
+    A template that scripts is a template that can grow string-built markup
+    again; keeping the rule structural is cheaper than re-reviewing it.
+    """
+    offenders = []
+    for path in WEB_DIR.glob("templates/*.html"):
+        text = path.read_text()
+        if "<script" in text and 'type="module" src=' not in text:
+            offenders.append(path.name)
+    assert not offenders, f"inline <script> in templates: {offenders}"
+
+
+def test_pages_get_the_safe_helpers() -> None:
+    """Every page module builds its nodes through core/dom.js."""
+    dom = (WEB_DIR / "static" / "js" / "core" / "dom.js").read_text()
+    assert "export function el(" in dom
+    assert "export function row(" in dom
+    pages = list((WEB_DIR / "static" / "js" / "pages").glob("*.js"))
+    assert pages, "no page modules found"
+    for page in pages:
+        assert "core/dom.js" in page.read_text(), page.name

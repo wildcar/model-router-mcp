@@ -92,9 +92,36 @@ it as a managed service on this host.
      dedicated `location ~ ^/api/(cli|runs)` gets 3600s with buffering off; the
      rest of the console gets 600s (image generation allows 180s plus a retry).
      Needs `cp` + `nginx -t` + reload on the prod host, see `deploy/DEPLOY.md`.
-- ✅ Tests green: `pytest` (51 passed). Note: `tests/test_web.py` now clears every
-  provider key explicitly — Settings still reads the repo `.env`, and a configured
-  adapter made the sync call the live DeepSeek API during tests.
+- ✅ Console wave 0 shipped (2026-07-26), everything in §21 of the concept except
+  vendoring htmx/Alpine (deferred to wave 1, when the first fragment needs them):
+  1. `/api/v1` is the contract; the bare `/api` prefix serves the same router so
+     a page loaded before a restart keeps working. Lists answer
+     `{items, total, next_cursor, facets}`.
+  2. One `Run` envelope (`web/views.py`) built from a dispatch and from a log
+     row, with `tests/test_web_views.py` failing on key drift.
+  3. Typed errors: each class carries `code`, `http_status`, `retriable`, `hint`;
+     the router attaches `log_id` before the exception leaves, one app handler
+     renders the envelope, MCP tools append the same facts to the message.
+  4. `request_logs` migration in one pass: channel/tool/client_id/
+     client_request_id, attempts, provider_status, provider_request_id,
+     session_id, return_code, cache/write/reasoning tokens, characters,
+     plan_json, finished_at.
+  5. Log reads: column projection, cursor paging by descending id, filters
+     (user/status/modality/model/channel/period, with_fallback, with_retries,
+     unverified_cost), `GET /logs/{id}` as a `Run`, indexes behind all of it.
+  6. `params` reach `/api/tts` and `/api/cli` (TTS language, claude-cli model
+     were unreachable from the web API).
+  7. Blobs: inline only for image/audio, `nosniff`, immutable cache, byte ranges.
+     `/health` trimmed to `{"status": "ok"}`.
+  8. Static skeleton: `css/tokens.css`, `js/core/{api,dom,format,state,keys}.js`,
+     page logic as ES modules in `js/pages/`, `?v=<version>` on every link.
+     `static/app.js` and all inline template scripts are gone.
+  9. `ProviderAdapter.SUPPORTED_PARAMS` feeds both the payload and the new
+     `ignored_params` on a run; the retry loop records each HTTP try, so the
+     two-level timeline has data; a read timeout logs `cost_source='cost_unknown'`.
+- ✅ Tests green: `pytest` (73 passed). One app per test session (`tests/conftest.py`):
+  FastMCP's session manager runs once per process. `Settings` still reads the repo
+  `.env`, so the fixture clears every provider key explicitly.
 - ✅ Process: humanizer-ru skill vendored to `.claude/skills/humanizer-ru/` and made
   mandatory for all agent-produced Russian prose (AGENTS.md → Language Rules).
 
@@ -103,11 +130,17 @@ it as a managed service on this host.
 - Deploy the registry-freshness pack to prod, run `POST /api/registry/refresh`
   there, and fill real prices for the live DeepSeek models in `/registry`
   (they arrive from the catalog with `price_source_kind='unknown'`).
-- Copy the updated nginx config to the prod host and reload it, then re-run a
-  long `/api/cli` request to confirm the 504 is gone.
-- Decide whether to start wave 0 of `docs/UI_CONCEPT_v2.md` (the remaining items
-  are the unified `Run` envelope, the error contract, the log-column projection
-  and the `request_logs` migration).
+- Copy the updated nginx config to the prod host and reload it (the long-run
+  location now also matches `/api/v1/cli`), then re-run a long `/api/cli`
+  request to confirm the 504 is gone.
+- Deploy wave 0 and watch the first restart: `_add_missing_columns` grows
+  sixteen columns on the live `request_logs` in one pass.
+- Wave 1 of `docs/UI_CONCEPT_v2.md`: `/api/v1/capabilities` from
+  `SUPPORTED_PARAMS` (plus an ADR-0001 addendum), `POST /api/v1/plan` that never
+  touches the network, five-item navigation with state in the address, the
+  inspector with four tabs and the two-level timeline, the JSON viewer, the
+  fallback as one select, `PATCH` on a registry model with the price-protection
+  criterion moved to price provenance.
 - Phase 5 (cont.): subscription/amortization UI; tune seed prices.
 - Phase 6: hardening, optional streaming for long CLI/chat runs.
 

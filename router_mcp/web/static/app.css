@@ -1,3 +1,5 @@
+/* Page styles. Colours, spacing and type live in css/tokens.css; the names
+ * below are kept as local aliases so this sheet reads unchanged. */
 :root { --bg:#0f1115; --card:#1a1d24; --fg:#e6e8eb; --muted:#9aa3af; --accent:#4f8cff; --err:#ff6b6b; --border:#2a2e37; }
 * { box-sizing: border-box; }
 body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.5 system-ui, sans-serif; }
@@ -29,6 +31,15 @@ td.trunc { max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space
 th.num, td.num { text-align:right; font-variant-numeric:tabular-nums; font-family:ui-monospace, "SF Mono", Menlo, monospace; white-space:nowrap; }
 .hint { color:var(--muted); font-size:12px; margin:0 0 12px; }
 .err { color:var(--err); }
+.ok { color:var(--ok, #4ade80); }
+.warn { color:var(--warn, #fbbf24); }
+.muted { color:var(--muted); }
+.mono { font-family:var(--font-mono, ui-monospace, Menlo, monospace); }
+/* The failure text opens under its own row: an error the operator cannot read
+   is an error they cannot act on. */
+td.log-error { color:var(--muted); background:#15181f; font-size:12px; }
+a { color:var(--accent); }
+:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 #toast { position:fixed; bottom:24px; right:24px; background:#262b34; border:1px solid var(--border); padding:12px 18px; border-radius:8px; opacity:0; transform:translateY(8px); transition:.2s; pointer-events:none; }
 #toast.show { opacity:1; transform:none; }
 #toast.error { border-color:var(--err); color:var(--err); }

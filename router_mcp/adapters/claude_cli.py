@@ -26,7 +26,9 @@ logger = logging.getLogger(__name__)
 
 class ClaudeCliAdapter(ProviderAdapter):
     name = "claude-cli"
+    env_var = "CLAUDE_COMMAND"
     supported_modalities = {Modality.CLI}
+    SUPPORTED_PARAMS = {Modality.CLI: ("cwd", "timeout_sec", "model")}
 
     def __init__(
         self,

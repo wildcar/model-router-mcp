@@ -32,7 +32,9 @@ _CLEAN_RE = [
 
 class ElevenLabsAdapter(RetryClientMixin, ProviderAdapter):
     name = "elevenlabs"
+    env_var = "ELEVENLABS_API_KEY"
     supported_modalities = {Modality.TTS}
+    SUPPORTED_PARAMS = {Modality.TTS: ("voice", "language")}
 
     def __init__(
         self,

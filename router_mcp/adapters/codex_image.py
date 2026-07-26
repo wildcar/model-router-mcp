@@ -38,7 +38,11 @@ CODEX_TOKEN_REFRESH_URL = "https://auth.openai.com/oauth/token"
 
 class CodexImageAdapter(ProviderAdapter):
     name = "codex-oauth"
+    env_var = "CODEX_AUTH_PATH"
     supported_modalities = {Modality.IMAGE}
+    # Size, quality and both model ids are fixed by configuration; the caller
+    # only supplies the prompt.
+    SUPPORTED_PARAMS = {Modality.IMAGE: ()}
 
     def __init__(
         self,

@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from router_mcp.adapters.base import ProviderAdapter
-from router_mcp.domain.errors import RouterError
+from router_mcp.domain.errors import BadRequest, RouterError
 from router_mcp.registry.models import RegistryModel
 from router_mcp.storage.database import Database
 
@@ -99,7 +99,7 @@ class RegistryService:
     async def sync_provider(self, provider_id: str) -> SyncReport:
         """Reconcile a single provider now (ignores the TTL)."""
         if provider_id not in self._adapters:
-            raise RouterError(f"Unknown provider {provider_id!r}")
+            raise BadRequest(f"Unknown provider {provider_id!r}")
         async with self._lock:
             return await self._sync_one(provider_id)
 

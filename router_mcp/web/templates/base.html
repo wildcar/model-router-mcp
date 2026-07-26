@@ -4,7 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Model Router{% endblock %}</title>
-  <link rel="stylesheet" href="/static/app.css">
+  {# ?v= is the app version: after a restart the browser must not keep running
+     yesterday's client against today's API. #}
+  <link rel="stylesheet" href="/static/css/tokens.css?v={{ version }}">
+  <link rel="stylesheet" href="/static/app.css?v={{ version }}">
 </head>
 <body>
   <header>
@@ -20,7 +23,10 @@
   <main>
     {% block content %}{% endblock %}
   </main>
-  <script src="/static/app.js"></script>
-  {% block script %}{% endblock %}
+  {# No page carries logic in a <script> block: templates are markup, behaviour
+     lives in static/js/pages/*.js as native ES modules (§18). #}
+  {% if page_script %}
+  <script type="module" src="/static/js/pages/{{ page_script }}.js?v={{ version }}"></script>
+  {% endif %}
 </body>
 </html>

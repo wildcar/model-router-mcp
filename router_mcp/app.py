@@ -14,18 +14,19 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from router_mcp import __version__
 from router_mcp.bootstrap import build_core
 from router_mcp.config import Settings, load_settings
+from router_mcp.domain.errors import RouterError
 from router_mcp.logging_config import setup_logging
 from router_mcp.mcp_server.tools import mcp
-from router_mcp.runtime import get_core, set_core
+from router_mcp.runtime import set_core
 from router_mcp.web.api import api_router, blob_router
 from router_mcp.web.pages import pages_router
+from router_mcp.web.views import error_envelope
 
 logger = logging.getLogger(__name__)
 
@@ -109,19 +110,39 @@ def build_app(settings: Settings | None = None) -> FastAPI:
     # Bearer-token gate for /mcp (no-op when AUTH_TOKEN is unset).
     app.add_middleware(McpBearerAuthMiddleware, token=settings.auth_token)
 
+    @app.exception_handler(RouterError)
+    async def router_error_handler(request: Request, exc: RouterError) -> JSONResponse:
+        """One error shape for the whole API (see web/views.error_envelope).
+
+        Each error class carries its own HTTP status and stable code, so a
+        caller can branch on `code` and the console can offer the right next
+        action — including "open this failure in the log", which needs the
+        `log_id` the router attached on the way out.
+        """
+        logger.info(
+            "API error %s %s -> %s (%s)",
+            request.method, request.url.path, exc.code, exc,
+        )
+        return JSONResponse(error_envelope(exc), status_code=exc.http_status)
+
     @app.get("/health")
     async def health() -> dict:
-        try:
-            providers = sorted(get_core().adapters)
-        except RuntimeError:
-            providers = []
-        return {"status": "ok", "version": __version__, "providers": providers}
+        """Public liveness only.
+
+        The version and the provider inventory used to be here; that is a map of
+        the installation handed out before Basic auth. The console reads the
+        same facts from /api/v1/health/summary, behind the gate.
+        """
+        return {"status": "ok"}
 
     # MCP Streamable HTTP endpoint (POST/GET to /mcp).
     app.mount("/mcp", mcp_app)
 
-    # Web JSON API + blob serving + pages.
-    app.include_router(api_router, prefix="/api")
+    # Web JSON API + blob serving + pages. `/api/v1` is the contract; the bare
+    # `/api` prefix stays so an in-flight page from before a restart does not
+    # break mid-session.
+    app.include_router(api_router, prefix="/api/v1")
+    app.include_router(api_router, prefix="/api", include_in_schema=False)
     app.include_router(blob_router)
     app.include_router(pages_router)
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

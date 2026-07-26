@@ -66,6 +66,9 @@ on it; adapters never touch storage/mcp directly.
 15. ✅ Per-provider catalog sync on a period: adapters expose `list_catalog()`, models missing upstream are deprecated rather than deleted, seeds never resurrect a retired id.
 16. ✅ Price provenance per model (`price_source`, `price_source_kind`, `price_checked_at`) and per provider (`pricing_url`); unverified prices surface as `cost_source='estimated'`.
 17. ✅ Request-level fallback policy for dead/unavailable models (`same` / `cheaper` / `pricier`), with the substitution reported and logged.
+18. ✅ Web contract: `/api/v1`, the `Run` envelope, the typed error envelope, `{items, total, next_cursor, facets}` lists, cursor-paged and column-projected log. [console wave 0]
+19. ✅ Call provenance and execution detail in the log: channel/tool/client, HTTP retries, upstream status and request id, token breakdown (cache/reasoning), `finished_at`.
+20. ✅ Response files are served safely: MIME whitelist for inline rendering, `nosniff`, immutable cache, byte ranges.
 
 ## Catalog freshness, price provenance, fallback
 
@@ -129,6 +132,90 @@ It never crosses modality and never retries a prompt-level rejection. The
 substitution is explicit in the response (`requested_model_id`, `model_id`,
 `fallback_reason`) and in `request_logs`.
 
+## Web contract (18–20)
+
+Wave 0 of `docs/UI_CONCEPT_v2.md`. The console is one consumer of it; MCP and
+any other caller see the same shapes.
+
+### Prefix and envelopes
+
+- `/api/v1` is the contract. The bare `/api` prefix serves the same router so a
+  page loaded before a restart keeps working; new work targets `/api/v1`.
+- Lists answer `{items, total, next_cursor, facets}` — a bare array has nowhere
+  to carry the total, the cursor or the facet counts.
+- Money is never returned without `cost_source`.
+- `/health` is public and says `{"status": "ok"}` only. Version and provider
+  inventory are a map of the installation and move behind the auth gate.
+
+### The `Run` envelope
+
+One shape for a run whether it just executed or is read back from the log, built
+by `web/views.run_from_dispatch` and `web/views.run_from_log`;
+`tests/test_web_views.py` fails if their key sets diverge. Fields: `run_id`,
+`log_id`, `status`, `modality`, `channel`, `tool`, `client_id`,
+`model {provider, model_id, display_name}`, `requested_model`,
+`fallback {kind, trigger, reason}`, `usage {prompt, completion, total,
+cache_read, cache_write, reasoning, audio_seconds, images, characters, raw}`,
+`cost {value, source, breakdown[]}`, `latency_ms`, `attempts`,
+`provider_status`, `provider_request_id`, `finish_reason`, `created_at`,
+`finished_at`, `text`, `steps[]`, `attachments[]`, `ignored_params[]`, `error`.
+
+A model is addressed by the pair (service provider + model id), never by the id
+alone. `fallback.kind` distinguishes a substitution planned before the call
+(`planned`) from one that followed a failure (`after_failure`): they cost
+differently. `steps[]` is the two-level timeline — provider attempts, each with
+the HTTP retries inside it, their upstream status and the wait the provider
+asked for.
+
+### Error envelope
+
+Every failure is a `RouterError` subclass carrying `code`, `http_status`,
+`retriable` and, where useful, `provider`, `model_id`, `provider_status`,
+`retry_after_s` and a `hint`. One app-level handler renders
+`{"error": {type, code, message, provider, model_id, log_id, retriable,
+provider_status, retry_after_s, hint}}`.
+
+| Code | Status | Raised when |
+|---|---|---|
+| `bad_request` | 400 | caller sent a malformed value |
+| `not_found` | 404 | log entry or blob does not exist |
+| `unknown_model` | 404 | no registry row for the model id |
+| `model_retired` / `provider_disabled` / `model_unavailable` | 409 | the pair cannot serve the request |
+| `response_truncated` | 422 | output ceiling hit before any content |
+| `rate_limited` | 429 | provider refused; `retry_after_s` when it said so |
+| `not_configured` | 503 | no key/binary; `hint.env_var` names the variable |
+| `provider_timeout` | 504 | no answer inside the read timeout |
+| `provider_error` / `provider_unavailable` / `access_denied` | 502 | upstream failure |
+
+`log_id` is written before the exception leaves the router and travels on the
+exception, so "open this failure in the log" works from every screen. MCP tools
+get the same facts appended to the message text, since FastMCP hands clients
+`str(exception)`.
+
+### Log reads
+
+`GET /api/v1/logs` is cursor-paged by descending id (offset would repeat rows,
+because the log grows from the head) and projected to the columns the table
+shows — the full row carries the response text and the raw usage block.
+Filters: user, status, modality, model, channel, since/until, `with_fallback`,
+`with_retries`, `unverified_cost`. `GET /api/v1/logs/{id}` returns the full row
+as a `Run`.
+
+### Adapter parameter declarations
+
+`ProviderAdapter.SUPPORTED_PARAMS` maps modality → the `request.params` keys the
+adapter reads. The adapter builds its payload from that same tuple, and anything
+the caller sent outside it comes back as `ignored_params` on the run: silently
+dropping `tools` or `seed` lets a caller pay for a request that ignored half of
+what they asked for.
+
+### Response files
+
+Blobs render inline only for `image/*` and `audio/*`; everything else is
+`Content-Disposition: attachment`. Always `X-Content-Type-Options: nosniff`,
+immutable long cache (the ref is generated per payload) and byte-range support
+so an audio player can seek.
+
 ## Project structure
 
 ```
@@ -149,10 +236,23 @@ router_mcp/
   storage/database.py  aiosqlite schema + CRUD + logging + usage
   blobs/store.py       on-disk blob store
   mcp_server/          tools (FastMCP), serialize
-  web/                 api (JSON), pages (Jinja2), templates/, static/
-tests/                 test_smoke (chain), test_web (app), test_modalities,
-                       test_adapters_parse, test_cli, test_auth; mcp_probe.py (manual)
+  web/                 api (JSON, mounted at /api/v1 and /api), views (Run and
+                       error envelopes), pages (Jinja2 frames), templates/,
+                       static/{app.css, css/tokens.css,
+                       js/core/{api,dom,format,state,keys}.js, js/pages/*.js}
+tests/                 conftest (one app per session), test_smoke (chain),
+                       test_web (app), test_web_views (envelope parity),
+                       test_api_filters (log filters/cursor), test_blobs
+                       (file-serving headers), test_escaping (no innerHTML),
+                       test_modalities, test_adapters_parse, test_cli,
+                       test_fallback, test_registry_sync, test_auth;
+                       mcp_probe.py (manual)
 ```
+
+Frontend rule: templates are markup only; behaviour lives in native ES modules
+under `static/js/`, pages get their module from `page_script`, and static links
+carry `?v=<app version>` so a restart cannot leave an old client talking to a
+new API.
 
 ## Deployment
 
@@ -164,7 +264,7 @@ tests/                 test_smoke (chain), test_web (app), test_modalities,
   `deploy/install.sh`, `deploy/deploy.sh`, `deploy/nginx-model-router.conf`.
 - Secrets/config live in `.env` (see `.env.example`); never committed.
 - Runtime data (`data/router.db`, `data/blobs/`) and `logs/` are gitignored.
-- Endpoints: `GET /health` (open); `/mcp` (Streamable HTTP, requires
+- Endpoints: `GET /health` (open, status only); `/mcp` (Streamable HTTP, requires
   `Authorization: Bearer $AUTH_TOKEN` when set, enforced by a pure-ASGI middleware);
   web console `/`, `/registry`, `/logs` (guarded by nginx HTTP Basic auth).
 

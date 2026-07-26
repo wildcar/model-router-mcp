@@ -26,7 +26,9 @@ logger = logging.getLogger(__name__)
 
 class CodexCliAdapter(ProviderAdapter):
     name = "codex-cli"
+    env_var = "CODEX_COMMAND"
     supported_modalities = {Modality.CLI}
+    SUPPORTED_PARAMS = {Modality.CLI: ("cwd", "timeout_sec")}
 
     def __init__(
         self,

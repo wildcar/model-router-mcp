@@ -2,6 +2,12 @@
 
 Mirrors the MCP tools but is multipart-friendly (file uploads in later phases)
 and adds registry-admin CRUD. Shares the same AppCore as the MCP tools.
+
+Mounted twice: at `/api/v1` (the contract) and at `/api` (what the current
+console still calls). Lists answer with the `{items, total, next_cursor, facets}`
+envelope, runs with the `Run` envelope from `web/views.py`, failures with the
+error envelope — a bare array or a bare number has nowhere to carry the total,
+the cursor or the provenance of a price.
 """
 
 from __future__ import annotations
@@ -10,19 +16,16 @@ import base64
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, File, Form, HTTPException, Response, UploadFile
+from fastapi import APIRouter, File, Form, Request, Response, UploadFile
 from pydantic import BaseModel
 
-from router_mcp.domain.errors import RouterError
+from router_mcp.domain.errors import BadRequest, NotFound
 from router_mcp.domain.messages import Attachment, FallbackPolicy, RouterRequest
 from router_mcp.domain.modality import Modality
-from router_mcp.mcp_server.serialize import (
-    attachments_web,
-    dispatch_summary,
-    model_to_dict,
-)
+from router_mcp.mcp_server.serialize import model_to_dict
 from router_mcp.registry.models import RegistryModel
 from router_mcp.runtime import get_core
+from router_mcp.web.views import page, run_from_dispatch, run_from_log
 
 api_router = APIRouter()
 blob_router = APIRouter()
@@ -33,7 +36,34 @@ def parse_fallback(value: Any) -> FallbackPolicy | None:
     try:
         return FallbackPolicy.parse(value)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise BadRequest(str(exc)) from exc
+
+
+def _channel(http_request: Request | None) -> tuple[str, str | None]:
+    """Where this call came from, for the log.
+
+    The console sends `X-Router-Channel: ui`; anything else calling `/api` is a
+    program. The client label is free-form and untrusted — a grouping key in the
+    log, exactly like `external_user_id`.
+    """
+    if http_request is None:
+        return "api", None
+    channel = (http_request.headers.get("x-router-channel") or "api").strip().lower()
+    if channel not in ("ui", "api", "mcp"):
+        channel = "api"
+    client = http_request.headers.get("x-router-client")
+    return channel, (client or None)
+
+
+async def _run(request: RouterRequest) -> dict[str, Any]:
+    """Dispatch and answer with the Run envelope.
+
+    RouterError travels up to the app-level handler, which turns it into the
+    error envelope with its code, hint and `log_id`; catching it here would throw
+    away exactly the fields the console needs.
+    """
+    result = await get_core().router.dispatch(request)
+    return run_from_dispatch(result, request)
 
 
 class ChatBody(BaseModel):
@@ -64,6 +94,11 @@ class TtsBody(BaseModel):
     voice: str | None = None
     model_id: str | None = None
     provider: str | None = None
+    # `voice` above is the shorthand the console has always sent; `params` is the
+    # general channel. Without it `language` was reachable from the adapter and
+    # from MCP but not from the web API, so the form described a field that did
+    # not exist.
+    params: dict[str, Any] | None = None
     fallback: dict[str, Any] | str | None = None
 
 
@@ -73,6 +108,8 @@ class CliBody(BaseModel):
     engine: str = "codex"  # "codex" | "claude"
     cwd: str | None = None
     timeout_sec: int | None = None
+    # Same gap as tts: `model` (claude-cli) had no way in from the web API.
+    params: dict[str, Any] | None = None
 
 
 class ManualModelBody(BaseModel):
@@ -103,147 +140,176 @@ class ProviderPatch(BaseModel):
 @api_router.get("/models")
 async def api_models(
     modality: str | None = None, tier: str | None = None, provider: str | None = None
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     core = get_core()
     models = await core.registry.get_models(modality=modality, tier=tier, provider=provider)
-    return [model_to_dict(m) for m in models]
+    items = [model_to_dict(m) for m in models]
+    return page(items, total=len(items))
 
 
 @api_router.post("/chat")
-async def api_chat(body: ChatBody) -> dict[str, Any]:
-    core = get_core()
-    request = RouterRequest(
-        modality=Modality.CHAT,
-        external_user_id=body.external_user_id,
-        model_id=body.model_id,
-        tier=body.tier,
-        provider_hint=body.provider,
-        text=body.text,
-        messages=body.messages,
-        params=body.params or {},
-        fallback=parse_fallback(body.fallback),
+async def api_chat(body: ChatBody, http_request: Request) -> dict[str, Any]:
+    channel, client_id = _channel(http_request)
+    return await _run(
+        RouterRequest(
+            modality=Modality.CHAT,
+            external_user_id=body.external_user_id,
+            model_id=body.model_id,
+            tier=body.tier,
+            provider_hint=body.provider,
+            text=body.text,
+            messages=body.messages,
+            params=body.params or {},
+            fallback=parse_fallback(body.fallback),
+            channel=channel,
+            client_id=client_id,
+        )
     )
-    try:
-        result = await core.router.dispatch(request)
-    except RouterError as exc:
-        raise HTTPException(status_code=502, detail=f"{type(exc).__name__}: {exc}") from exc
-    out = dispatch_summary(result)
-    out["text"] = result.response.text
-    if result.response.attachments:
-        out["image_urls"] = [a.url for a in result.response.attachments if a.url]
-        out["image_refs"] = [a.ref for a in result.response.attachments if a.ref]
-    return out
 
 
 @api_router.post("/image")
-async def api_image(body: ImageBody) -> dict[str, Any]:
-    core = get_core()
-    request = RouterRequest(
-        modality=Modality.IMAGE,
-        external_user_id=body.external_user_id,
-        model_id=body.model_id,
-        provider_hint=body.provider,
-        text=body.prompt,
-        params=body.params or {},
-        fallback=parse_fallback(body.fallback),
+async def api_image(body: ImageBody, http_request: Request) -> dict[str, Any]:
+    channel, client_id = _channel(http_request)
+    return await _run(
+        RouterRequest(
+            modality=Modality.IMAGE,
+            external_user_id=body.external_user_id,
+            model_id=body.model_id,
+            provider_hint=body.provider,
+            text=body.prompt,
+            params=body.params or {},
+            fallback=parse_fallback(body.fallback),
+            channel=channel,
+            client_id=client_id,
+        )
     )
-    try:
-        result = await core.router.dispatch(request)
-    except RouterError as exc:
-        raise HTTPException(status_code=502, detail=f"{type(exc).__name__}: {exc}") from exc
-    out = dispatch_summary(result)
-    out.update(attachments_web(result.response.attachments))
-    return out
 
 
 @api_router.post("/transcribe")
 async def api_transcribe(
+    http_request: Request,
     file: UploadFile = File(...),
     external_user_id: str = Form("web-tester"),
     model_id: str | None = Form(None),
     provider: str | None = Form(None),
 ) -> dict[str, Any]:
-    core = get_core()
     audio = await file.read()
-    request = RouterRequest(
-        modality=Modality.STT,
-        external_user_id=external_user_id,
-        model_id=model_id,
-        provider_hint=provider,
-        attachments=[
-            Attachment(kind="audio", mime=file.content_type or "audio/ogg", data=audio)
-        ],
+    channel, client_id = _channel(http_request)
+    return await _run(
+        RouterRequest(
+            modality=Modality.STT,
+            external_user_id=external_user_id,
+            model_id=model_id,
+            provider_hint=provider,
+            attachments=[
+                Attachment(kind="audio", mime=file.content_type or "audio/ogg", data=audio)
+            ],
+            channel=channel,
+            client_id=client_id,
+        )
     )
-    try:
-        result = await core.router.dispatch(request)
-    except RouterError as exc:
-        raise HTTPException(status_code=502, detail=f"{type(exc).__name__}: {exc}") from exc
-    out = dispatch_summary(result)
-    out["text"] = result.response.text
-    return out
 
 
 @api_router.post("/tts")
-async def api_tts(body: TtsBody) -> dict[str, Any]:
-    core = get_core()
-    params = {"voice": body.voice} if body.voice else {}
-    request = RouterRequest(
-        modality=Modality.TTS,
-        external_user_id=body.external_user_id,
-        model_id=body.model_id,
-        provider_hint=body.provider,
-        text=body.text,
-        params=params,
-        fallback=parse_fallback(body.fallback),
+async def api_tts(body: TtsBody, http_request: Request) -> dict[str, Any]:
+    params: dict[str, Any] = dict(body.params or {})
+    if body.voice:
+        params["voice"] = body.voice
+    channel, client_id = _channel(http_request)
+    return await _run(
+        RouterRequest(
+            modality=Modality.TTS,
+            external_user_id=body.external_user_id,
+            model_id=body.model_id,
+            provider_hint=body.provider,
+            text=body.text,
+            params=params,
+            fallback=parse_fallback(body.fallback),
+            channel=channel,
+            client_id=client_id,
+        )
     )
-    try:
-        result = await core.router.dispatch(request)
-    except RouterError as exc:
-        raise HTTPException(status_code=502, detail=f"{type(exc).__name__}: {exc}") from exc
-    out = dispatch_summary(result)
-    out.update(attachments_web(result.response.attachments))
-    return out
 
 
 @api_router.post("/cli")
-async def api_cli(body: CliBody) -> dict[str, Any]:
-    core = get_core()
+async def api_cli(body: CliBody, http_request: Request) -> dict[str, Any]:
     engine = body.engine.strip().lower()
     if engine not in ("codex", "claude"):
-        raise HTTPException(status_code=400, detail="engine must be 'codex' or 'claude'")
-    params: dict[str, Any] = {}
+        raise BadRequest("engine must be 'codex' or 'claude'")
+    params: dict[str, Any] = dict(body.params or {})
     if body.cwd:
         params["cwd"] = body.cwd
     if body.timeout_sec:
         params["timeout_sec"] = body.timeout_sec
-    request = RouterRequest(
-        modality=Modality.CLI,
-        external_user_id=body.external_user_id,
-        provider_hint=f"{engine}-cli",
-        text=body.prompt,
-        params=params,
+    channel, client_id = _channel(http_request)
+    return await _run(
+        RouterRequest(
+            modality=Modality.CLI,
+            external_user_id=body.external_user_id,
+            provider_hint=f"{engine}-cli",
+            text=body.prompt,
+            params=params,
+            channel=channel,
+            client_id=client_id,
+        )
     )
-    try:
-        result = await core.router.dispatch(request)
-    except RouterError as exc:
-        raise HTTPException(status_code=502, detail=f"{type(exc).__name__}: {exc}") from exc
-    out = dispatch_summary(result)
-    out["text"] = result.response.text
-    out["session_id"] = result.response.raw_meta.get("session_id")
-    return out
 
 
 @api_router.get("/logs")
-async def api_logs(user: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+async def api_logs(
+    user: str | None = None,
+    status: str | None = None,
+    modality: str | None = None,
+    model_id: str | None = None,
+    channel: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    with_fallback: bool = False,
+    with_retries: bool = False,
+    unverified_cost: bool = False,
+    cursor: int | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """One page of the log, newest first.
+
+    `cursor` is the id to page *before*: the log grows from the head, so an
+    offset would show part of page one again on page two.
+    """
     core = get_core()
-    return await core.db.list_request_logs(external_user_id=user, limit=limit)
+    limit = max(1, min(limit, 200))
+    filters = dict(
+        external_user_id=user,
+        status=status,
+        modality=modality,
+        model_id=model_id,
+        channel=channel,
+        since=since,
+        until=until,
+        with_fallback=with_fallback,
+        with_retries=with_retries,
+        unverified_cost=unverified_cost,
+    )
+    rows = await core.db.list_request_logs(before_id=cursor, limit=limit, **filters)
+    total = await core.db.count_request_logs(**filters)
+    next_cursor = rows[-1]["id"] if len(rows) == limit else None
+    return page(rows, total=total, next_cursor=next_cursor)
+
+
+@api_router.get("/logs/{log_id}")
+async def api_log(log_id: int) -> dict[str, Any]:
+    """The full row as a Run envelope — the same shape the inspector renders
+    right after a run, so one component serves both."""
+    row = await get_core().db.get_request_log(log_id)
+    if row is None:
+        raise NotFound(f"No log entry {log_id}")
+    return run_from_log(row)
 
 
 @api_router.get("/usage")
-async def api_usage(user: str | None = None, since: str | None = None) -> list[dict[str, Any]]:
+async def api_usage(user: str | None = None, since: str | None = None) -> dict[str, Any]:
     core = get_core()
     rows = await core.db.get_usage(external_user_id=user, since=since)
-    return [
+    items = [
         {
             "external_user_id": r.external_user_id,
             "requests": r.requests,
@@ -252,6 +318,7 @@ async def api_usage(user: str | None = None, since: str | None = None) -> list[d
         }
         for r in rows
     ]
+    return page(items, total=len(items))
 
 
 # --- registry admin -----------------------------------------------------
@@ -264,10 +331,10 @@ async def _provider_pricing_url(core, provider_id: str) -> str | None:
 
 
 @api_router.get("/registry/providers")
-async def api_providers() -> list[dict[str, Any]]:
+async def api_providers() -> dict[str, Any]:
     core = get_core()
     providers = await core.db.get_service_providers()
-    return [
+    items = [
         {
             "id": p.id,
             "display_name": p.display_name,
@@ -278,9 +345,12 @@ async def api_providers() -> list[dict[str, Any]]:
             "configured": p.id in core.adapters and core.adapters[p.id].is_configured(),
             "base_url": p.base_url,
             "pricing_url": p.pricing_url,
+            # By name only: the console must never learn a secret's value.
+            "env_var": core.adapters[p.id].env_var if p.id in core.adapters else None,
         }
         for p in providers
     ]
+    return page(items, total=len(items))
 
 
 @api_router.patch("/registry/providers/{provider_id}")
@@ -295,24 +365,22 @@ async def api_refresh_catalog(provider: str | None = None) -> dict[str, Any]:
     """Re-read provider catalogs now. Without `provider`, every provider that
     has one. Reports what changed, including models deprecated upstream."""
     core = get_core()
-    try:
-        reports = (
-            [await core.registry.sync_provider(provider)]
-            if provider
-            else await core.registry.sync_all(force=True)
-        )
-    except RouterError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    reports = (
+        [await core.registry.sync_provider(provider)]
+        if provider
+        else await core.registry.sync_all(force=True)
+    )
     return {"providers": [r.as_dict() for r in reports]}
 
 
 @api_router.get("/registry/models")
 async def api_registry_models(
     source: str | None = None, modality: str | None = None
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
     core = get_core()
     models = await core.db.list_registry_models(source=source, modality=modality, active_only=False)
-    return [model_to_dict(m) for m in models]
+    items = [model_to_dict(m) for m in models]
+    return page(items, total=len(items))
 
 
 @api_router.post("/registry/models")
@@ -321,7 +389,7 @@ async def api_add_manual_model(body: ManualModelBody) -> dict[str, Any]:
     try:
         modalities = tuple(Modality.from_str(m) for m in body.modalities)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise BadRequest(str(exc)) from exc
     tier = body.tier or RegistryModel.compute_tier(body.prompt_price, body.completion_price)
     model = RegistryModel(
         service_provider_id=body.service_provider_id,
@@ -355,16 +423,61 @@ async def api_delete_model(service_provider_id: str, model_id: str) -> dict[str,
 
 
 # --- blob serving -------------------------------------------------------
+# Only these render in the browser. Everything else downloads: a caller can put
+# an `.html` payload into a response, and serving it inline would run it on the
+# same origin as the console, behind the operator's Basic-auth session.
+INLINE_MIME_PREFIXES = ("image/", "audio/")
+
+
 @blob_router.get("/blobs/{ref}")
-async def serve_blob(ref: str) -> Response:
+async def serve_blob(ref: str, request: Request) -> Response:
     core = get_core()
     if not core.blobs.exists(ref):
-        raise HTTPException(status_code=404, detail="Blob not found")
+        raise NotFound("Blob not found")
     try:
         data = core.blobs.load(ref)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return Response(content=data, media_type=core.blobs.mime_of(ref))
+        raise BadRequest(str(exc)) from exc
+    mime = core.blobs.mime_of(ref)
+    inline = mime.startswith(INLINE_MIME_PREFIXES)
+    headers = {
+        "X-Content-Type-Options": "nosniff",
+        "Content-Disposition": (
+            f'{"inline" if inline else "attachment"}; filename="{ref}"'
+        ),
+        # Blob content is immutable — the ref is generated per payload — so the
+        # browser may keep it forever. Range support lets the audio player seek
+        # instead of refetching the whole file.
+        "Cache-Control": "public, max-age=31536000, immutable",
+        "Accept-Ranges": "bytes",
+    }
+    start, end = _parse_range(request.headers.get("range"), len(data))
+    if start is not None:
+        chunk = data[start : end + 1]
+        headers["Content-Range"] = f"bytes {start}-{end}/{len(data)}"
+        return Response(content=chunk, status_code=206, media_type=mime, headers=headers)
+    return Response(content=data, media_type=mime, headers=headers)
+
+
+def _parse_range(header: str | None, size: int) -> tuple[int | None, int]:
+    """Single `bytes=a-b` range, clamped. Anything else means "send it whole"."""
+    if not header or not header.startswith("bytes=") or size == 0:
+        return None, 0
+    spec = header[len("bytes=") :].split(",")[0].strip()
+    first, _, last = spec.partition("-")
+    try:
+        if not first:  # suffix form: last N bytes
+            length = int(last)
+            if length <= 0:
+                return None, 0
+            return max(0, size - length), size - 1
+        start = int(first)
+        end = int(last) if last else size - 1
+    except ValueError:
+        return None, 0
+    if start >= size or start > end:
+        return None, 0
+    return start, min(end, size - 1)
 
 
 def decode_b64(value: str) -> bytes:

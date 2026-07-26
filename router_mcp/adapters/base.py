@@ -10,6 +10,8 @@ from __future__ import annotations
 import abc
 import asyncio
 import logging
+import time
+from contextvars import ContextVar
 from typing import Any
 
 import httpx
@@ -20,7 +22,9 @@ from router_mcp.domain.errors import (
     AccessDenied,
     ModelUnavailable,
     ProviderError,
+    ProviderTimeout,
     ProviderUnavailable,
+    RateLimited,
     ResponseTruncated,
 )
 from router_mcp.domain.messages import RouterRequest, RouterResponse
@@ -30,6 +34,50 @@ from router_mcp.registry.models import RegistryModel
 logger = logging.getLogger(__name__)
 
 RETRY_STATUS = {429, 500, 502, 503, 504}
+
+# HTTP retries happen inside one provider attempt and today they are invisible:
+# an answer that took eight seconds because of two 429s and a sleep reads on
+# screen as "a slow model". The retry loop records each try here; the router
+# drains the list once the attempt finishes. A ContextVar (not an attribute on
+# the adapter) because one adapter instance serves concurrent requests.
+_http_trace: ContextVar[list[dict[str, Any]] | None] = ContextVar("http_trace", default=None)
+
+
+def start_http_trace() -> None:
+    """Begin recording HTTP tries for the current provider attempt."""
+    _http_trace.set([])
+
+
+def take_http_trace() -> list[dict[str, Any]]:
+    """Return the tries recorded since `start_http_trace` and stop recording."""
+    trace = _http_trace.get() or []
+    _http_trace.set(None)
+    return trace
+
+
+def _record_try(**fields: Any) -> None:
+    trace = _http_trace.get()
+    if trace is not None:
+        trace.append(fields)
+
+
+def parse_retry_after(response: httpx.Response) -> float | None:
+    """Seconds the provider asked us to wait, when it said so in a header.
+
+    Only the numeric form is honoured: the HTTP-date form is rare here and
+    guessing a clock skew is worse than reporting nothing.
+    """
+    for header in ("retry-after", "x-ratelimit-reset-after"):
+        raw = response.headers.get(header)
+        if not raw:
+            continue
+        try:
+            value = float(raw.strip())
+        except ValueError:
+            continue
+        if value >= 0:
+            return value
+    return None
 
 # "This model id is gone" as the OpenAI-compatible providers phrase it. Matching
 # on the text is unpleasant but it is the only signal they give: DeepSeek and
@@ -61,11 +109,40 @@ def truncated_error(
     )
 
 
+def ignored_params(
+    adapter: "ProviderAdapter", modality: Modality, params: dict[str, Any] | None
+) -> list[str]:
+    """Params the caller sent that this adapter will not read.
+
+    Adapters drop `tools`, `response_format`, `seed` and friends without a word,
+    so a caller can spend money on a request that quietly ignored half of it.
+    Naming the difference is the whole point; when an adapter has not declared
+    its parameters we stay silent rather than invent a warning.
+    """
+    if not params or adapter.SUPPORTED_PARAMS is None:
+        return []
+    supported = adapter.SUPPORTED_PARAMS.get(modality)
+    if supported is None:
+        return []
+    return sorted(key for key in params if key not in supported)
+
+
 class ProviderAdapter(abc.ABC):
     """Common interface every provider adapter implements."""
 
     name: str  # service-provider id, e.g. "openrouter"
     supported_modalities: set[Modality]
+    # Environment variable that configures this adapter, if any. Shown by name
+    # (never by value) when a request fails with "provider not configured": the
+    # operator's next action is to set it.
+    env_var: str | None = None
+
+    # Which `request.params` keys this adapter actually reads, per modality.
+    # One tuple, two consumers: the adapter builds its payload from it and the
+    # console renders exactly these fields — a hand-written copy in web/ drifts
+    # from the code on the first new adapter. `None` means "not declared yet",
+    # which suppresses the "ignored parameter" warning rather than guessing.
+    SUPPORTED_PARAMS: dict[Modality, tuple[str, ...]] | None = None
 
     @abc.abstractmethod
     def is_configured(self) -> bool:
@@ -100,31 +177,67 @@ class RetryClientMixin:
 
     async def _request_with_retry(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
         attempts = self._retries + 1
+        started = time.monotonic()
         for attempt in range(1, attempts + 1):
+            at_ms = int((time.monotonic() - started) * 1000)
             try:
                 response = await self._client.request(method, url, **kwargs)
-                if response.status_code in (401, 403):
-                    raise AccessDenied(f"Authorization failed ({response.status_code})")
-                if response.status_code in RETRY_STATUS:
-                    if attempt < attempts:
-                        await asyncio.sleep(0.4 * attempt)
-                        continue
-                    raise ProviderUnavailable(
-                        f"Upstream temporarily unavailable (HTTP {response.status_code})"
+                status = response.status_code
+                if status in (401, 403):
+                    _record_try(at_ms=at_ms, status=status)
+                    raise AccessDenied(
+                        f"Authorization failed ({status})", provider_status=status
                     )
-                if response.status_code >= 400:
+                if status in RETRY_STATUS:
+                    asked = parse_retry_after(response)
+                    wait = asked if asked is not None else 0.4 * attempt
+                    last = attempt >= attempts
+                    _record_try(
+                        at_ms=at_ms,
+                        status=status,
+                        retry_after_s=asked,
+                        wait_s=None if last else wait,
+                    )
+                    if not last:
+                        await asyncio.sleep(wait)
+                        continue
+                    if status == 429:
+                        raise RateLimited(
+                            f"Provider rate limit reached (HTTP 429) after {attempts} tries",
+                            provider_status=status,
+                            retry_after_s=asked,
+                        )
+                    raise ProviderUnavailable(
+                        f"Upstream temporarily unavailable (HTTP {status})",
+                        provider_status=status,
+                    )
+                _record_try(at_ms=at_ms, status=status)
+                if status >= 400:
                     body = response.text[:500]
                     # A retired model id is the one 4xx a fallback policy may
                     # answer by choosing a different model.
-                    if response.status_code == 404 or (
-                        response.status_code == 400 and MODEL_GONE_RE.search(body)
-                    ):
-                        raise ModelUnavailable(f"HTTP {response.status_code}: {body}")
-                    raise ProviderError(f"HTTP {response.status_code}: {body}")
+                    if status == 404 or (status == 400 and MODEL_GONE_RE.search(body)):
+                        raise ModelUnavailable(
+                            f"HTTP {status}: {body}", provider_status=status
+                        )
+                    raise ProviderError(f"HTTP {status}: {body}", provider_status=status)
                 return response
             except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
                 logger.warning("HTTP network error attempt=%s url=%s: %s", attempt, url, exc)
-                if attempt >= attempts:
+                timed_out = isinstance(exc, httpx.TimeoutException)
+                last = attempt >= attempts
+                _record_try(
+                    at_ms=at_ms,
+                    error=f"{type(exc).__name__}: {exc}"[:200],
+                    wait_s=None if last else 0.4 * attempt,
+                )
+                if last:
+                    if timed_out:
+                        # The provider very likely ran (and billed) the request;
+                        # the caller just never saw the answer.
+                        raise ProviderTimeout(
+                            "Provider did not answer within the read timeout"
+                        ) from exc
                     raise ProviderUnavailable("Could not reach upstream provider") from exc
                 await asyncio.sleep(0.4 * attempt)
         raise ProviderUnavailable("Upstream unavailable")

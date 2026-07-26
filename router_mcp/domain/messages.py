@@ -32,13 +32,24 @@ class Attachment:
 @dataclass(slots=True)
 class Usage:
     """Normalized metering. Fields are populated per modality; `raw` keeps the
-    provider-native usage block verbatim so nothing is lost."""
+    provider-native usage block verbatim so nothing is lost.
+
+    The cache/reasoning breakdown is not cosmetic: Anthropic reports cache reads
+    outside `input_tokens` and DeepSeek bills a cache hit about an order of
+    magnitude cheaper, so a single prompt-token number makes the cost wrong by
+    multiples rather than percents. Adapters fill what their provider reports;
+    `None` means "not reported", which is not the same as zero.
+    """
 
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     total_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    cache_write_tokens: int | None = None
+    reasoning_tokens: int | None = None
     audio_seconds: float | None = None
     images: int | None = None
+    characters: int | None = None  # TTS is billed per character, not per token
     raw: dict[str, Any] = field(default_factory=dict)
 
 
@@ -103,6 +114,13 @@ class RouterRequest:
     attachments: list[Attachment] = field(default_factory=list)
     params: dict[str, Any] = field(default_factory=dict)  # passthrough knobs
     fallback: FallbackPolicy | None = None  # None == off
+    # Call provenance, logged but never used for routing or access decisions.
+    # Without it the log cannot answer "who is calling this service", which is
+    # the question every MCP deployment asks first.
+    channel: str = "api"  # "mcp" | "api" | "ui"
+    tool: str | None = None  # MCP tool name, when the call came through /mcp
+    client_id: str | None = None  # caller-supplied label; untrusted, like the user id
+    client_request_id: str | None = None  # caller's idempotency key
 
 
 @dataclass(slots=True)

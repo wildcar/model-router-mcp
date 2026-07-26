@@ -59,7 +59,11 @@ async def test_image_cost_and_blob(tmp_path):
         assert ref and blobs.exists(ref)
         assert blobs.load(ref) == b"PNGBYTES"
         logs = await db.list_request_logs(external_user_id="u")
-        assert logs[0]["images"] == 1 and logs[0]["response_ref"] == ref
+        assert logs[0]["images"] == 1
+        # response_ref is detail, not a table column: the list projection only
+        # carries what the log table on screen shows.
+        detail = await db.get_request_log(logs[0]["id"])
+        assert detail["response_ref"] == ref
     finally:
         await registry.close(); await db.close()
 
@@ -79,7 +83,9 @@ async def test_stt_cost(tmp_path):
         assert result.cost.cost_usd == pytest.approx(0.01)  # 10s * 0.001
         # request audio persisted to blob
         logs = await db.list_request_logs(external_user_id="u")
-        assert logs[0]["request_ref"] and logs[0]["audio_seconds"] == 10.0
+        assert logs[0]["audio_seconds"] == 10.0
+        detail = await db.get_request_log(logs[0]["id"])
+        assert detail["request_ref"]
     finally:
         await registry.close(); await db.close()
 

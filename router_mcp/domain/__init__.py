@@ -6,10 +6,19 @@ inward, towards these types, to keep the import graph acyclic.
 
 from router_mcp.domain.errors import (
     AccessDenied,
+    BadRequest,
+    ModelRetired,
+    ModelUnavailable,
     NotConfigured,
+    NotFound,
+    ProviderDisabled,
     ProviderError,
+    ProviderTimeout,
     ProviderUnavailable,
+    RateLimited,
+    ResponseTruncated,
     RouterError,
+    UnknownModel,
 )
 from router_mcp.domain.messages import Attachment, RouterRequest, RouterResponse, Usage
 from router_mcp.domain.modality import Modality
@@ -21,8 +30,17 @@ __all__ = [
     "RouterResponse",
     "Usage",
     "RouterError",
+    "BadRequest",
+    "UnknownModel",
+    "ModelRetired",
+    "ModelUnavailable",
     "ProviderUnavailable",
+    "ProviderTimeout",
+    "RateLimited",
     "ProviderError",
+    "ResponseTruncated",
     "AccessDenied",
     "NotConfigured",
+    "NotFound",
+    "ProviderDisabled",
 ]

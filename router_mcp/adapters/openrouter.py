@@ -34,7 +34,12 @@ PRICE_SOURCE = "api:openrouter GET /models (pricing)"
 
 class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
     name = "openrouter"
+    env_var = "OPENROUTER_API_KEY"
     supported_modalities = {Modality.CHAT, Modality.IMAGE}
+    SUPPORTED_PARAMS = {
+        Modality.CHAT: ("temperature", "max_tokens", "top_p", "reasoning"),
+        Modality.IMAGE: ("temperature", "max_tokens", "top_p", "reasoning"),
+    }
 
     def __init__(
         self,
@@ -62,7 +67,7 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
     async def generate(self, request: RouterRequest, model: RegistryModel) -> RouterResponse:
         messages = self._build_messages(request)
         payload: dict[str, Any] = {"model": model.model_id, "messages": messages}
-        for key in ("temperature", "max_tokens", "top_p", "reasoning"):
+        for key in self.SUPPORTED_PARAMS[Modality.CHAT]:
             if key in request.params:
                 payload[key] = request.params[key]
 

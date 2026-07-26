@@ -15,16 +15,27 @@ from __future__ import annotations
 import json
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any
 
 from router_mcp.accounting.cost import CostResult, compute_cost
-from router_mcp.adapters.base import ProviderAdapter
+from router_mcp.adapters.base import (
+    ProviderAdapter,
+    ignored_params,
+    start_http_trace,
+    take_http_trace,
+)
 from router_mcp.blobs.store import BlobStore
 from router_mcp.domain.errors import (
+    ModelRetired,
     ModelUnavailable,
     NotConfigured,
+    ProviderDisabled,
+    ProviderTimeout,
     ProviderUnavailable,
     RouterError,
+    UnknownModel,
 )
 from router_mcp.domain.messages import (
     Attachment,
@@ -41,6 +52,28 @@ logger = logging.getLogger(__name__)
 
 _TIER_ORDER = {"free": 0, "cheap": 1, "expensive": 2}
 _TEXT_TRUNCATE = 4000
+
+
+def _last_status(trace: list[dict[str, Any]]) -> int | None:
+    """The upstream HTTP status of the last try, when there was one."""
+    for entry in reversed(trace):
+        status = entry.get("status")
+        if status is not None:
+            return int(status)
+    return None
+
+
+def _provider_request_id(meta: dict[str, Any]) -> str | None:
+    """Providers name their request id half a dozen ways; keep whichever came.
+
+    It is the one string a support ticket is answered by, so it must reach the
+    screen verbatim.
+    """
+    for key in ("provider_request_id", "request_id", "id", "x-request-id"):
+        value = meta.get(key)
+        if value:
+            return str(value)[:200]
+    return None
 
 
 def _finish_reason(response: RouterResponse) -> str | None:
@@ -87,6 +120,16 @@ class DispatchResult:
     # for, and why it did not get it.
     requested_model_id: str | None = None
     fallback_reason: str | None = None
+    # Execution detail. It all exists inside dispatch already; before this it
+    # died here and the console showed a result with no path behind it.
+    latency_ms: int = 0
+    attempts: int = 1  # HTTP tries inside the provider attempt that succeeded
+    provider_status: int | None = None
+    provider_request_id: str | None = None
+    finish_reason: str | None = None
+    steps: list[dict[str, Any]] = field(default_factory=list)
+    ignored_params: list[str] = field(default_factory=list)
+    finished_at: str | None = None
 
 
 class ModelRouter:
@@ -203,30 +246,51 @@ class ModelRouter:
         if model is None:
             return _Problem(
                 f"model_id {model_id!r} is not in the registry",
-                RouterError(f"Unknown model_id: {model_id!r}"),
+                UnknownModel(f"Unknown model_id: {model_id!r}", model_id=model_id),
             )
         if not model.is_active:
             when = f" on {model.deprecated_at}" if model.deprecated_at else ""
             return _Problem(
                 f"model {model_id!r} was retired by its provider{when}",
-                RouterError(f"Model {model_id!r} is retired (deprecated{when})"),
+                ModelRetired(
+                    f"Model {model_id!r} is retired (deprecated{when})",
+                    provider=model.service_provider_id,
+                    model_id=model_id,
+                    hint={"kind": "pick_model", "action": "choose an active model"},
+                ),
             )
         provider = model.service_provider_id
         adapter = self._adapters.get(provider)
         if adapter is None:
             return _Problem(
                 f"no adapter for provider {provider!r}",
-                RouterError(f"No adapter for provider {provider!r}"),
+                RouterError(f"No adapter for provider {provider!r}", provider=provider),
             )
         if provider not in enabled:
             return _Problem(
                 f"provider {provider!r} is disabled",
-                NotConfigured(f"Provider {provider!r} is disabled"),
+                ProviderDisabled(
+                    f"Provider {provider!r} is disabled",
+                    provider=provider,
+                    model_id=model_id,
+                    hint={"kind": "enable_provider", "target": provider},
+                ),
             )
         if not adapter.is_configured():
             return _Problem(
                 f"provider {provider!r} is not configured",
-                NotConfigured(f"Provider {provider!r} is not configured"),
+                NotConfigured(
+                    f"Provider {provider!r} is not configured",
+                    provider=provider,
+                    model_id=model_id,
+                    # Name the variable, never its value: the operator's next
+                    # step is to set it, and the console must not leak secrets.
+                    hint={
+                        "kind": "env_var",
+                        "env_var": adapter.env_var,
+                        "target": provider,
+                    },
+                ),
             )
         return None
 
@@ -319,17 +383,41 @@ class ModelRouter:
         # Persist large request payloads up-front so they survive failures.
         request_ref = self._persist_request_attachment(request)
         request_text = self._truncate_request_text(request)
+        steps: list[dict[str, Any]] = []
+
+        def step(kind: str, title: str, **detail: Any) -> None:
+            steps.append(
+                {
+                    "at_ms": int((time.monotonic() - t0) * 1000),
+                    "kind": kind,
+                    "title": title,
+                    **detail,
+                }
+            )
 
         try:
             attempts = await self.plan(request)
         except RouterError as exc:
-            await self._log_error(request, None, request_text, request_ref, exc, t0)
+            step("plan", "plan failed", error=str(exc))
+            await self._log_error(
+                request, None, request_text, request_ref, exc, t0, steps=steps
+            )
             raise
+        step(
+            "plan",
+            "plan built",
+            planned=[
+                {"provider": a.model.service_provider_id, "model_id": a.model.model_id}
+                for a in attempts
+            ],
+        )
 
         response: RouterResponse | None = None
         model: RegistryModel | None = None
+        used_adapter: ProviderAdapter | None = None
         reason: str | None = None  # why we are not on the originally chosen model
         requested_model_id: str | None = None
+        http_trace: list[dict[str, Any]] = []
         for index, attempt in enumerate(attempts):
             model = attempt.model
             if index or attempt.reason:
@@ -339,34 +427,66 @@ class ModelRouter:
                     "Fallback: %s -> %s (%s)", requested_model_id, model.model_id, reason
                 )
             last = index == len(attempts) - 1
+            attempt_step_index = len(steps)
+            step(
+                "attempt",
+                f"attempt {index + 1}",
+                provider=model.service_provider_id,
+                model_id=model.model_id,
+                reason=attempt.reason or (reason if index else None),
+                status="running",
+            )
+            start_http_trace()
             try:
                 response = await attempt.adapter.generate(request, model)
+                http_trace = take_http_trace()
+                used_adapter = attempt.adapter
+                steps[attempt_step_index].update(status="ok", retries=http_trace)
                 break
             except FALLBACK_TRIGGERS as exc:
+                http_trace = take_http_trace()
+                steps[attempt_step_index].update(
+                    status="error", retries=http_trace, error=f"{type(exc).__name__}: {exc}"
+                )
                 await self._log_error(
                     request, model, request_text, request_ref, exc, t0,
                     requested_model_id=requested_model_id, fallback_reason=reason,
+                    steps=steps, http_trace=http_trace,
                 )
                 if last:
                     raise
                 # The next attempt carries the failure that caused it.
                 reason = f"{model.model_id} failed: {type(exc).__name__}: {exc}"
             except RouterError as exc:
+                http_trace = take_http_trace()
+                steps[attempt_step_index].update(
+                    status="error", retries=http_trace, error=f"{type(exc).__name__}: {exc}"
+                )
                 await self._log_error(
                     request, model, request_text, request_ref, exc, t0,
                     requested_model_id=requested_model_id, fallback_reason=reason,
+                    steps=steps, http_trace=http_trace,
                 )
                 raise
             except Exception as exc:  # normalize unexpected failures
-                await self._log_error(
-                    request, model, request_text, request_ref, exc, t0,
-                    requested_model_id=requested_model_id, fallback_reason=reason,
+                http_trace = take_http_trace()
+                steps[attempt_step_index].update(
+                    status="error", retries=http_trace, error=f"{type(exc).__name__}: {exc}"
                 )
-                raise RouterError(str(exc)) from exc
+                normalized = RouterError(str(exc))
+                await self._log_error(
+                    request, model, request_text, request_ref, normalized, t0,
+                    requested_model_id=requested_model_id, fallback_reason=reason,
+                    steps=steps, http_trace=http_trace,
+                )
+                raise normalized from exc
 
-        assert response is not None and model is not None
+        assert response is not None and model is not None and used_adapter is not None
         latency_ms = int((time.monotonic() - t0) * 1000)
         response_ref = self._persist_response_attachment(response)
+        step("response", "response parsed", finish_reason=_finish_reason(response))
+        if response_ref:
+            step("blob", "response file stored", ref=response_ref)
 
         subscription = None
         if model.pricing_mode == "amortized_subscription" and model.subscription_id:
@@ -378,7 +498,10 @@ class ModelRouter:
             override_usd=response.cost_override_usd,
             subscription=subscription,
         )
+        step("cost", "cost computed", cost_usd=cost.cost_usd, cost_source=cost.cost_source)
 
+        meta = response.raw_meta or {}
+        finished_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         rec = RequestLogRecord(
             external_user_id=request.external_user_id,
             modality=request.modality.value,
@@ -393,8 +516,12 @@ class ModelRouter:
             prompt_tokens=response.usage.prompt_tokens,
             completion_tokens=response.usage.completion_tokens,
             total_tokens=response.usage.total_tokens,
+            cache_read_tokens=response.usage.cache_read_tokens,
+            cache_write_tokens=response.usage.cache_write_tokens,
+            reasoning_tokens=response.usage.reasoning_tokens,
             audio_seconds=response.usage.audio_seconds,
             images=response.usage.images,
+            characters=response.usage.characters,
             usage_raw=response.usage.raw,
             cost_usd=cost.cost_usd,
             cost_source=cost.cost_source,
@@ -403,14 +530,33 @@ class ModelRouter:
             finish_reason=_finish_reason(response),
             requested_model_id=requested_model_id,
             fallback_reason=reason,
+            channel=request.channel,
+            tool=request.tool,
+            client_id=request.client_id,
+            client_request_id=request.client_request_id,
+            attempts=max(len(http_trace), 1),
+            provider_status=_last_status(http_trace),
+            provider_request_id=_provider_request_id(meta),
+            session_id=meta.get("session_id"),
+            return_code=meta.get("return_code"),
+            finished_at=finished_at,
         )
         log_id = await self._db.log_request(rec)
+        step("log", "logged", log_id=log_id, channel=request.channel)
         return DispatchResult(
             response=response,
             cost=cost,
             log_id=log_id,
             requested_model_id=requested_model_id,
             fallback_reason=reason,
+            latency_ms=latency_ms,
+            attempts=rec.attempts or 1,
+            provider_status=rec.provider_status,
+            provider_request_id=rec.provider_request_id,
+            finish_reason=rec.finish_reason,
+            steps=steps,
+            ignored_params=ignored_params(used_adapter, request.modality, request.params),
+            finished_at=finished_at,
         )
 
     # --- blob / text helpers -------------------------------------------
@@ -449,7 +595,13 @@ class ModelRouter:
         *,
         requested_model_id: str | None = None,
         fallback_reason: str | None = None,
+        steps: list[dict[str, Any]] | None = None,
+        http_trace: list[dict[str, Any]] | None = None,
     ) -> int:
+        trace = http_trace or []
+        # A read timeout means the provider most likely ran — and billed — the
+        # request; recording zero would understate the bill with confidence.
+        cost_source = "cost_unknown" if isinstance(exc, ProviderTimeout) else "computed"
         rec = RequestLogRecord(
             external_user_id=request.external_user_id,
             modality=request.modality.value,
@@ -460,8 +612,27 @@ class ModelRouter:
             error_message=f"{type(exc).__name__}: {exc}"[:1000],
             request_text=request_text,
             request_ref=request_ref,
+            cost_source=cost_source,
             latency_ms=int((time.monotonic() - t0) * 1000),
             requested_model_id=requested_model_id,
             fallback_reason=fallback_reason,
+            channel=request.channel,
+            tool=request.tool,
+            client_id=request.client_id,
+            client_request_id=request.client_request_id,
+            attempts=len(trace) or None,
+            provider_status=_last_status(trace)
+            or getattr(exc, "provider_status", None),
+            plan_json=json.dumps(steps, ensure_ascii=False) if steps else None,
+            finished_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         )
-        return await self._db.log_request(rec)
+        log_id = await self._db.log_request(rec)
+        # "Open this error in the log" is offered on three screens; without the
+        # id travelling with the exception the link has nowhere to point.
+        if isinstance(exc, RouterError):
+            exc.log_id = log_id
+            if exc.provider is None:
+                exc.provider = rec.service_provider_id
+            if exc.model_id is None:
+                exc.model_id = rec.model_id
+        return log_id

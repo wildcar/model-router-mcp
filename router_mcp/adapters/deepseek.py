@@ -29,7 +29,9 @@ PRICING_PAGE = "https://api-docs.deepseek.com/quick_start/pricing"
 
 class DeepSeekAdapter(RetryClientMixin, ProviderAdapter):
     name = "deepseek"
+    env_var = "DEEPSEEK_API_KEY"
     supported_modalities = {Modality.CHAT}
+    SUPPORTED_PARAMS = {Modality.CHAT: ("temperature", "max_tokens", "top_p")}
 
     def __init__(
         self,
@@ -55,7 +57,7 @@ class DeepSeekAdapter(RetryClientMixin, ProviderAdapter):
     async def generate(self, request: RouterRequest, model: RegistryModel) -> RouterResponse:
         messages = self._build_messages(request)
         payload: dict[str, Any] = {"model": model.model_id, "messages": messages}
-        for key in ("temperature", "max_tokens", "top_p"):
+        for key in self.SUPPORTED_PARAMS[Modality.CHAT]:
             if key in request.params:
                 payload[key] = request.params[key]
 

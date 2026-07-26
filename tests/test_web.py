@@ -1,47 +1,18 @@
 """Web app smoke test: lifespan boots, pages render, registry admin works.
 
-The FastMCP session manager can only be run once per process, so the app (and
-thus the TestClient lifespan) is module-scoped — matching the real one-app-per-
-process deployment.
+Uses the session-scoped `client` from conftest: the FastMCP session manager can
+only be run once per process, matching the real one-app-per-process deployment.
 """
 
 from __future__ import annotations
 
-import pytest
-from fastapi.testclient import TestClient
 
-from router_mcp.app import build_app
-from router_mcp.config import Settings
-
-
-@pytest.fixture(scope="module")
-def client(tmp_path_factory):
-    tmp_path = tmp_path_factory.mktemp("web")
-    settings = Settings(
-        DB_PATH=str(tmp_path / "web.db"),
-        BLOB_DIR=str(tmp_path / "blobs"),
-        LOG_FILE=str(tmp_path / "log.txt"),
-        # Every provider key is cleared explicitly: Settings still reads the
-        # repo .env, and a configured adapter would make the catalog sync call
-        # the real API during tests.
-        OPENROUTER_API_KEY=None,
-        DEEPSEEK_API_KEY=None,
-        ANTHROPIC_API_KEY=None,
-        DEEPGRAM_API_KEY=None,
-        ELEVENLABS_API_KEY=None,
-        CATALOG_SYNC_INTERVAL_SECONDS=0,
-    )
-    app = build_app(settings)
-    with TestClient(app) as c:
-        yield c
-
-
-def test_health(client):
+def test_health_is_status_only(client):
+    """Public health says alive and nothing else: the version and the provider
+    inventory are a map of the installation, and this route is open."""
     r = client.get("/health")
     assert r.status_code == 200
-    body = r.json()
-    assert body["status"] == "ok"
-    assert "openrouter" in body["providers"]
+    assert r.json() == {"status": "ok"}
 
 
 def test_pages_render(client):
@@ -55,23 +26,24 @@ def test_models_filtered_unknown_modality_empty(client):
     # An unknown modality matches nothing, regardless of keys.
     r = client.get("/api/models?modality=bogus")
     assert r.status_code == 200
-    assert r.json() == []
+    assert r.json()["items"] == []
 
 
 def test_seed_models_present(client):
     # Fixed-catalog models are seeded regardless of whether keys are set.
     r = client.get("/api/models?modality=tts")
     assert r.status_code == 200
-    assert any(m["service_provider"] == "elevenlabs" for m in r.json())
-    assert any(m["service_provider"] == "deepgram" for m in client.get("/api/models?modality=stt").json())
-    cli = client.get("/api/models?modality=cli").json()
+    assert any(m["service_provider"] == "elevenlabs" for m in r.json()["items"])
+    stt = client.get("/api/models?modality=stt").json()["items"]
+    assert any(m["service_provider"] == "deepgram" for m in stt)
+    cli = client.get("/api/models?modality=cli").json()["items"]
     assert {"codex-cli", "claude-cli"} <= {m["service_provider"] for m in cli}
 
 
 def test_providers_listed(client):
     r = client.get("/api/registry/providers")
     assert r.status_code == 200
-    body = r.json()
+    body = r.json()["items"]
     ids = [p["id"] for p in body]
     assert "openrouter" in ids
     assert all(isinstance(p["configured"], bool) for p in body)
@@ -90,7 +62,10 @@ def test_refresh_without_keys_reports_skips(client):
 
 
 def test_refresh_unknown_provider_is_a_client_error(client):
-    assert client.post("/api/registry/refresh?provider=nope").status_code == 400
+    r = client.post("/api/registry/refresh?provider=nope")
+    assert r.status_code == 400
+    # Every failure answers with the same envelope, keyed by a stable code.
+    assert r.json()["error"]["code"] == "bad_request"
 
 
 def test_add_manual_model_and_list(client):
@@ -108,7 +83,7 @@ def test_add_manual_model_and_list(client):
     assert r.json()["tier"] == "expensive"
 
     r = client.get("/api/registry/models?source=manual")
-    rows = {m["model_id"]: m for m in r.json()}
+    rows = {m["model_id"]: m for m in r.json()["items"]}
     assert "demo/manual-1" in rows
     added = rows["demo/manual-1"]
     # A hand-entered price counts as verified and falls back to the provider's
@@ -122,5 +97,5 @@ def test_add_manual_model_and_list(client):
 def test_deepseek_has_no_hardcoded_models(client):
     """The retired deepseek-chat/deepseek-reasoner ids used to come back on every
     restart. Without keys DeepSeek should now contribute nothing at all."""
-    rows = client.get("/api/registry/models").json()
+    rows = client.get("/api/registry/models").json()["items"]
     assert [m for m in rows if m["service_provider"] == "deepseek"] == []

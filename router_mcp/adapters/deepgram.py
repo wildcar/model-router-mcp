@@ -23,7 +23,9 @@ logger = logging.getLogger(__name__)
 
 class DeepgramAdapter(RetryClientMixin, ProviderAdapter):
     name = "deepgram"
+    env_var = "DEEPGRAM_API_KEY"
     supported_modalities = {Modality.STT}
+    SUPPORTED_PARAMS = {Modality.STT: ()}
 
     def __init__(
         self,

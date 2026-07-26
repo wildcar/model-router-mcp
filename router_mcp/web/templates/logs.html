@@ -4,74 +4,58 @@
 <section class="card">
   <h2>Статистика по пользователям</h2>
   <table id="usage"><thead><tr>
-    <th>Пользователь</th><th>Запросов</th><th>Токенов</th><th>Стоимость, $</th>
+    <th>Метка пользователя</th><th class="num">Запросов</th>
+    <th class="num">Токенов</th><th class="num">Стоимость, $</th>
   </tr></thead><tbody></tbody></table>
 </section>
+
+<section class="card" id="detail" hidden></section>
 
 <section class="card">
   <h2>Журнал запросов</h2>
   <div class="row">
-    <label>Пользователь <input id="f-user" placeholder="(все)"></label>
-    <label>Лимит <input id="f-limit" type="number" value="50"></label>
+    <label>Метка пользователя <input id="f-user" placeholder="(все)"></label>
+    <label>Статус
+      <select id="f-status">
+        <option value="">все</option>
+        <option value="ok">ok</option>
+        <option value="error">ошибка</option>
+      </select>
+    </label>
+    <label>Модальность
+      <select id="f-modality">
+        <option value="">все</option>
+        <option value="chat">chat</option>
+        <option value="image">image</option>
+        <option value="stt">stt</option>
+        <option value="tts">tts</option>
+        <option value="cli">cli</option>
+      </select>
+    </label>
+    <label>Канал
+      <select id="f-channel">
+        <option value="">все</option>
+        <option value="ui">консоль</option>
+        <option value="api">API</option>
+        <option value="mcp">MCP</option>
+      </select>
+    </label>
     <button id="reload" type="button">Обновить</button>
   </div>
+  <div class="row">
+    <label><input id="f-fallback" type="checkbox"> с подстановкой</label>
+    <label><input id="f-retries" type="checkbox"> были повторы</label>
+    <label><input id="f-unverified" type="checkbox"> цена не подтверждена</label>
+  </div>
   <table id="logs"><thead><tr>
-    <th>id</th><th>Время</th><th>Пользователь</th><th>Модель</th><th>Мод.</th>
-    <th>Статус</th><th>Токены</th><th>$</th><th>Запрос</th>
+    <th class="num">id</th><th>Время</th><th>Метка</th><th>Модель</th><th>Мод.</th>
+    <th>Канал</th><th>Статус</th><th class="num">Время ответа</th>
+    <th class="num">Токены</th><th class="num">$</th><th>Запрос</th>
   </tr></thead><tbody></tbody></table>
+  <div class="row">
+    <span id="count" class="hint"></span>
+    <span id="tz" class="hint"></span>
+    <button id="more" type="button" hidden>Ещё 50</button>
+  </div>
 </section>
-{% endblock %}
-{% block script %}
-<script>
-async function loadUsage() {
-  const rows = await api('/api/usage');
-  const tb = document.querySelector('#usage tbody');
-  tb.innerHTML = '';
-  for (const r of rows) {
-    tb.appendChild(row([
-      r.external_user_id,
-      r.requests,
-      r.total_tokens,
-      (r.total_cost_usd ?? 0).toFixed(6),
-    ]));
-  }
-}
-
-async function loadLogs() {
-  const user = document.getElementById('f-user').value.trim();
-  const limit = document.getElementById('f-limit').value || 50;
-  const q = new URLSearchParams({ limit }); if (user) q.set('user', user);
-  const rows = await api('/api/logs?' + q);
-  const tb = document.querySelector('#logs tbody');
-  tb.innerHTML = '';
-  for (const r of rows) {
-    // A substituted model and an estimated price both have to be visible here:
-    // the log is where a surprising bill gets explained.
-    const model = r.requested_model_id
-      ? el('span', `${r.model_id ?? '–'} ⇄`,
-           { title: `Запрошена ${r.requested_model_id}: ${r.fallback_reason || ''}` })
-      : el('span', r.model_id ?? '–');
-    const cost = el('span', (r.cost_usd ?? 0).toFixed(6));
-    if (r.cost_source === 'estimated') {
-      cost.appendChild(el('span', ' ≈', { title: 'Цена модели не подтверждена' }));
-    }
-    tb.appendChild(row([
-      r.id,
-      r.created_at,
-      r.external_user_id,
-      { node: model },
-      r.modality,
-      r.status === 'ok' ? r.status : el('td', r.status, { className: 'err' }),
-      r.total_tokens ?? '–',
-      { node: cost },
-      { text: (r.request_text || '').slice(0, 60), className: 'trunc',
-        title: r.request_text || '' },
-    ]));
-  }
-}
-
-function reload() { loadUsage(); loadLogs(); }
-document.getElementById('reload').addEventListener('click', reload);
-reload();
-</script>
 {% endblock %}

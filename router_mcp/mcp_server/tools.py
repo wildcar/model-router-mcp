@@ -16,6 +16,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from router_mcp.domain.errors import BadRequest, RouterError
 from router_mcp.domain.messages import Attachment, FallbackPolicy, RouterRequest
 from router_mcp.domain.modality import Modality
 from router_mcp.mcp_server.serialize import (
@@ -28,6 +29,31 @@ from router_mcp.runtime import get_core
 # streamable_http_path="/" so that mounting the sub-app at "/mcp" yields the
 # endpoint at "/mcp" (not "/mcp/mcp").
 mcp = FastMCP("model-router", stateless_http=True, streamable_http_path="/")
+
+
+async def dispatch_tool(request: RouterRequest):
+    """Dispatch and translate a failure into the shared error contract.
+
+    FastMCP hands the client `str(exception)`, so the fields the web API puts in
+    the error envelope — the stable code, the log id, the environment variable
+    to set — are appended to the message. The caller here is usually a model
+    reading text; without them "provider not configured" is a dead end.
+    """
+    try:
+        return await get_core().router.dispatch(request)
+    except RouterError as exc:
+        facts = [f"code={exc.code}"]
+        if exc.log_id is not None:
+            facts.append(f"log_id={exc.log_id}")
+        if exc.provider:
+            facts.append(f"provider={exc.provider}")
+        if exc.provider_status:
+            facts.append(f"provider_status={exc.provider_status}")
+        if exc.retry_after_s is not None:
+            facts.append(f"retry_after_s={exc.retry_after_s}")
+        if exc.hint and exc.hint.get("env_var"):
+            facts.append(f"env_var={exc.hint['env_var']}")
+        raise type(exc)(f"{exc} [{' '.join(facts)}]") from exc
 
 
 @mcp.tool()
@@ -64,7 +90,6 @@ async def chat(
     "provider"|"vendor"|"any"}` (or just the policy name). The reply then carries
     `requested_model_id` and `fallback_reason` alongside the model actually used.
     """
-    core = get_core()
     request = RouterRequest(
         modality=Modality.CHAT,
         external_user_id=external_user_id,
@@ -75,8 +100,10 @@ async def chat(
         messages=messages,
         params=params or {},
         fallback=FallbackPolicy.parse(fallback),
+        channel="mcp",
+        tool="chat",
     )
-    result = await core.router.dispatch(request)
+    result = await dispatch_tool(request)
     out = dispatch_summary(result)
     out["text"] = result.response.text
     if result.response.attachments:
@@ -104,8 +131,10 @@ async def generate_image(
         text=prompt,
         params=params or {},
         fallback=FallbackPolicy.parse(fallback),
+        channel="mcp",
+        tool="generate_image",
     )
-    result = await core.router.dispatch(request)
+    result = await dispatch_tool(request)
     out = dispatch_summary(result)
     out.update(attachments_b64(result.response.attachments, core.blobs))
     return out
@@ -122,7 +151,6 @@ async def transcribe(
 ) -> dict[str, Any]:
     """Transcribe base64-encoded audio to text (speech-to-text).
     `fallback` works as in `chat`."""
-    core = get_core()
     request = RouterRequest(
         modality=Modality.STT,
         external_user_id=external_user_id,
@@ -130,8 +158,10 @@ async def transcribe(
         provider_hint=provider,
         attachments=[Attachment(kind="audio", mime=mime, data=base64.b64decode(audio_b64))],
         fallback=FallbackPolicy.parse(fallback),
+        channel="mcp",
+        tool="transcribe",
     )
-    result = await core.router.dispatch(request)
+    result = await dispatch_tool(request)
     out = dispatch_summary(result)
     out["text"] = result.response.text
     return out
@@ -161,8 +191,10 @@ async def synthesize_speech(
         text=text,
         params=merged,
         fallback=FallbackPolicy.parse(fallback),
+        channel="mcp",
+        tool="synthesize_speech",
     )
-    result = await core.router.dispatch(request)
+    result = await dispatch_tool(request)
     out = dispatch_summary(result)
     out.update(attachments_b64(result.response.attachments, core.blobs))
     return out
@@ -181,10 +213,9 @@ async def run_cli(
     `cwd` (optional) must be under a server-allowed root. Returns the engine's
     text output with usage and cost.
     """
-    core = get_core()
     engine = engine.strip().lower()
     if engine not in ("codex", "claude"):
-        raise ValueError("engine must be 'codex' or 'claude'")
+        raise BadRequest("engine must be 'codex' or 'claude'")
     params: dict[str, Any] = {}
     if cwd:
         params["cwd"] = cwd
@@ -196,8 +227,10 @@ async def run_cli(
         provider_hint=f"{engine}-cli",
         text=prompt,
         params=params,
+        channel="mcp",
+        tool="run_cli",
     )
-    result = await core.router.dispatch(request)
+    result = await dispatch_tool(request)
     out = dispatch_summary(result)
     out["text"] = result.response.text
     out["session_id"] = result.response.raw_meta.get("session_id")

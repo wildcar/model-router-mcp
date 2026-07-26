@@ -31,7 +31,11 @@ PRICING_PAGE = "https://claude.com/pricing#api"
 
 class ClaudeApiAdapter(RetryClientMixin, ProviderAdapter):
     name = "anthropic-api"
+    env_var = "ANTHROPIC_API_KEY"
     supported_modalities = {Modality.CHAT}
+    # max_tokens is mandatory here (unlike the OpenAI-shaped providers) and has
+    # a default, so it is listed even though it is never merely passed through.
+    SUPPORTED_PARAMS = {Modality.CHAT: ("temperature", "top_p", "max_tokens")}
 
     def __init__(
         self,

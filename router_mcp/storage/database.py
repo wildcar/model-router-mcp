@@ -68,17 +68,35 @@ class RequestLogRecord:
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     total_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    cache_write_tokens: int | None = None
+    reasoning_tokens: int | None = None
     audio_seconds: float | None = None
     images: int | None = None
+    characters: int | None = None
     usage_raw: dict[str, Any] = field(default_factory=dict)
     cost_usd: float = 0.0
     # "computed" | "estimated" | "manual" | "amortized" | "provider"
+    # | "provider_notional" | "unpriced" | "cost_unknown"
     cost_source: str = "computed"
     pricing_mode: str = "per_request"
     latency_ms: int | None = None
     finish_reason: str | None = None  # provider stop reason, verbatim
     requested_model_id: str | None = None  # set when a fallback substituted a model
     fallback_reason: str | None = None
+    # Call provenance: who called, through which interface, with which tool.
+    channel: str = "api"  # "mcp" | "api" | "ui"
+    tool: str | None = None
+    client_id: str | None = None
+    client_request_id: str | None = None
+    # Execution detail the console's timeline and error card need.
+    attempts: int | None = None  # HTTP tries inside the successful provider attempt
+    provider_status: int | None = None  # last upstream HTTP status
+    provider_request_id: str | None = None  # upstream id, for support tickets
+    session_id: str | None = None  # CLI engines
+    return_code: int | None = None  # CLI engines
+    plan_json: str | None = None  # routing plan, for replaying the timeline
+    finished_at: str | None = None
 
 
 @dataclass(slots=True)
@@ -247,8 +265,12 @@ class Database:
                     prompt_tokens INTEGER,
                     completion_tokens INTEGER,
                     total_tokens INTEGER,
+                    cache_read_tokens INTEGER,
+                    cache_write_tokens INTEGER,
+                    reasoning_tokens INTEGER,
                     audio_seconds REAL,
                     images INTEGER,
+                    characters INTEGER,
                     usage_raw TEXT,
                     cost_usd REAL NOT NULL DEFAULT 0,
                     cost_source TEXT NOT NULL DEFAULT 'computed',
@@ -257,18 +279,50 @@ class Database:
                     finish_reason TEXT,
                     requested_model_id TEXT,
                     fallback_reason TEXT,
+                    channel TEXT NOT NULL DEFAULT 'api',
+                    tool TEXT,
+                    client_id TEXT,
+                    client_request_id TEXT,
+                    attempts INTEGER,
+                    provider_status INTEGER,
+                    provider_request_id TEXT,
+                    session_id TEXT,
+                    return_code INTEGER,
+                    plan_json TEXT,
+                    finished_at DATETIME,
                     created_at DATETIME NOT NULL
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_registry_models_modality ON registry_models(modality);
                 CREATE INDEX IF NOT EXISTS idx_registry_models_tier ON registry_models(tier);
                 CREATE INDEX IF NOT EXISTS idx_registry_models_sp ON registry_models(service_provider_id, is_active);
-                CREATE INDEX IF NOT EXISTS idx_request_logs_user ON request_logs(external_user_id, created_at);
-                CREATE INDEX IF NOT EXISTS idx_request_logs_provider ON request_logs(service_provider_id, created_at);
                 """
             )
             await conn.commit()
         await self._add_missing_columns()
+        await self._create_log_indexes()
+
+    # Indexes over request_logs live after the column migration: some of them
+    # cover columns a deployed database only grows in `_add_missing_columns`.
+    _LOG_INDEXES = (
+        "CREATE INDEX IF NOT EXISTS idx_request_logs_user ON request_logs(external_user_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_request_logs_provider ON request_logs(service_provider_id, created_at)",
+        # The console pages the log by descending id and filters on these
+        # columns; without the indexes every filtered page is a full scan of a
+        # table that only grows.
+        "CREATE INDEX IF NOT EXISTS idx_request_logs_id ON request_logs(id DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_request_logs_status ON request_logs(status, id DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_request_logs_modality ON request_logs(modality, id DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_request_logs_channel ON request_logs(channel, id DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_request_logs_model ON request_logs(model_id, id DESC)",
+    )
+
+    async def _create_log_indexes(self) -> None:
+        conn = await self._get_conn()
+        async with self._write_lock:
+            for statement in self._LOG_INDEXES:
+                await conn.execute(statement)
+            await conn.commit()
 
     # Columns added after the first release. `CREATE TABLE IF NOT EXISTS` above
     # covers fresh databases; deployed ones are patched here (SQLite has no
@@ -287,6 +341,24 @@ class Database:
             "finish_reason": "TEXT",
             "requested_model_id": "TEXT",
             "fallback_reason": "TEXT",
+            # Wave 0 of docs/UI_CONCEPT_v2.md: everything the console has to show
+            # but the log never recorded, added in one pass so a deployed
+            # database is patched by a single restart.
+            "cache_read_tokens": "INTEGER",
+            "cache_write_tokens": "INTEGER",
+            "reasoning_tokens": "INTEGER",
+            "characters": "INTEGER",
+            "channel": "TEXT NOT NULL DEFAULT 'api'",
+            "tool": "TEXT",
+            "client_id": "TEXT",
+            "client_request_id": "TEXT",
+            "attempts": "INTEGER",
+            "provider_status": "INTEGER",
+            "provider_request_id": "TEXT",
+            "session_id": "TEXT",
+            "return_code": "INTEGER",
+            "plan_json": "TEXT",
+            "finished_at": "DATETIME",
         },
     }
 
@@ -537,69 +609,176 @@ class Database:
         )
 
     # --- request logging ------------------------------------------------
+    # Every scalar field of RequestLogRecord maps 1:1 to a column; usage_raw is
+    # the one that needs encoding. Deriving the INSERT from the dataclass keeps
+    # a new field from being silently dropped on the way to disk.
+    _LOG_ENCODED_FIELDS = {
+        "usage_raw": lambda v: json.dumps(v, ensure_ascii=False) if v else None,
+    }
+
     async def log_request(self, rec: RequestLogRecord) -> int:
+        values: dict[str, Any] = {}
+        for name in RequestLogRecord.__dataclass_fields__:
+            value = getattr(rec, name)
+            encode = self._LOG_ENCODED_FIELDS.get(name)
+            values[name] = encode(value) if encode else value
+        values["created_at"] = _now()
+        cols = list(values)
         conn = await self._get_conn()
         async with self._write_lock:
             cur = await conn.execute(
-                """
-                INSERT INTO request_logs (
-                    external_user_id, service_provider_id, model_provider, model_id,
-                    modality, status, error_message, request_text, request_ref,
-                    response_text, response_ref, prompt_tokens, completion_tokens,
-                    total_tokens, audio_seconds, images, usage_raw, cost_usd,
-                    cost_source, pricing_mode, latency_ms, finish_reason,
-                    requested_model_id, fallback_reason, created_at
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """,
-                (
-                    rec.external_user_id,
-                    rec.service_provider_id,
-                    rec.model_provider,
-                    rec.model_id,
-                    rec.modality,
-                    rec.status,
-                    rec.error_message,
-                    rec.request_text,
-                    rec.request_ref,
-                    rec.response_text,
-                    rec.response_ref,
-                    rec.prompt_tokens,
-                    rec.completion_tokens,
-                    rec.total_tokens,
-                    rec.audio_seconds,
-                    rec.images,
-                    json.dumps(rec.usage_raw, ensure_ascii=False) if rec.usage_raw else None,
-                    rec.cost_usd,
-                    rec.cost_source,
-                    rec.pricing_mode,
-                    rec.latency_ms,
-                    rec.finish_reason,
-                    rec.requested_model_id,
-                    rec.fallback_reason,
-                    _now(),
-                ),
+                f"INSERT INTO request_logs ({', '.join(cols)}) "
+                f"VALUES ({', '.join('?' for _ in cols)})",
+                tuple(values.values()),
             )
             await conn.commit()
             return int(cur.lastrowid)
 
-    async def list_request_logs(
+    # What the log table on screen actually shows. The full row carries the
+    # response text (up to 4000 chars) and the raw usage block; sending fifty of
+    # those to draw a table of numbers is the difference between a 6 KB and a
+    # 300 KB response.
+    LOG_LIST_COLUMNS = (
+        "id", "created_at", "external_user_id", "modality", "service_provider_id",
+        "model_provider", "model_id", "requested_model_id", "fallback_reason",
+        "status", "error_message", "channel", "tool", "client_id",
+        "prompt_tokens", "completion_tokens", "total_tokens", "cache_read_tokens",
+        "reasoning_tokens", "audio_seconds", "images", "characters",
+        "cost_usd", "cost_source", "pricing_mode",
+        "latency_ms", "attempts", "finish_reason", "request_text",
+    )
+
+    _LOG_UNVERIFIED_COST = ("estimated", "unpriced", "cost_unknown", "provider_notional")
+
+    def _log_filters(
         self,
         *,
-        external_user_id: str | None = None,
-        limit: int = 100,
-    ) -> list[dict[str, Any]]:
+        external_user_id: str | None,
+        status: str | None,
+        modality: str | None,
+        model_id: str | None,
+        channel: str | None,
+        since: str | None,
+        until: str | None,
+        with_fallback: bool,
+        with_retries: bool,
+        unverified_cost: bool,
+    ) -> tuple[list[str], list[Any]]:
         clauses: list[str] = []
         params: list[Any] = []
         if external_user_id:
             clauses.append("external_user_id = ?")
             params.append(external_user_id)
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        if modality:
+            clauses.append("modality = ?")
+            params.append(modality)
+        if model_id:
+            clauses.append("model_id = ?")
+            params.append(model_id)
+        if channel:
+            clauses.append("channel = ?")
+            params.append(channel)
+        if since:
+            clauses.append("created_at >= ?")
+            params.append(since)
+        if until:
+            clauses.append("created_at <= ?")
+            params.append(until)
+        if with_fallback:
+            clauses.append("requested_model_id IS NOT NULL")
+        if with_retries:
+            clauses.append("attempts > 1")
+        if unverified_cost:
+            placeholders = ", ".join("?" for _ in self._LOG_UNVERIFIED_COST)
+            clauses.append(f"cost_source IN ({placeholders})")
+            params.extend(self._LOG_UNVERIFIED_COST)
+        return clauses, params
+
+    async def list_request_logs(
+        self,
+        *,
+        external_user_id: str | None = None,
+        status: str | None = None,
+        modality: str | None = None,
+        model_id: str | None = None,
+        channel: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        with_fallback: bool = False,
+        with_retries: bool = False,
+        unverified_cost: bool = False,
+        before_id: int | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """One page of the log, newest first, projected to the table columns.
+
+        Pagination is by cursor (`before_id`), not offset: the log grows from the
+        head, so page two of an offset query would repeat rows from page one.
+        """
+        clauses, params = self._log_filters(
+            external_user_id=external_user_id,
+            status=status,
+            modality=modality,
+            model_id=model_id,
+            channel=channel,
+            since=since,
+            until=until,
+            with_fallback=with_fallback,
+            with_retries=with_retries,
+            unverified_cost=unverified_cost,
+        )
+        if before_id is not None:
+            clauses.append("id < ?")
+            params.append(before_id)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params.append(limit)
         rows = await self._fetchall(
-            f"SELECT * FROM request_logs {where} ORDER BY id DESC LIMIT ?",
+            f"SELECT {', '.join(self.LOG_LIST_COLUMNS)} FROM request_logs {where} "
+            "ORDER BY id DESC LIMIT ?",
             tuple(params),
         )
         return [dict(r) for r in rows]
+
+    async def count_request_logs(
+        self,
+        *,
+        external_user_id: str | None = None,
+        status: str | None = None,
+        modality: str | None = None,
+        model_id: str | None = None,
+        channel: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        with_fallback: bool = False,
+        with_retries: bool = False,
+        unverified_cost: bool = False,
+    ) -> int:
+        clauses, params = self._log_filters(
+            external_user_id=external_user_id,
+            status=status,
+            modality=modality,
+            model_id=model_id,
+            channel=channel,
+            since=since,
+            until=until,
+            with_fallback=with_fallback,
+            with_retries=with_retries,
+            unverified_cost=unverified_cost,
+        )
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        row = await self._fetchone(
+            f"SELECT COUNT(*) AS n FROM request_logs {where}", tuple(params)
+        )
+        return int(row["n"]) if row else 0
+
+    async def get_request_log(self, log_id: int) -> dict[str, Any] | None:
+        """The full row, including response text and raw usage — what the
+        inspector needs and the list deliberately does not carry."""
+        row = await self._fetchone("SELECT * FROM request_logs WHERE id = ?", (log_id,))
+        return dict(row) if row is not None else None
 
     async def get_usage(
         self, *, external_user_id: str | None = None, since: str | None = None
