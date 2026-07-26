@@ -214,15 +214,6 @@ it as a managed service on this host.
 - Deploy the registry-freshness pack to prod, run `POST /api/registry/refresh`
   there, and fill real prices for the live DeepSeek models in `/registry`
   (they arrive from the catalog with `price_source_kind='unknown'`).
-- nginx: the live config already carries the long-run `location` (applied
-  earlier); the only delta left is widening its regex to `^/api/(v1/)?(cli|runs)`
-  so the new console's `/api/v1/cli` lands in the 3600s block instead of the
-  600s one. Edit `/etc/nginx/sites-available/model-router` by hand — certbot
-  owns the TLS block and the redirect in that file, `cp` would drop them — then
-  `nginx -t` (it covers every site on the host) and reload. Afterwards re-run a
-  long CLI request to confirm the 504 is gone.
-- Deploy wave 0 and watch the first restart: `_add_missing_columns` grows
-  sixteen columns on the live `request_logs` in one pass.
 - ✅ Waves 0-2 deployed to prod (2026-07-26). DeepSeek prices corrected from the
   vendor page with `page` provenance: v4-pro 0.435/0.87 + cache read 0.003625
   per 1M (it had been carrying deepseek-chat's 0.27/1.10), v4-flash
@@ -233,11 +224,18 @@ it as a managed service on this host.
 - Still unpriced on prod: the image, stt and tts seed rows, and Anthropic's
   catalog rows. The «Обзор» work list names them. Anthropic cache rates are
   worth entering for the same reason as DeepSeek's.
-- Deploy wave 3 and check three things on prod: the `batch_id` column arrives by
-  migration on the first restart; a `run_cli` through **claude** still parses
-  (it switched to `--output-format stream-json`, verified locally against codex
-  and against the format claude 2.1.187 prints, but prod's grant is a different
-  one); and any rows left `running` by the restart show up as `interrupted`.
+- ✅ Wave 3 deployed (2026-07-26 14:56 UTC, `d05b915`) and verified on prod:
+  the `batch_id` column and the `client_request_id` index arrived by migration
+  on the first restart; `run_cli` through claude parses the new
+  `stream-json` output (steps arrived live, cache tokens normalized —
+  prompt 12354 = 2 input + 7669 cache read + 4683 cache write, cost
+  `provider_notional`); a run deliberately caught by a restart came back as
+  `interrupted` with `cost_unknown` and its subprocess died with the cgroup.
+  The verification left rows 8219 (ok, notional $0.051) and 8220 (interrupted)
+  under `wave3-deploy-check` / `wave3-interrupt-check` — mine, not traffic.
+- The nginx delta from wave 2 turns out to be already applied: the live config
+  carries `location ~ ^/api/(v1/)?(cli|runs)` with the 3600s timeouts. Nothing
+  left to do there.
 - Decide the retention policy itself. The code is there and disabled: with
   `LOG_RETENTION_DAYS`/`BLOB_RETENTION_DAYS` unset nothing is ever deleted,
   exactly as before. The log is the only record of spend, so the number is a
