@@ -189,10 +189,16 @@ it as a managed service on this host.
   long CLI request to confirm the 504 is gone.
 - Deploy wave 0 and watch the first restart: `_add_missing_columns` grows
   sixteen columns on the live `request_logs` in one pass.
-- Deploy wave 2 and fill real prices for the models that now report `unpriced`
-  (three of five modalities have no rates at all — the «Обзор» work list names
-  them). Cache rates for DeepSeek and Anthropic are worth entering too: without
-  them a cached conversation is priced at the prompt rate and marked estimated.
+- ✅ Waves 0-2 deployed to prod (2026-07-26). DeepSeek prices corrected from the
+  vendor page with `page` provenance: v4-pro 0.435/0.87 + cache read 0.003625
+  per 1M (it had been carrying deepseek-chat's 0.27/1.10), v4-flash
+  0.14/0.28/0.0028 (was unpriced). Historical rows keep what they were logged
+  with and cannot be recomputed — before wave 2 the cache split was not
+  recorded, so the 30-day DeepSeek figure of $6.24 is only known to lie between
+  ~$2.40 (all cache hits) and ~$7.61 (all misses).
+- Still unpriced on prod: the image, stt and tts seed rows, and Anthropic's
+  catalog rows. The «Обзор» work list names them. Anthropic cache rates are
+  worth entering for the same reason as DeepSeek's.
 - Wave 3 of `docs/UI_CONCEPT_v2.md`: in-process run registry with progress and
   cancellation, line-by-line CLI output, `running`/`interrupted` recovery on
   restart, the multi-model mode of «Прогон», `plan_json` replay in the log,

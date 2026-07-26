@@ -4,6 +4,13 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-07-26 · Real DeepSeek prices off the vendor page, cache rates editable
+- What: `cache_read_price` / `cache_write_price` / `character_price` reachable through `PATCH` and the model card (they were columns from wave 2 that only SQL could set); real DeepSeek rates entered on prod from https://api-docs.deepseek.com/quick_start/pricing with `page` provenance — v4-pro 0.435/0.87 and cache read 0.003625 per 1M (was 0.27/1.10, copied from deepseek-chat), v4-flash 0.14/0.28/0.0028 (was unpriced).
+- Why: the console reported $6.24 of DeepSeek spend over 30 days computed from prices belonging to a different model, and no cache rate meant cached tokens were charged at the full prompt rate.
+- Files: router_mcp/web/api.py, web/static/js/pages/models.js, tests/test_registry_patch.py; prod registry rows via PATCH
+- Fixes-on-the-fly: the first PATCH run silently left the cache rate at zero because the commit had not been pushed and `deploy.sh` pulled nothing — the deploy script reports the revision it moved to, worth reading.
+- Next: wave 3 — run registry with progress and cancellation, line-by-line CLI output, `running`/`interrupted` recovery, multi-model mode, retention.
+
 ## 2026-07-26 · Console wave 2: honest money, operations, acceptance in a browser
 - What: accounting stopped calling a missing rate a zero — `unpriced`, per-character TTS, cache/reasoning tokens at their own rates with the sum returned by its terms, notional subscription money kept out of real totals, and OpenRouter's own charge captured beside the registry figure; `GET /usage` groups spend five ways and splits the totals by price source with `is_lower_bound`, plus CSV export and the «Расход» tab; `GET /health/summary` and `POST /providers/{id}/probe` behind the gate with «Обзор» rebuilt on them; `GET /mcp/summary` with tool schemas and per-tool/per-client statistics from the log, and the MCP tab; «Модели» gained facet counts returned with the rows, mass deprecation with a listed confirmation and a working undo.
 - Why: Wave 2 of `docs/UI_CONCEPT_v2.md`. §7 says the three accounting defects have to be fixed before the spend screen is drawn, or it shows confidently wrong numbers.
