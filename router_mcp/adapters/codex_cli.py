@@ -16,6 +16,7 @@ from typing import Any
 
 from router_mcp.adapters._subprocess import resolve_executable, run_subprocess, validate_cwd
 from router_mcp.adapters.base import ProviderAdapter
+from router_mcp.domain import progress
 from router_mcp.domain.errors import ProviderError
 from router_mcp.domain.messages import RouterRequest, RouterResponse, Usage
 from router_mcp.domain.modality import Modality
@@ -53,7 +54,9 @@ class CodexCliAdapter(ProviderAdapter):
         timeout = int(request.params.get("timeout_sec", self._timeout))
         command = self._build_command(prompt, cwd)
 
-        result = await run_subprocess(command, cwd=cwd, timeout_sec=timeout)
+        result = await run_subprocess(
+            command, cwd=cwd, timeout_sec=timeout, on_line=self._report
+        )
         text, token_info = self._parse_stdout(result.stdout)
         if result.return_code != 0 and not text:
             raise ProviderError(
@@ -79,6 +82,57 @@ class CodexCliAdapter(ProviderAdapter):
         if "--json" not in base:
             base.append("--json")
         return [*base, "--", prompt]
+
+    @staticmethod
+    def _report(line: str) -> None:
+        """Turn one stdout line into a timeline step, while the run is going.
+
+        Deltas are skipped on purpose: a token-by-token feed would bury the
+        events an operator is actually watching for (which command ran, which
+        file was touched) under thousands of one-character steps.
+        """
+        line = line.strip()
+        if not line or not line.startswith("{"):
+            return
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            return
+        if not isinstance(event, dict):
+            return
+        etype = str(event.get("type", ""))
+        if etype == "item.completed" and isinstance(event.get("item"), dict):
+            item = event["item"]
+            kind = str(item.get("type") or "item")
+            title = (
+                item.get("command")
+                or item.get("path")
+                or (item.get("text") or "")[:120]
+                or kind
+            )
+            progress.emit("cli", f"{kind}: {title}")
+        elif etype == "event_msg" and isinstance(event.get("payload"), dict):
+            body = event["payload"]
+            btype = str(body.get("type") or "")
+            if btype == "token_count" and isinstance(body.get("info"), dict):
+                info = body["info"]
+                block = info.get("total_token_usage") or info.get("last_token_usage") or {}
+                if isinstance(block, dict):
+                    progress.emit(
+                        "cli",
+                        f"токенов: {block.get('total_tokens') or 0}",
+                        prompt=block.get("input_tokens"),
+                        completion=block.get("output_tokens"),
+                    )
+            elif btype in ("agent_message", "task_complete"):
+                progress.emit("cli", "ответ агента получен")
+            elif btype == "exec_command_begin":
+                command = body.get("command")
+                if isinstance(command, list):
+                    command = " ".join(str(part) for part in command)
+                progress.emit("cli", f"команда: {str(command or '')[:120]}")
+        elif etype == "turn.completed":
+            progress.emit("cli", "ход завершён")
 
     @staticmethod
     def _parse_stdout(stdout: str) -> tuple[str, dict[str, Any] | None]:

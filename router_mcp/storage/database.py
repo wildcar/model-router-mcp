@@ -89,6 +89,7 @@ class RequestLogRecord:
     tool: str | None = None
     client_id: str | None = None
     client_request_id: str | None = None
+    batch_id: str | None = None  # one operator action that fanned out into N runs
     # Execution detail the console's timeline and error card need.
     attempts: int | None = None  # HTTP tries inside the successful provider attempt
     provider_status: int | None = None  # last upstream HTTP status
@@ -298,6 +299,7 @@ class Database:
                     tool TEXT,
                     client_id TEXT,
                     client_request_id TEXT,
+                    batch_id TEXT,
                     attempts INTEGER,
                     provider_status INTEGER,
                     provider_request_id TEXT,
@@ -330,6 +332,10 @@ class Database:
         "CREATE INDEX IF NOT EXISTS idx_request_logs_modality ON request_logs(modality, id DESC)",
         "CREATE INDEX IF NOT EXISTS idx_request_logs_channel ON request_logs(channel, id DESC)",
         "CREATE INDEX IF NOT EXISTS idx_request_logs_model ON request_logs(model_id, id DESC)",
+        # Looked up on every run that carries an idempotency key, i.e. on the
+        # hot path of the multi-model mode.
+        "CREATE INDEX IF NOT EXISTS idx_request_logs_client_request "
+        "ON request_logs(client_request_id)",
     )
 
     async def _create_log_indexes(self) -> None:
@@ -374,6 +380,8 @@ class Database:
             "tool": "TEXT",
             "client_id": "TEXT",
             "client_request_id": "TEXT",
+            # Wave 3: the multi-model mode of «Прогон» sends N runs at once.
+            "batch_id": "TEXT",
             "attempts": "INTEGER",
             "provider_status": "INTEGER",
             "provider_request_id": "TEXT",
@@ -722,12 +730,16 @@ class Database:
         "usage_raw": lambda v: json.dumps(v, ensure_ascii=False) if v else None,
     }
 
-    async def log_request(self, rec: RequestLogRecord) -> int:
+    def _log_values(self, rec: RequestLogRecord) -> dict[str, Any]:
         values: dict[str, Any] = {}
         for name in RequestLogRecord.__dataclass_fields__:
             value = getattr(rec, name)
             encode = self._LOG_ENCODED_FIELDS.get(name)
             values[name] = encode(value) if encode else value
+        return values
+
+    async def log_request(self, rec: RequestLogRecord) -> int:
+        values = self._log_values(rec)
         values["created_at"] = _now()
         cols = list(values)
         conn = await self._get_conn()
@@ -740,6 +752,65 @@ class Database:
             await conn.commit()
             return int(cur.lastrowid)
 
+    async def finish_request_log(self, log_id: int, rec: RequestLogRecord) -> None:
+        """Write the outcome onto a row that was opened as `running`.
+
+        The row is created before the provider is called so a run in flight is
+        visible in the log and survives a restart as `interrupted`; this is the
+        second half of that write, and it sets every column the finished record
+        carries except `created_at`, which belongs to the moment the run started.
+        """
+        values = self._log_values(rec)
+        assignments = ", ".join(f"{name} = ?" for name in values)
+        conn = await self._get_conn()
+        async with self._write_lock:
+            await conn.execute(
+                f"UPDATE request_logs SET {assignments} WHERE id = ?",
+                (*values.values(), log_id),
+            )
+            await conn.commit()
+
+    # Statuses that mean "this run is still going". Nothing outside the process
+    # that started it can move them along, which is why a restart has to.
+    LIVE_STATUSES = ("running", "queued")
+
+    async def interrupt_live_logs(self) -> int:
+        """Close out runs the previous process was executing when it stopped.
+
+        Without this a killed service leaves rows reading «выполняется» forever,
+        and the console cannot tell them from a call that is genuinely in flight.
+        The outcome is honestly unknown: the provider may well have run and
+        billed the request, so the cost source says so rather than claiming zero.
+        """
+        placeholders = ", ".join("?" for _ in self.LIVE_STATUSES)
+        conn = await self._get_conn()
+        async with self._write_lock:
+            cur = await conn.execute(
+                "UPDATE request_logs SET status = 'interrupted', "
+                "cost_source = 'cost_unknown', finished_at = ?, "
+                "error_message = COALESCE(error_message, "
+                "'Сервис перезапустился, пока запрос выполнялся') "
+                f"WHERE status IN ({placeholders})",
+                (_now(), *self.LIVE_STATUSES),
+            )
+            await conn.commit()
+            return cur.rowcount or 0
+
+    async def find_log_by_client_request_id(
+        self, client_request_id: str
+    ) -> dict[str, Any] | None:
+        """The row a repeated `client_request_id` already produced.
+
+        Idempotency is the point: a double-submitted form, or a client retrying
+        after a dropped connection, must not spend the money twice.
+        """
+        row = await self._fetchone(
+            "SELECT * FROM request_logs WHERE client_request_id = ? "
+            "ORDER BY id DESC LIMIT 1",
+            (client_request_id,),
+        )
+        return dict(row) if row is not None else None
+
     # What the log table on screen actually shows. The full row carries the
     # response text (up to 4000 chars) and the raw usage block; sending fifty of
     # those to draw a table of numbers is the difference between a 6 KB and a
@@ -747,7 +818,7 @@ class Database:
     LOG_LIST_COLUMNS = (
         "id", "created_at", "external_user_id", "modality", "service_provider_id",
         "model_provider", "model_id", "requested_model_id", "fallback_reason",
-        "status", "error_message", "channel", "tool", "client_id",
+        "status", "error_message", "channel", "tool", "client_id", "batch_id",
         "prompt_tokens", "completion_tokens", "total_tokens", "cache_read_tokens",
         "reasoning_tokens", "audio_seconds", "images", "characters",
         "cost_usd", "cost_source", "pricing_mode",
@@ -764,6 +835,7 @@ class Database:
         modality: str | None,
         model_id: str | None,
         channel: str | None,
+        batch_id: str | None,
         since: str | None,
         until: str | None,
         with_fallback: bool,
@@ -787,6 +859,9 @@ class Database:
         if channel:
             clauses.append("channel = ?")
             params.append(channel)
+        if batch_id:
+            clauses.append("batch_id = ?")
+            params.append(batch_id)
         if since:
             clauses.append("created_at >= ?")
             params.append(since)
@@ -811,6 +886,7 @@ class Database:
         modality: str | None = None,
         model_id: str | None = None,
         channel: str | None = None,
+        batch_id: str | None = None,
         since: str | None = None,
         until: str | None = None,
         with_fallback: bool = False,
@@ -830,6 +906,7 @@ class Database:
             modality=modality,
             model_id=model_id,
             channel=channel,
+            batch_id=batch_id,
             since=since,
             until=until,
             with_fallback=with_fallback,
@@ -856,6 +933,7 @@ class Database:
         modality: str | None = None,
         model_id: str | None = None,
         channel: str | None = None,
+        batch_id: str | None = None,
         since: str | None = None,
         until: str | None = None,
         with_fallback: bool = False,
@@ -868,6 +946,7 @@ class Database:
             modality=modality,
             model_id=model_id,
             channel=channel,
+            batch_id=batch_id,
             since=since,
             until=until,
             with_fallback=with_fallback,
@@ -879,6 +958,53 @@ class Database:
             f"SELECT COUNT(*) AS n FROM request_logs {where}", tuple(params)
         )
         return int(row["n"]) if row else 0
+
+    # --- retention --------------------------------------------------------
+    async def count_logs_before(self, before: str) -> int:
+        row = await self._fetchone(
+            "SELECT COUNT(*) AS n FROM request_logs WHERE created_at < ?", (before,)
+        )
+        return int(row["n"]) if row else 0
+
+    async def list_refs_before(self, before: str) -> list[str]:
+        """Blob refs held only by rows that are about to be deleted.
+
+        Collected before the delete, because afterwards nothing remembers which
+        files those rows pointed at and the blobs become orphans on disk. A ref
+        that any surviving row still names is left out.
+        """
+        rows = await self._fetchall(
+            "SELECT DISTINCT ref FROM ("
+            "  SELECT request_ref AS ref FROM request_logs WHERE created_at < ?"
+            "  UNION SELECT response_ref FROM request_logs WHERE created_at < ?"
+            ") WHERE ref IS NOT NULL AND ref NOT IN ("
+            "  SELECT request_ref FROM request_logs WHERE created_at >= ? "
+            "     AND request_ref IS NOT NULL"
+            "  UNION SELECT response_ref FROM request_logs WHERE created_at >= ? "
+            "     AND response_ref IS NOT NULL"
+            ")",
+            (before, before, before, before),
+        )
+        return [str(r["ref"]) for r in rows]
+
+    async def all_referenced_refs(self) -> set[str]:
+        """Every blob ref the log still points at, for orphan collection."""
+        rows = await self._fetchall(
+            "SELECT DISTINCT request_ref AS ref FROM request_logs "
+            "WHERE request_ref IS NOT NULL "
+            "UNION SELECT DISTINCT response_ref FROM request_logs "
+            "WHERE response_ref IS NOT NULL"
+        )
+        return {str(r["ref"]) for r in rows}
+
+    async def delete_logs_before(self, before: str) -> int:
+        conn = await self._get_conn()
+        async with self._write_lock:
+            cur = await conn.execute(
+                "DELETE FROM request_logs WHERE created_at < ?", (before,)
+            )
+            await conn.commit()
+            return cur.rowcount or 0
 
     async def get_request_log(self, log_id: int) -> dict[str, Any] | None:
         """The full row, including response text and raw usage — what the

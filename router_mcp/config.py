@@ -103,6 +103,28 @@ class Settings(BaseSettings):
     # Default working directory for CLI runs; empty = the router process cwd.
     cli_default_cwd: str | None = Field(default=None, alias="CLI_DEFAULT_CWD")
 
+    # --- Runs in flight --------------------------------------------------
+    # How many runs the console may have going at once. Three because the whole
+    # service shares one SQLite connection behind one write lock, and a
+    # multi-model run of six would queue on that lock at exactly the moment the
+    # operator is watching six timelines tick (concept §21, open question 5).
+    max_concurrent_runs: int = Field(default=3, alias="MAX_CONCURRENT_RUNS")
+    # How long a finished run stays in the in-process registry, for the tab that
+    # was closed and reopened. The log is the durable record; this is a cache.
+    run_registry_size: int = Field(default=200, alias="RUN_REGISTRY_SIZE")
+
+    # --- Retention --------------------------------------------------------
+    # 0 means "keep forever", which is what the service did before there was a
+    # policy at all — so an installation that never sets these behaves as it did.
+    log_retention_days: int = Field(default=0, alias="LOG_RETENTION_DAYS")
+    # Response files are the bulk on disk; they can go earlier than the rows
+    # that point at them, which then show the payload as no longer stored.
+    blob_retention_days: int = Field(default=0, alias="BLOB_RETENTION_DAYS")
+    # Runs the purge on a timer. 0 leaves it to the button on «Обзор».
+    retention_sweep_interval_seconds: int = Field(
+        default=86400, alias="RETENTION_SWEEP_INTERVAL_SECONDS"
+    )
+
     # --- Routing defaults (per modality) --------------------------------
     default_chat_model: str | None = Field(default=None, alias="DEFAULT_CHAT_MODEL")
     default_image_model: str | None = Field(default=None, alias="DEFAULT_IMAGE_MODEL")

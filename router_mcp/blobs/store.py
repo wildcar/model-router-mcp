@@ -37,3 +37,18 @@ class BlobStore:
 
     def mime_of(self, ref: str) -> str:
         return mimetypes.guess_type(ref)[0] or "application/octet-stream"
+
+    def delete(self, ref: str) -> bool:
+        """Remove one blob. Missing is success: the goal is that it is gone."""
+        try:
+            self._path(ref).unlink(missing_ok=True)
+        except (OSError, ValueError):
+            return False
+        return True
+
+    def list_refs(self) -> list[str]:
+        """Everything stored, for orphan collection by the retention sweep."""
+        try:
+            return sorted(p.name for p in self.root.iterdir() if p.is_file())
+        except OSError:  # pragma: no cover - the directory is created in __init__
+            return []

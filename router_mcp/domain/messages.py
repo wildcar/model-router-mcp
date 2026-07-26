@@ -131,6 +131,10 @@ class RouterRequest:
     tool: str | None = None  # MCP tool name, when the call came through /mcp
     client_id: str | None = None  # caller-supplied label; untrusted, like the user id
     client_request_id: str | None = None  # caller's idempotency key
+    # Set when one operator action fanned out into several runs (the
+    # multi-model mode). Grouping happens by this key rather than by timestamp,
+    # which cannot tell two runs of one batch from two batches a second apart.
+    batch_id: str | None = None
 
 
 @dataclass(slots=True)

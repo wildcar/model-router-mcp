@@ -12,6 +12,7 @@ service_providers row + registry rows.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -43,6 +44,7 @@ from router_mcp.domain.messages import (
     RouterRequest,
     RouterResponse,
 )
+from router_mcp.domain import progress
 from router_mcp.domain.modality import Modality
 from router_mcp.registry.models import RegistryModel
 from router_mcp.registry.service import RegistryService
@@ -55,6 +57,27 @@ _TEXT_TRUNCATE = 4000
 # What a cost estimate assumes about the answer, since its length is the one
 # number nobody can know before the call. Stated on screen next to the figure.
 _ASSUMED_COMPLETION_TOKENS = 500
+# How many timeline steps one run may store. A CLI engine emits an event per
+# tool call and can produce thousands; the whole list is read back on every
+# inspector open.
+_MAX_STEPS = 500
+
+
+def _steps_json(steps: list[dict[str, Any]], dropped: int = 0) -> str | None:
+    """The timeline as it goes into the row, with the truncation stated."""
+    if not steps:
+        return None
+    payload = list(steps)
+    if dropped:
+        payload.append(
+            {
+                "at_ms": payload[-1].get("at_ms"),
+                "kind": "truncated",
+                "title": f"ещё {dropped} шаг(ов) не сохранено",
+                "dropped": dropped,
+            }
+        )
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def _pair(model: RegistryModel) -> dict[str, Any]:
@@ -591,29 +614,121 @@ class ModelRouter:
             ),
         }
 
-    async def dispatch(self, request: RouterRequest) -> DispatchResult:
+    async def dispatch(
+        self, request: RouterRequest, *, steps_out: list[dict[str, Any]] | None = None
+    ) -> DispatchResult:
+        """Execute one request, from planning to the logged row.
+
+        `steps_out` is the live timeline: pass a list and it fills up as the run
+        proceeds, which is how the run registry answers "что сейчас происходит"
+        without waiting for the result.
+        """
         t0 = time.monotonic()
         # Persist large request payloads up-front so they survive failures.
         request_ref = self._persist_request_attachment(request)
         request_text = self._truncate_request_text(request)
-        steps: list[dict[str, Any]] = []
+        steps = steps_out if steps_out is not None else []
+        dropped = 0
 
-        def step(kind: str, title: str, **detail: Any) -> None:
-            steps.append(
-                {
-                    "at_ms": int((time.monotonic() - t0) * 1000),
-                    "kind": kind,
-                    "title": title,
-                    **detail,
-                }
+        def step(kind: str, title: str, **detail: Any) -> dict[str, Any]:
+            nonlocal dropped
+            entry = {
+                "at_ms": int((time.monotonic() - t0) * 1000),
+                "kind": kind,
+                "title": title,
+                **detail,
+            }
+            # A CLI engine can print thousands of events. The timeline is stored
+            # in the log row and re-read on every inspector open, so it is
+            # capped — with the count of what was left out, because a silently
+            # shortened timeline reads like a run that stopped early.
+            if len(steps) < _MAX_STEPS:
+                steps.append(entry)
+            else:
+                dropped += 1
+            return entry
+
+        # The row exists before the provider is called: a run in flight has to be
+        # visible in the log (and to a second browser tab), and a service that
+        # dies mid-run must leave a row that says so rather than nothing at all.
+        log_id = await self._db.log_request(
+            RequestLogRecord(
+                external_user_id=request.external_user_id,
+                modality=request.modality.value,
+                service_provider_id=request.provider_hint,
+                model_id=request.model_id,
+                status="running",
+                request_text=request_text,
+                request_ref=request_ref,
+                cost_source="cost_unknown",
+                channel=request.channel,
+                tool=request.tool,
+                client_id=request.client_id,
+                client_request_id=request.client_request_id,
+                batch_id=request.batch_id,
             )
+        )
 
+        step("log", "запись журнала открыта", log_id=log_id)
+
+        def _sink(event: dict[str, Any]) -> None:
+            detail = dict(event)
+            step(detail.pop("kind", "progress"), detail.pop("title", ""), **detail)
+
+        sink_token = progress.set_sink(_sink)
+        try:
+            return await self._dispatch_inner(
+                request, log_id, steps, step, t0, request_text, request_ref,
+                lambda: dropped,
+            )
+        except asyncio.CancelledError:
+            # Cancellation is an outcome, not an absence of one: the provider may
+            # have run the request already, so the row says "прервано" and marks
+            # the cost unknown instead of recording a confident zero.
+            await self._db.finish_request_log(
+                log_id,
+                RequestLogRecord(
+                    external_user_id=request.external_user_id,
+                    modality=request.modality.value,
+                    service_provider_id=request.provider_hint,
+                    model_id=request.model_id,
+                    status="cancelled",
+                    error_message="Прогон отменён оператором",
+                    request_text=request_text,
+                    request_ref=request_ref,
+                    cost_source="cost_unknown",
+                    latency_ms=int((time.monotonic() - t0) * 1000),
+                    channel=request.channel,
+                    tool=request.tool,
+                    client_id=request.client_id,
+                    client_request_id=request.client_request_id,
+                    batch_id=request.batch_id,
+                    plan_json=_steps_json(steps, dropped),
+                    finished_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                ),
+            )
+            raise
+        finally:
+            progress.reset_sink(sink_token)
+
+    async def _dispatch_inner(
+        self,
+        request: RouterRequest,
+        log_id: int,
+        steps: list[dict[str, Any]],
+        step,
+        t0: float,
+        request_text: str | None,
+        request_ref: str | None,
+        dropped,
+    ) -> DispatchResult:
         try:
             attempts = await self.plan(request)
         except RouterError as exc:
             step("plan", "plan failed", error=str(exc))
             await self._log_error(
-                request, None, request_text, request_ref, exc, t0, steps=steps
+                request, None, request_text, request_ref, exc, t0, steps=steps,
+                row_id=log_id, dropped=dropped(),
             )
             raise
         step(
@@ -665,6 +780,10 @@ class ModelRouter:
                     request, model, request_text, request_ref, exc, t0,
                     requested_model_id=requested_model_id, fallback_reason=reason,
                     steps=steps, http_trace=http_trace,
+                    # Only the last attempt closes the run's own row. An earlier
+                    # failure that a fallback recovered from is its own log
+                    # entry, as it has been since the fallback policy landed.
+                    row_id=log_id if last else None, dropped=dropped(),
                 )
                 if last:
                     raise
@@ -679,6 +798,7 @@ class ModelRouter:
                     request, model, request_text, request_ref, exc, t0,
                     requested_model_id=requested_model_id, fallback_reason=reason,
                     steps=steps, http_trace=http_trace,
+                    row_id=log_id, dropped=dropped(),
                 )
                 raise
             except Exception as exc:  # normalize unexpected failures
@@ -691,6 +811,7 @@ class ModelRouter:
                     request, model, request_text, request_ref, normalized, t0,
                     requested_model_id=requested_model_id, fallback_reason=reason,
                     steps=steps, http_trace=http_trace,
+                    row_id=log_id, dropped=dropped(),
                 )
                 raise normalized from exc
 
@@ -748,6 +869,7 @@ class ModelRouter:
             tool=request.tool,
             client_id=request.client_id,
             client_request_id=request.client_request_id,
+            batch_id=request.batch_id,
             attempts=max(len(http_trace), 1),
             provider_status=_last_status(http_trace),
             provider_request_id=_provider_request_id(meta),
@@ -755,8 +877,11 @@ class ModelRouter:
             return_code=meta.get("return_code"),
             finished_at=finished_at,
         )
-        log_id = await self._db.log_request(rec)
         step("log", "logged", log_id=log_id, channel=request.channel)
+        # The timeline is stored with the row, so opening the entry a week later
+        # replays the same steps the operator watched go by.
+        rec.plan_json = _steps_json(steps, dropped())
+        await self._db.finish_request_log(log_id, rec)
         return DispatchResult(
             response=response,
             cost=cost,
@@ -811,6 +936,8 @@ class ModelRouter:
         fallback_reason: str | None = None,
         steps: list[dict[str, Any]] | None = None,
         http_trace: list[dict[str, Any]] | None = None,
+        row_id: int | None = None,
+        dropped: int = 0,
     ) -> int:
         trace = http_trace or []
         # A read timeout means the provider most likely ran — and billed — the
@@ -834,13 +961,20 @@ class ModelRouter:
             tool=request.tool,
             client_id=request.client_id,
             client_request_id=request.client_request_id,
+            batch_id=request.batch_id,
             attempts=len(trace) or None,
             provider_status=_last_status(trace)
             or getattr(exc, "provider_status", None),
-            plan_json=json.dumps(steps, ensure_ascii=False) if steps else None,
+            plan_json=_steps_json(steps or [], dropped),
             finished_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
         )
-        log_id = await self._db.log_request(rec)
+        if row_id is None:
+            log_id = await self._db.log_request(rec)
+        else:
+            # This failure is the outcome of the run, so it closes the row that
+            # was opened when the run started rather than adding a second one.
+            await self._db.finish_request_log(row_id, rec)
+            log_id = row_id
         # "Open this error in the log" is offered on three screens; without the
         # id travelling with the exception the link has nowhere to point.
         if isinstance(exc, RouterError):

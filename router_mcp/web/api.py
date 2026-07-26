@@ -27,7 +27,7 @@ from router_mcp.domain.modality import Modality
 from router_mcp.mcp_server.serialize import model_to_dict
 from router_mcp.registry.models import RegistryModel
 from router_mcp.runtime import get_core
-from router_mcp.web import capabilities, health, mcp_summary
+from router_mcp.web import capabilities, health, mcp_summary, retention
 from router_mcp.web.views import page, run_from_dispatch, run_from_log
 
 api_router = APIRouter()
@@ -344,6 +344,163 @@ async def api_cli(body: CliBody, http_request: Request) -> dict[str, Any]:
     )
 
 
+# --- runs in flight -----------------------------------------------------
+class RunBody(BaseModel):
+    """One run of any modality, submitted without waiting for it.
+
+    The fields are the union of the five synchronous bodies rather than a
+    per-modality endpoint set: the console builds this object from the
+    capability matrix, and a second dispatch tree here would be a second place
+    to forget a parameter.
+    """
+
+    modality: str = "chat"
+    external_user_id: str = "web-tester"
+    text: str | None = None
+    prompt: str | None = None          # what the image and cli forms call it
+    messages: list[dict[str, Any]] | None = None
+    model_id: str | None = None
+    tier: str | None = None
+    provider: str | None = None
+    voice: str | None = None           # tts shorthand, as on /api/tts
+    engine: str | None = None          # cli: "codex" | "claude"
+    cwd: str | None = None
+    timeout_sec: int | None = None
+    params: dict[str, Any] | None = None
+    fallback: dict[str, Any] | str | None = None
+    # An uploaded file, by reference. Attachments do not travel through JSON:
+    # POST /api/v1/blobs first, send the ref here.
+    attachment_ref: str | None = None
+    attachment_kind: str = "audio"
+    # Idempotency and grouping. The same key twice returns the first run instead
+    # of spending the money again; the batch groups one operator action.
+    client_request_id: str | None = None
+    batch_id: str | None = None
+
+
+def _attachment_from_ref(ref: str, kind: str) -> Attachment:
+    core = get_core()
+    if not core.blobs.exists(ref):
+        raise NotFound(f"Файл {ref} не найден")
+    return Attachment(
+        kind=kind,
+        mime=core.blobs.mime_of(ref),
+        data=core.blobs.load(ref),
+        ref=ref,
+    )
+
+
+def _router_request(body: RunBody, http_request: Request | None) -> RouterRequest:
+    try:
+        modality = Modality.from_str(body.modality)
+    except ValueError as exc:
+        raise BadRequest(str(exc)) from exc
+    channel, client_id = _channel(http_request)
+
+    params: dict[str, Any] = dict(body.params or {})
+    provider = body.provider
+    if modality is Modality.TTS and body.voice:
+        params["voice"] = body.voice
+    if modality is Modality.CLI:
+        engine = (body.engine or "codex").strip().lower()
+        if engine not in ("codex", "claude"):
+            raise BadRequest("engine must be 'codex' or 'claude'")
+        provider = f"{engine}-cli"
+        if body.cwd:
+            params["cwd"] = body.cwd
+        if body.timeout_sec:
+            params["timeout_sec"] = body.timeout_sec
+
+    attachments = (
+        [_attachment_from_ref(body.attachment_ref, body.attachment_kind)]
+        if body.attachment_ref
+        else []
+    )
+    if modality is Modality.STT and not attachments:
+        raise BadRequest("Для распознавания нужен файл: сначала POST /api/v1/blobs")
+
+    return RouterRequest(
+        modality=modality,
+        external_user_id=body.external_user_id,
+        model_id=body.model_id,
+        tier=body.tier,
+        provider_hint=provider,
+        text=body.text if body.text is not None else body.prompt,
+        messages=body.messages,
+        attachments=attachments,
+        params=params,
+        fallback=parse_fallback(body.fallback),
+        channel=channel,
+        client_id=client_id,
+        client_request_id=body.client_request_id,
+        batch_id=body.batch_id,
+    )
+
+
+@api_router.post("/runs", status_code=202)
+async def api_submit_run(body: RunBody, http_request: Request) -> dict[str, Any]:
+    """Start a run and answer with its id, without waiting for it.
+
+    202, not 200: nothing has happened yet beyond accepting the work. The
+    console polls `GET /runs/{id}` once a second (§10.5); an operator who closes
+    the tab loses nothing, because the row in the log was written at the start.
+    """
+    request = _router_request(body, http_request)
+    registry = get_core().runs
+    if registry is None:  # pragma: no cover - always wired in build_core
+        raise Conflict("Реестр прогонов недоступен")
+    run = await registry.submit(
+        request, label=body.model_id or request.provider_hint or body.modality
+    )
+    return run.as_dict()
+
+
+@api_router.get("/runs")
+async def api_list_runs(batch_id: str | None = None, limit: int = 20) -> dict[str, Any]:
+    """What this process is running now, newest first.
+
+    In-process only, on purpose: this is the лента последних прогонов, not the
+    log. Anything older lives in `GET /logs`, which survives restarts.
+    """
+    registry = get_core().runs
+    runs = registry.list(batch_id=batch_id, limit=max(1, min(limit, 100)))
+    return page([r.as_dict() for r in runs], total=len(runs))
+
+
+@api_router.get("/runs/{run_id}")
+async def api_get_run(run_id: str) -> dict[str, Any]:
+    return get_core().runs.get(run_id).as_dict()
+
+
+@api_router.delete("/runs/{run_id}")
+async def api_cancel_run(run_id: str) -> dict[str, Any]:
+    """Stop a run. For a CLI engine this kills the process; for an HTTP call it
+    cancels the task. Either way the log row is closed as `cancelled` with the
+    cost marked unknown — the provider may already have done the work."""
+    run = await get_core().runs.cancel(run_id)
+    return run.as_dict()
+
+
+@api_router.post("/blobs")
+async def api_upload_blob(file: UploadFile = File(...)) -> dict[str, Any]:
+    """Store a file and answer with its ref, so JSON bodies can point at it.
+
+    The audio for a transcription used to be reachable only through a multipart
+    form, which meant the asynchronous run path could not carry one at all.
+    """
+    core = get_core()
+    data = await file.read()
+    if not data:
+        raise BadRequest("Пустой файл")
+    ref = core.blobs.save(data, file.content_type or "application/octet-stream")
+    return {
+        "ref": ref,
+        "bytes": len(data),
+        "mime": core.blobs.mime_of(ref),
+        "url": f"/blobs/{ref}",
+    }
+
+
 @api_router.get("/logs")
 async def api_logs(
     user: str | None = None,
@@ -351,6 +508,7 @@ async def api_logs(
     modality: str | None = None,
     model_id: str | None = None,
     channel: str | None = None,
+    batch_id: str | None = None,
     since: str | None = None,
     until: str | None = None,
     with_fallback: bool = False,
@@ -372,6 +530,7 @@ async def api_logs(
         modality=modality,
         model_id=model_id,
         channel=channel,
+        batch_id=batch_id,
         since=since,
         until=until,
         with_fallback=with_fallback,
@@ -392,6 +551,23 @@ async def api_log(log_id: int) -> dict[str, Any]:
     if row is None:
         raise NotFound(f"No log entry {log_id}")
     return run_from_log(row)
+
+
+@api_router.get("/retention")
+async def api_retention() -> dict[str, Any]:
+    """The policy and what applying it would remove. Deletes nothing."""
+    return await retention.preview(get_core())
+
+
+@api_router.post("/retention/purge")
+async def api_retention_purge(orphans: bool = True) -> dict[str, Any]:
+    """Apply the retention policy now.
+
+    Irreversible, and the console asks first with these numbers in the prompt:
+    the log is the only record of what was spent, and no export runs behind the
+    operator's back to soften a deletion they did not mean.
+    """
+    return await retention.purge(get_core(), orphans_too=orphans)
 
 
 @api_router.get("/usage")

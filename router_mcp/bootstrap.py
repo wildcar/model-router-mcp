@@ -28,6 +28,7 @@ from router_mcp.registry.models import RegistryModel
 from router_mcp.registry.service import RegistryService
 from router_mcp.routing.router import ModelRouter
 from router_mcp.storage.database import Database
+from router_mcp.web.runs import RunRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -56,11 +57,16 @@ class AppCore:
     registry: RegistryService
     router: ModelRouter
     adapters: dict[str, ProviderAdapter]
+    # Runs this process has in flight. Assigned right after construction,
+    # because the registry needs the assembled core to dispatch through.
+    runs: "RunRegistry | None" = None
     # When this process built its core. The console shows uptime, and a service
     # that restarted an hour ago explains a lot of otherwise odd numbers.
     started_at: float = field(default_factory=time.time)
 
     async def aclose(self) -> None:
+        if self.runs is not None:
+            await self.runs.aclose()
         for adapter in self.adapters.values():
             try:
                 await adapter.close()
@@ -276,6 +282,15 @@ def _build_adapters(settings: Settings) -> list[ProviderSpec]:
 async def build_core(settings: Settings) -> AppCore:
     db = Database(settings.db_path)
     await db.init()
+    # Runs the previous process was executing when it stopped cannot be resumed;
+    # left as they are they read «выполняется» forever and the console has no way
+    # to tell them from a call that is genuinely in flight right now.
+    interrupted = await db.interrupt_live_logs()
+    if interrupted:
+        logger.warning(
+            "Marked %d run(s) interrupted: the service restarted while they ran",
+            interrupted,
+        )
 
     blobs = BlobStore(settings.blob_dir)
 
@@ -320,7 +335,7 @@ async def build_core(settings: Settings) -> AppCore:
         db=db, registry=registry, adapters=adapters, blobs=blobs, defaults=defaults
     )
 
-    return AppCore(
+    core = AppCore(
         settings=settings,
         db=db,
         blobs=blobs,
@@ -328,3 +343,9 @@ async def build_core(settings: Settings) -> AppCore:
         router=router,
         adapters=adapters,
     )
+    core.runs = RunRegistry(
+        core,
+        max_concurrent=settings.max_concurrent_runs,
+        keep=settings.run_registry_size,
+    )
+    return core

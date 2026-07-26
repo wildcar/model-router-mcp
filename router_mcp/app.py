@@ -24,6 +24,7 @@ from router_mcp.domain.errors import RouterError
 from router_mcp.logging_config import setup_logging
 from router_mcp.mcp_server.tools import mcp
 from router_mcp.runtime import set_core
+from router_mcp.web import retention
 from router_mcp.web.api import api_router, blob_router
 from router_mcp.web.pages import pages_router
 from router_mcp.web.views import error_envelope
@@ -75,6 +76,22 @@ async def catalog_sync_loop(core, interval_seconds: int) -> None:
             logger.warning("Scheduled catalog sync failed", exc_info=True)
 
 
+async def retention_sweep_loop(core, interval_seconds: int) -> None:
+    """Apply the retention policy on a timer.
+
+    With both retentions left at 0 this does nothing at all, which is how an
+    installation that never configured a policy keeps behaving.
+    """
+    while True:
+        await asyncio.sleep(interval_seconds)
+        if not (core.settings.log_retention_days or core.settings.blob_retention_days):
+            continue
+        try:
+            await retention.purge(core)
+        except Exception:  # pragma: no cover - the timer must survive anything
+            logger.warning("Scheduled retention purge failed", exc_info=True)
+
+
 def build_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or load_settings()
     setup_logging(settings.log_file, settings.log_level)
@@ -90,19 +107,27 @@ def build_app(settings: Settings | None = None) -> FastAPI:
         logger.info(
             "Core ready: providers=%s db=%s", list(core.adapters), settings.db_path
         )
-        sync_task: asyncio.Task | None = None
+        tasks: list[asyncio.Task] = []
         if settings.catalog_sync_interval_seconds > 0:
-            sync_task = asyncio.create_task(
-                catalog_sync_loop(core, settings.catalog_sync_interval_seconds)
+            tasks.append(
+                asyncio.create_task(
+                    catalog_sync_loop(core, settings.catalog_sync_interval_seconds)
+                )
+            )
+        if settings.retention_sweep_interval_seconds > 0:
+            tasks.append(
+                asyncio.create_task(
+                    retention_sweep_loop(core, settings.retention_sweep_interval_seconds)
+                )
             )
         try:
             async with mcp.session_manager.run():
                 yield
         finally:
-            if sync_task is not None:
-                sync_task.cancel()
+            for task in tasks:
+                task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
-                    await sync_task
+                    await task
             await core.aclose()
 
     app = FastAPI(title="model-router-mcp", lifespan=lifespan)

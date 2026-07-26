@@ -168,11 +168,14 @@ async def test_runtime_model_not_found_falls_back(tmp_path):
         assert result.response.model_id == "mid"
         assert result.requested_model_id == "pro"
         assert "model not found" in result.fallback_reason
-        # Both the failed attempt and the successful one are on record.
+        # Both the failed attempt and the successful one are on record. The
+        # run's own row is opened when the run starts, so it sorts *before* the
+        # attempt failure it later recovered from: the log is ordered by when a
+        # request began, not by when it finished.
         logs = await db.list_request_logs(external_user_id="u")
         assert [(row["model_id"], row["status"]) for row in logs] == [
-            ("mid", "ok"),
             ("pro", "error"),
+            ("mid", "ok"),
         ]
     finally:
         await db.close()

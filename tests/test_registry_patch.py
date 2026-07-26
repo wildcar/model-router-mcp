@@ -197,3 +197,10 @@ def test_cache_rates_are_reachable_through_the_api(client):
     assert patched["cache_read_price"] == pytest.approx(0.003625e-6)
     # Touching a cache rate is touching a price, so provenance follows.
     assert patched["price_source_kind"] == "manual"
+    # The app fixture is session-scoped, so a row left behind here is a row the
+    # next module sees — and one of them asserts DeepSeek contributes nothing
+    # without a key.
+    client.delete(
+        "/api/v1/registry/models",
+        params={"service_provider_id": "deepseek", "model_id": "demo/cached"},
+    )

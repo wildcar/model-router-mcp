@@ -16,6 +16,7 @@ from typing import Any
 
 from router_mcp.adapters._subprocess import resolve_executable, run_subprocess, validate_cwd
 from router_mcp.adapters.base import ProviderAdapter
+from router_mcp.domain import progress
 from router_mcp.domain.errors import ProviderError
 from router_mcp.domain.messages import RouterRequest, RouterResponse, Usage
 from router_mcp.domain.modality import Modality
@@ -60,7 +61,12 @@ class ClaudeCliAdapter(ProviderAdapter):
         timeout = int(request.params.get("timeout_sec", self._timeout))
 
         exe = resolve_executable(self._argv[0]) or self._argv[0]
-        command = [exe, *self._argv[1:], "-p", prompt, "--output-format", "json",
+        # `stream-json` rather than `json`: the same final object arrives, but it
+        # is preceded by one line per turn, which is what makes a long run
+        # legible while it runs. `--verbose` is what the CLI requires to stream
+        # in print mode.
+        command = [exe, *self._argv[1:], "-p", prompt,
+                   "--output-format", "stream-json", "--verbose",
                    "--dangerously-skip-permissions"]
         requested_model = request.params.get("model")
         if requested_model:
@@ -68,7 +74,9 @@ class ClaudeCliAdapter(ProviderAdapter):
         if request.params.get("cwd"):
             command += ["--add-dir", cwd]
 
-        result = await run_subprocess(command, cwd=cwd, timeout_sec=timeout)
+        result = await run_subprocess(
+            command, cwd=cwd, timeout_sec=timeout, on_line=self._report
+        )
         data = self._parse_stdout(result.stdout, result.return_code, result.stderr)
 
         text = data.get("result")
@@ -92,17 +100,49 @@ class ClaudeCliAdapter(ProviderAdapter):
         )
 
     @staticmethod
+    def _report(line: str) -> None:
+        """One timeline step per streamed line, while the run is going."""
+        line = line.strip()
+        if not line.startswith("{"):
+            return
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            return
+        if not isinstance(event, dict):
+            return
+        etype = str(event.get("type") or "")
+        if etype == "system" and event.get("subtype") == "init":
+            progress.emit("cli", f"сессия {str(event.get('session_id') or '')[:8]}")
+        elif etype == "system" and event.get("subtype") == "api_retry":
+            progress.emit(
+                "cli",
+                f"повтор запроса к API ({event.get('error_status')})",
+                attempt=event.get("attempt"),
+            )
+        elif etype == "assistant":
+            message = event.get("message")
+            blocks = message.get("content") if isinstance(message, dict) else None
+            for block in blocks or []:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "tool_use":
+                    progress.emit("cli", f"инструмент: {block.get('name')}")
+                elif block.get("type") == "text" and str(block.get("text") or "").strip():
+                    progress.emit("cli", "текст от агента")
+        elif etype == "result":
+            progress.emit("cli", "результат получен")
+
+    @staticmethod
     def _parse_stdout(stdout: str, return_code: int, stderr: str) -> dict[str, Any]:
         text = stdout.strip()
         if not text:
             raise ProviderError(
                 f"claude CLI produced no output (exit {return_code}): {stderr[:500]}"
             )
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError as exc:
-            # --output-format json should emit one object; if not, surface raw.
-            raise ProviderError(f"claude CLI returned non-JSON output: {text[:500]}") from exc
+        data = ClaudeCliAdapter._final_object(text)
+        if data is None:
+            raise ProviderError(f"claude CLI returned non-JSON output: {text[:500]}")
         if not isinstance(data, dict):
             raise ProviderError("claude CLI returned an unexpected payload")
         if data.get("is_error"):
@@ -110,10 +150,51 @@ class ClaudeCliAdapter(ProviderAdapter):
         return data
 
     @staticmethod
+    def _final_object(text: str) -> dict[str, Any] | None:
+        """The result object, from either output format.
+
+        Under `stream-json` it is the line whose `type` is `result`; the whole
+        output is still parsed as one object first, so an older CLI (or a
+        `--output-format json` left in `CLAUDE_COMMAND`) keeps working.
+        """
+        try:
+            whole = json.loads(text)
+        except json.JSONDecodeError:
+            whole = None
+        if isinstance(whole, dict):
+            return whole
+        for line in reversed(text.splitlines()):
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(event, dict) and event.get("type") == "result":
+                return event
+        return None
+
+    @staticmethod
     def _usage(raw: Any) -> Usage:
         if not isinstance(raw, dict):
             return Usage()
-        prompt = raw.get("input_tokens")
+        # Same shape as the Anthropic API: cache reads and writes sit *outside*
+        # `input_tokens`, while Usage's contract is that `prompt_tokens` is the
+        # whole prompt. A CLI turn is mostly cache, so leaving them out made a
+        # long session look like it had sent almost nothing.
+        cache_read = raw.get("cache_read_input_tokens")
+        cache_write = raw.get("cache_creation_input_tokens")
+        prompt = (
+            (raw.get("input_tokens") or 0) + (cache_read or 0) + (cache_write or 0)
+        ) or None
         completion = raw.get("output_tokens")
         total = (prompt or 0) + (completion or 0) if (prompt or completion) else None
-        return Usage(prompt_tokens=prompt, completion_tokens=completion, total_tokens=total, raw=raw)
+        return Usage(
+            prompt_tokens=prompt,
+            completion_tokens=completion,
+            total_tokens=total,
+            cache_read_tokens=cache_read,
+            cache_write_tokens=cache_write,
+            raw=raw,
+        )
