@@ -145,3 +145,16 @@ table.kv th { width:38%; text-align:left; color:var(--muted); font-weight:400; v
 .spark { display:flex; align-items:flex-end; gap:2px; height:44px; margin:14px 0; }
 .spark-bar { width:8px; background:var(--accent); opacity:.7; border-radius:2px 2px 0 0; }
 .spark-bar:hover { opacity:1; }
+
+/* Models: facets on the left, table, card on the right. */
+.models-layout.three { grid-template-columns:220px minmax(0,1fr) 340px; }
+@media (max-width:1400px) { .models-layout.three { grid-template-columns:200px minmax(0,1fr); } }
+@media (max-width:1100px) { .models-layout.three { grid-template-columns:1fr; } }
+.facets { font-size:12px; position:sticky; top:16px; }
+.facet-group { margin-bottom:14px; }
+.facet-group h4 { margin:0 0 6px; color:var(--muted); font-size:11px; text-transform:uppercase; }
+.facet { display:grid; grid-template-columns:auto 1fr auto; gap:6px; align-items:center; padding:1px 0; }
+.undo-bar { position:fixed; bottom:24px; left:24px; display:flex; gap:12px; align-items:center;
+  background:#262b34; border:1px solid var(--border); padding:10px 16px; border-radius:8px; }
+.work-list { margin:0; padding-left:18px; }
+.work-list li { margin-bottom:4px; }

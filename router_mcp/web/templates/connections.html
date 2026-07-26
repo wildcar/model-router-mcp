@@ -1,25 +1,63 @@
 {% extends "base.html" %}
 {% block title %}Подключения — Model Router{% endblock %}
 {% block content %}
-<section class="card">
-  <div class="row">
-    <button id="sync" type="button">Синхронизировать каталоги</button>
-    <span class="hint">Ручные цены сохраняются, снятые модели помечаются, ничего не удаляется.</span>
-  </div>
-  <table id="providers"><thead><tr>
-    <th scope="col">Поставщик</th><th scope="col">Модальности</th>
-    <th scope="col">Включён</th><th scope="col">Состояние</th>
-    <th scope="col">Переменная</th><th scope="col">Прайс</th>
-  </tr></thead><tbody></tbody></table>
-  <div id="reports"></div>
-</section>
+<nav class="tabs" role="tablist">
+  <button type="button" id="tab-providers" class="tab active" role="tab">Поставщики</button>
+  <button type="button" id="tab-mcp" class="tab" role="tab">MCP</button>
+</nav>
 
-{# The MCP tab — tool inventory, self-probe, per-client call counts — is wave 2.
-   Naming it here beats a tab that opens onto nothing. #}
-<section class="card">
-  <h2>MCP</h2>
-  <p class="hint">Инвентарь инструментов, самопроба эндпоинта и статистика вызовов
-    по клиентам появятся во второй волне. Сейчас канал вызова уже пишется в журнал —
-    <a href="/logs?channel=mcp">посмотреть вызовы по MCP</a>.</p>
-</section>
+<div id="pane-providers">
+  <section class="card">
+    <div class="row">
+      <button id="sync" type="button">Синхронизировать каталоги</button>
+      <button id="probe-all" type="button">Проверить все ключи</button>
+      <span class="hint">Ручные цены сохраняются, снятые модели помечаются,
+        ничего не удаляется.</span>
+    </div>
+    <table id="providers"><thead><tr>
+      <th scope="col">Поставщик</th><th scope="col">Модальности</th>
+      <th scope="col" class="num">Моделей</th>
+      <th scope="col">Включён</th><th scope="col">Состояние</th>
+      <th scope="col">Проба ключа</th>
+      <th scope="col">Переменная</th><th scope="col">Прайс</th>
+    </tr></thead><tbody></tbody></table>
+    {# The sync report stays put until the next action: it is the answer to
+       "что изменилось", and a toast takes it away before it is read (§8.2). #}
+    <div id="reports"></div>
+  </section>
+</div>
+
+<div id="pane-mcp" hidden>
+  <section class="card">
+    <div class="row">
+      <span class="mono" id="mcp-endpoint">/mcp</span>
+      <span id="mcp-auth" class="hint"></span>
+      <button id="mcp-probe" type="button">Самопроба</button>
+      <span id="mcp-probe-result" class="hint"></span>
+    </div>
+    <h2>Инструменты</h2>
+    <table id="tools"><thead><tr>
+      <th scope="col">Инструмент</th>
+      <th scope="col" class="num">Вызовов 24 ч</th>
+      <th scope="col" class="num">Ошибок</th>
+      <th scope="col" class="num">p50</th>
+      <th scope="col">Схема</th>
+    </tr></thead><tbody></tbody></table>
+    <div id="retired-tools"></div>
+
+    <h2>Клиенты</h2>
+    <table id="clients"><thead><tr>
+      <th scope="col">Метка клиента</th><th scope="col" class="num">Вызовов</th>
+      <th scope="col" class="num">Ошибок</th><th scope="col">Последний вызов</th>
+    </tr></thead><tbody></tbody></table>
+    <p class="hint">Метку присылает сам клиент в заголовке
+      <code>X-Router-Client</code>, поэтому доверять ей нельзя — это ключ
+      группировки, как и метка пользователя. Различать клиентов по-настоящему
+      можно только именованными токенами; это открытый вопрос §24.</p>
+
+    <h2>Фрагмент конфигурации клиента</h2>
+    <pre id="mcp-snippet" class="mono"></pre>
+    <button id="copy-snippet" type="button">Копировать</button>
+  </section>
+</div>
 {% endblock %}

@@ -27,6 +27,12 @@ const ROUTES = {
   '/api/v1/logs/1': fixture('log-detail'),
   '/api/v1/logs/4821': fixture('run-ok'),
   '/api/v1/usage': fixture('usage'),
+  '/api/v1/health/summary': fixture('health-summary'),
+  '/api/v1/mcp/summary': fixture('mcp-summary'),
+  'POST /api/v1/providers/openrouter/probe': { provider_id: 'openrouter', status: 'ok',
+    detail: 'Каталог ответил, моделей 345', latency_ms: 210, age_seconds: 3 },
+  'POST /api/v1/mcp/probe': { status: 'ok', detail: 'инструментов 7', tools: 7, latency_ms: 4 },
+  'POST /api/v1/registry/models/bulk': { action: 'deprecate', changed: [], count: 0 },
   'POST /api/v1/plan': fixture('plan'),
   'POST /api/v1/registry/refresh': { providers: [
     { provider_id: 'openrouter', seen: 345, added: 2, updated: 14, deprecated: 1, skipped: null },
@@ -84,6 +90,13 @@ await runPage('overview', 'overview', (doc) => {
   check('обзор: плитка поставщиков заполнена', /\d+\/\d+/.test(text(doc, 'providers-count')),
     text(doc, 'providers-count'));
   check('обзор: плитка реестра заполнена', text(doc, 'models-count') !== '—');
+  check('обзор: uptime и размеры показаны', text(doc, 'service-detail').includes('МБ'),
+    text(doc, 'service-detail'));
+  // A fresh install must get steps, and a running one a work list — never a
+  // wall of zeroes (§14).
+  const hasWork = doc.getElementById('work').children.length > 0
+    || doc.getElementById('work-empty').hidden === false;
+  check('обзор: список работы или явное «ничего не требует внимания»', hasWork);
   check('обзор: ошибки перечислены или названы отсутствующими',
     rowsOf(doc, 'errors') > 0 || doc.getElementById('no-errors')?.hidden === false);
 });
@@ -117,6 +130,9 @@ await runPage('logs', 'logs', async (doc, _calls, settleNow) => {
 await runPage('models', 'models', (doc) => {
   check('модели: таблица заполнена', rowsOf(doc, 'models') > 0);
   check('модели: счётчик показан', text(doc, 'count') !== '');
+  // Facet counts come back with the rows, so the sidebar cannot disagree.
+  check('модели: фасеты со счётчиками построены',
+    doc.getElementById('facet-groups').children.length > 0);
   // Opening a row must build the price card with the unit inside the field.
   doc.querySelector('#models tbody').children[0].dispatch('click');
   const card = doc.getElementById('card');
@@ -125,13 +141,26 @@ await runPage('models', 'models', (doc) => {
   check('модели: прежнее значение показано', card.textContent.includes('было'));
 });
 
-await runPage('connections', 'connections', (doc) => {
+await runPage('connections', 'connections', async (doc, _calls, settleNow) => {
   check('подключения: поставщики перечислены', rowsOf(doc, 'providers') > 0);
   const body = doc.querySelector('#providers tbody');
   check('подключения: имя переменной окружения показано',
     body.textContent.includes('_API_KEY') || body.textContent.includes('_COMMAND'));
   check('подключения: значение ключа не показано', !body.textContent.includes('sk-'));
-  doc.getElementById('sync').dispatch('click');
+  check('подключения: колонка пробы ключа есть', body.textContent.includes('Проверить'));
+
+  doc.getElementById('tab-mcp').dispatch('click');
+  await settleNow();
+  check('MCP: вкладка открывается', doc.getElementById('pane-mcp').hidden === false);
+  check('MCP: инструменты перечислены', rowsOf(doc, 'tools') > 0);
+  const tools = doc.querySelector('#tools tbody').textContent;
+  check('MCP: статистика вызовов из журнала подтянута', tools.includes('chat'));
+  check('MCP: клиенты перечислены', rowsOf(doc, 'clients') > 0);
+  check('MCP: фрагмент конфигурации собран',
+    text(doc, 'mcp-snippet').includes('mcpServers'));
+  doc.getElementById('mcp-probe').dispatch('click');
+  await settleNow();
+  check('MCP: самопроба отвечает', text(doc, 'mcp-probe-result').includes('ok'));
 });
 
 await runPage('run', 'run', (doc, calls) => {

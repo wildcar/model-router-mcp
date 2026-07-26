@@ -7,6 +7,7 @@ Both the FastAPI app (production) and tests build their core here.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 
 from router_mcp.adapters.base import ProviderAdapter
@@ -55,6 +56,9 @@ class AppCore:
     registry: RegistryService
     router: ModelRouter
     adapters: dict[str, ProviderAdapter]
+    # When this process built its core. The console shows uptime, and a service
+    # that restarted an hour ago explains a lot of otherwise odd numbers.
+    started_at: float = field(default_factory=time.time)
 
     async def aclose(self) -> None:
         for adapter in self.adapters.values():

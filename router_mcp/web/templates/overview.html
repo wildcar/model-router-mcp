@@ -1,10 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Обзор — Model Router{% endblock %}
 {% block content %}
-{# The health summary, the error feed and the work list need
-   /api/v1/health/summary, which is wave 2. What this screen can already answer
-   honestly is the first-run question: which providers are configured, whether
-   the registry has anything in it, and what to do next (§14). #}
+{# On a fresh install this replaces the zeroes with steps: empty tables tell an
+   operator nothing about what to do next (§14). #}
 <section class="card" id="first-run" hidden>
   <h2>Сервис запущен, данных пока нет</h2>
   <ol id="steps"></ol>
@@ -13,6 +11,11 @@
 </section>
 
 <div class="tiles">
+  <section class="card tile">
+    <h3>Сервис</h3>
+    <p class="big ok" id="service-state">—</p>
+    <p class="hint mono" id="service-detail"></p>
+  </section>
   <section class="card tile">
     <h3>Поставщики</h3>
     <p class="big num" id="providers-count">—</p>
@@ -32,6 +35,12 @@
     <a href="/logs">журнал →</a>
   </section>
 </div>
+
+<section class="card">
+  <h2>Список работы</h2>
+  <ul id="work" class="work-list"></ul>
+  <p id="work-empty" class="hint" hidden>Ничего не требует внимания.</p>
+</section>
 
 <section class="card">
   <h2>Последние ошибки</h2>

@@ -27,7 +27,7 @@ from router_mcp.domain.modality import Modality
 from router_mcp.mcp_server.serialize import model_to_dict
 from router_mcp.registry.models import RegistryModel
 from router_mcp.runtime import get_core
-from router_mcp.web import capabilities
+from router_mcp.web import capabilities, health, mcp_summary
 from router_mcp.web.views import page, run_from_dispatch, run_from_log
 
 api_router = APIRouter()
@@ -190,6 +190,40 @@ async def api_plan(body: PlanBody) -> dict[str, Any]:
         fallback=parse_fallback(body.fallback),
     )
     return await get_core().router.explain(request)
+
+
+@api_router.get("/health/summary")
+async def api_health_summary() -> dict[str, Any]:
+    """The state of the installation, behind the auth gate.
+
+    Public `/health` answers only that the service is alive; version, provider
+    inventory and disk usage are a map of the host and live here (§16.5).
+    """
+    core = get_core()
+    return await health.summary(core, core.started_at)
+
+
+@api_router.post("/providers/{provider_id}/probe")
+async def api_probe_provider(provider_id: str, force: bool = False) -> dict[str, Any]:
+    """Ask a provider whether the key we hold still works.
+
+    `configured` only checks that a key is present, so a revoked key reads as
+    healthy. The answer is cached — probing on every page load would spend the
+    rate limit on reassurance.
+    """
+    result = await health.probe_provider(get_core(), provider_id, force=force)
+    return result.as_dict()
+
+
+@api_router.get("/mcp/summary")
+async def api_mcp_summary(hours: int = 24) -> dict[str, Any]:
+    """Tool inventory with schemas, joined with what the log saw."""
+    return await mcp_summary.summary(get_core(), hours=max(1, min(hours, 24 * 30)))
+
+
+@api_router.post("/mcp/probe")
+async def api_mcp_probe() -> dict[str, Any]:
+    return await mcp_summary.probe()
 
 
 @api_router.get("/models")
@@ -485,14 +519,109 @@ async def api_refresh_catalog(provider: str | None = None) -> dict[str, Any]:
     return {"providers": [r.as_dict() for r in reports]}
 
 
+def _facets(models: list[RegistryModel]) -> dict[str, Any]:
+    """Counts for the sidebar, computed over the same list that was returned.
+
+    Counting in a second call would show numbers from a different moment than
+    the rows beside them, and a sidebar that disagrees with its table is worse
+    than no sidebar (§11).
+    """
+    def _tally(key) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for model in models:
+            for value in key(model):
+                counts[value] = counts.get(value, 0) + 1
+        return dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
+
+    return {
+        "modality": _tally(lambda m: [mod.value for mod in m.modalities]),
+        "provider": _tally(lambda m: [m.service_provider_id]),
+        "source": _tally(lambda m: [m.source]),
+        "price_source_kind": _tally(lambda m: [m.price_source_kind]),
+        "tier": _tally(lambda m: [m.tier]),
+        "state": _tally(lambda m: ["active" if m.is_active else "retired"]),
+    }
+
+
 @api_router.get("/registry/models")
 async def api_registry_models(
-    source: str | None = None, modality: str | None = None
+    source: str | None = None,
+    modality: str | None = None,
+    provider: str | None = None,
+    tier: str | None = None,
+    state: str | None = None,
+    price_source_kind: str | None = None,
+    search: str | None = None,
 ) -> dict[str, Any]:
     core = get_core()
-    models = await core.db.list_registry_models(source=source, modality=modality, active_only=False)
+    models = await core.db.list_registry_models(
+        source=source,
+        modality=modality,
+        service_provider_id=provider,
+        tier=tier,
+        active_only=False,
+    )
+    if state == "active":
+        models = [m for m in models if m.is_active]
+    elif state == "retired":
+        models = [m for m in models if not m.is_active]
+    if price_source_kind:
+        models = [m for m in models if m.price_source_kind == price_source_kind]
+    if search:
+        needle = search.strip().lower()
+        models = [
+            m for m in models
+            if needle in m.model_id.lower() or needle in (m.display_name or "").lower()
+        ]
     items = [model_to_dict(m) for m in models]
-    return page(items, total=len(items))
+    return page(items, total=len(items), facets=_facets(models))
+
+
+class BulkModelsBody(BaseModel):
+    """A mass action, addressed by explicit pairs.
+
+    Pairs rather than a filter on purpose: a filter re-evaluated server-side can
+    match rows the operator never saw, and the confirmation they agreed to
+    listed the ones they did.
+    """
+
+    models: list[dict[str, str]]           # [{service_provider_id, model_id}]
+    action: str                            # "deprecate" | "restore" | "set_price_kind"
+    price_source_kind: str | None = None
+
+
+@api_router.post("/registry/models/bulk")
+async def api_bulk_models(body: BulkModelsBody) -> dict[str, Any]:
+    core = get_core()
+    if body.action not in ("deprecate", "restore", "set_price_kind"):
+        raise BadRequest(f"Unknown action {body.action!r}")
+    if not body.models:
+        raise BadRequest("No models given")
+    if len(body.models) > 500:
+        raise BadRequest("Too many models in one action (max 500)")
+
+    changed: list[dict[str, str]] = []
+    for pair in body.models:
+        provider = pair.get("service_provider_id")
+        model_id = pair.get("model_id")
+        if not provider or not model_id:
+            raise BadRequest("Each entry needs service_provider_id and model_id")
+        if body.action == "deprecate":
+            # Deprecate, never delete: logs and cost history point at the row.
+            await core.db.deprecate_registry_model(provider, model_id)
+        elif body.action == "restore":
+            # The undo behind the "отменить" window. If the provider really did
+            # retire the model, the next sync deprecates it again — the registry
+            # follows the provider, not the button.
+            await core.db.restore_registry_model(provider, model_id)
+        else:
+            if not body.price_source_kind:
+                raise BadRequest("set_price_kind needs price_source_kind")
+            await core.db.update_registry_model(
+                provider, model_id, {"price_source_kind": body.price_source_kind}
+            )
+        changed.append({"service_provider_id": provider, "model_id": model_id})
+    return {"action": body.action, "changed": changed, "count": len(changed)}
 
 
 @api_router.get("/registry/tree")

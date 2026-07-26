@@ -1,36 +1,38 @@
-// «Обзор»: state of the service in five seconds, and a first-run checklist.
+// «Обзор»: the state of the service in five seconds, and what to go and fix.
 //
-// The health tile, the freshness of every catalog and the work list arrive in
-// wave 2 with /api/v1/health/summary. What this screen already answers from
-// capabilities and the log: which providers are usable, whether the registry
-// has anything in it, and what went wrong recently.
-//
-// The rule it does follow today (§14): on an empty installation this shows a
-// list of steps, not a wall of zeroes. Three empty tables teach an operator
-// nothing about what to do next.
+// Everything comes from one call to /api/v1/health/summary, so the tiles cannot
+// disagree with each other the way four separate requests would. The rule that
+// shapes the screen (§14): on an empty installation this shows a list of steps,
+// not a wall of zeroes — three empty tables teach an operator nothing.
 
 import { api, query } from '../core/api.js';
 import { el, row, clear, fill, toast } from '../core/dom.js';
-import { localTime } from '../core/format.js';
+import { localTime, money } from '../core/format.js';
 
 const $ = (id) => document.getElementById(id);
 
-function since24h() {
-  return new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+function megabytes(bytes) {
+  return `${Math.round((bytes || 0) / (1024 * 1024))} МБ`;
 }
 
-function firstRunSteps(caps, modelCount) {
-  const missing = caps.providers.filter((p) => !p.configured && p.env_var);
+function duration(seconds) {
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return days ? `${days} д ${hours} ч` : `${hours} ч ${minutes} мин`;
+}
+
+function firstRunSteps(summary) {
+  const missing = summary.providers.filter((p) => !p.configured && p.env_var);
   const steps = [];
-  if (missing.length === caps.providers.length) {
-    const names = missing.map((p) => p.env_var).join(' · ');
+  if (missing.length === summary.providers.length) {
     steps.push([
       'Задайте ключ хотя бы одного поставщика в .env и перезапустите сервис',
-      `не задано: ${names}`,
+      `не задано: ${missing.map((p) => p.env_var).join(' · ')}`,
       null,
     ]);
   }
-  if (!modelCount) {
+  if (!summary.models_active) {
     steps.push(['Синхронизируйте каталоги', 'модели приедут от поставщиков',
       ['/connections', 'Открыть подключения']]);
   }
@@ -40,30 +42,44 @@ function firstRunSteps(caps, modelCount) {
 }
 
 async function boot() {
+  const summary = await api('/health/summary');
   const caps = await api('/capabilities');
-  const models = await api('/registry/models');
-  const logs = await api(`/logs${query({ since: since24h(), limit: 200 })}`);
   const errors = await api(`/logs${query({ status: 'error', limit: 10 })}`);
 
-  const usable = caps.providers.filter((p) => p.enabled && p.configured);
-  $('providers-count').textContent = `${usable.length}/${caps.providers.length}`;
-  const broken = caps.providers.filter((p) => p.enabled && !p.configured);
+  $('service-state').textContent = 'работает';
+  $('service-detail').textContent =
+    `${summary.version} · ${duration(summary.uptime_seconds)} · база ${megabytes(summary.db_bytes)}`
+    + ` · файлы ${megabytes(summary.blob_bytes)}`;
+
+  $('providers-count').textContent =
+    `${summary.providers_usable}/${summary.providers_total}`;
+  const broken = summary.providers.filter((p) => p.enabled && !p.configured);
   $('providers-detail').textContent = broken.length
     ? `не настроены: ${broken.map((p) => p.id).join(', ')}`
     : 'все включённые поставщики настроены';
 
-  $('models-count').textContent = String(models.total);
-  const unpriced = models.items.filter((m) => m.price_is_unknown).length;
-  const unverified = models.items.filter(
-    (m) => !m.price_is_verified && !m.price_is_unknown).length;
+  $('models-count').textContent = String(summary.models_active);
   $('models-detail').textContent =
-    `${unpriced} без цены · ${unverified} с неподтверждённой ценой`;
+    `${summary.models_unpriced} без цены · ${summary.models_unverified} с неподтверждённой`
+    + (summary.catalog_last_seen_at
+      ? ` · сверка ${localTime(summary.catalog_last_seen_at)}`
+      : '');
 
-  $('requests-count').textContent = String(logs.total);
-  const failed = logs.items.filter((r) => r.status !== 'ok').length;
-  $('requests-detail').textContent = failed
-    ? `${failed} с ошибкой за сутки`
-    : 'ошибок за сутки нет';
+  const day = summary.last_24h;
+  $('requests-count').textContent = String(day.requests);
+  // The headline figure says "не менее" whenever the selection holds requests
+  // nobody can price — the same rule as the spend tab.
+  $('requests-detail').textContent =
+    `${day.is_lower_bound ? 'не менее ' : ''}$${money(day.total_usd)}`
+    + (day.errors ? ` · ${day.errors} с ошибкой` : '')
+    + (day.unpriced_requests ? ` · ${day.unpriced_requests} без методики цены` : '');
+
+  fill($('work'), summary.work.map((item) => {
+    const li = el('li');
+    li.appendChild(el('a', item.text, { href: item.href }));
+    return li;
+  }));
+  $('work-empty').hidden = summary.work.length > 0;
 
   const body = document.querySelector('#errors tbody');
   clear(body);
@@ -80,9 +96,9 @@ async function boot() {
   }
 
   // Nothing configured and nothing logged means this is a fresh install.
-  if (!models.total || (!usable.length && !logs.total)) {
+  if (!summary.models_active || (!summary.providers_usable && !day.requests)) {
     $('first-run').hidden = false;
-    fill($('steps'), firstRunSteps(caps, models.total).map(([title, detail, link]) => {
+    fill($('steps'), firstRunSteps(summary).map(([title, detail, link]) => {
       const item = el('li');
       item.appendChild(el('b', title));
       item.appendChild(el('div', detail, { className: 'muted mono' }));

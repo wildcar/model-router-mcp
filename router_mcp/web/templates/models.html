@@ -1,43 +1,49 @@
 {% extends "base.html" %}
 {% block title %}Модели — Model Router{% endblock %}
 {% block content %}
-<div class="models-layout">
+{# Three panels: facets, table, card. The facet counts come back in the same
+   response as the rows — computed separately they would be numbers from a
+   different moment than the table beside them (§11). #}
+<div class="models-layout three">
+  <aside class="card facets" id="facets">
+    <label class="grow">Поиск
+      <input id="search" type="search" placeholder="model_id или название">
+    </label>
+    <div id="facet-groups"></div>
+    <button id="reset-facets" type="button">Сбросить</button>
+  </aside>
+
   <section class="card">
     <div class="row">
-      <label class="grow">Поиск <input id="search" type="search" placeholder="model_id или название"></label>
-      <label>Строка
-        <select id="f-source">
-          <option value="">все</option>
-          <option value="catalog">из каталога</option>
-          <option value="manual">добавлена вручную</option>
-          <option value="seed">из заготовки</option>
-        </select>
-      </label>
-      <label>Модальность
-        <select id="f-modality">
-          <option value="">все</option>
-          <option value="chat">chat</option>
-          <option value="image">image</option>
-          <option value="stt">stt</option>
-          <option value="tts">tts</option>
-          <option value="cli">cli</option>
-        </select>
-      </label>
+      <span id="count" class="hint"></span>
+      <span class="spacer"></span>
       <button id="reload" type="button">Обновить</button>
       <button id="add-model" type="button">Добавить вручную</button>
     </div>
     <p class="hint">Цены в <b>USD за 1&nbsp;000&nbsp;000 токенов</b>.
       <b>Промпт</b> — входные токены, <b>Ответ</b> — выходные.
       Щёлкните строку, чтобы открыть карточку.</p>
+    <div class="row" id="bulk-bar" hidden>
+      <span id="bulk-count"></span>
+      <button id="bulk-deprecate" type="button">Снять с учёта</button>
+      <button id="bulk-clear" type="button">Снять выделение</button>
+    </div>
     <table id="models"><thead><tr>
+      <th scope="col"><input id="select-all" type="checkbox"></th>
       <th scope="col">Поставщик</th><th scope="col">model_id</th>
       <th scope="col">Мод.</th><th scope="col">Уровень</th>
       <th scope="col" class="num">Промпт, $/1M</th><th scope="col" class="num">Ответ, $/1M</th>
       <th scope="col">Цена откуда</th><th scope="col">Состояние</th>
     </tr></thead><tbody></tbody></table>
-    <p id="count" class="hint"></p>
   </section>
 
   <aside class="card model-card" id="card" hidden></aside>
+</div>
+
+{# An undo window beats a second confirmation dialog: the action already
+   happened, and taking it back is one click for a few seconds (§11). #}
+<div id="undo-bar" class="undo-bar" hidden>
+  <span id="undo-text"></span>
+  <button id="undo-action" type="button">Отменить</button>
 </div>
 {% endblock %}

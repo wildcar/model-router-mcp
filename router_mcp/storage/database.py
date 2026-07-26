@@ -533,6 +533,27 @@ class Database:
             )
             await conn.commit()
 
+    async def restore_registry_model(self, service_provider_id: str, model_id: str) -> None:
+        """Undo a deprecation — the other half of the "few seconds to take it
+        back" the console offers after a mass action.
+
+        Only clears the flags a deprecation sets. If the provider really has
+        retired the model, the next sync will deprecate it again, which is the
+        correct outcome: the registry follows the provider, not the button.
+        """
+        conn = await self._get_conn()
+        async with self._write_lock:
+            await conn.execute(
+                """
+                UPDATE registry_models
+                SET is_active = 1, deprecated_at = NULL,
+                    revision = revision + 1, updated_at = ?
+                WHERE service_provider_id = ? AND model_id = ?
+                """,
+                (_now(), service_provider_id, model_id),
+            )
+            await conn.commit()
+
     async def delete_registry_model(self, service_provider_id: str, model_id: str) -> None:
         conn = await self._get_conn()
         async with self._write_lock:
@@ -968,6 +989,74 @@ class Database:
             totals["unpriced_requests"] or totals["unknown_requests"]
         )
         return items, totals
+
+    async def get_tool_stats(self, *, since: str | None = None) -> list[dict[str, Any]]:
+        """Calls per MCP tool: how many, how many failed, and the median latency.
+
+        SQLite has no percentile function, so p50 is taken as the middle element
+        of the ordered latencies per tool. On the volumes this console deals
+        with that is exact rather than an approximation.
+        """
+        clauses = ["channel = 'mcp'", "tool IS NOT NULL"]
+        params: list[Any] = []
+        if since:
+            clauses.append("created_at >= ?")
+            params.append(since)
+        where = " AND ".join(clauses)
+        rows = await self._fetchall(
+            f"""
+            SELECT tool,
+                   COUNT(*) AS calls,
+                   SUM(CASE WHEN status != 'ok' THEN 1 ELSE 0 END) AS errors
+            FROM request_logs WHERE {where}
+            GROUP BY tool ORDER BY calls DESC
+            """,
+            tuple(params),
+        )
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            latencies = await self._fetchall(
+                f"SELECT latency_ms FROM request_logs "
+                f"WHERE {where} AND tool = ? AND latency_ms IS NOT NULL "
+                "ORDER BY latency_ms",
+                (*params, row["tool"]),
+            )
+            values = [r["latency_ms"] for r in latencies]
+            out.append(
+                {
+                    "tool": row["tool"],
+                    "calls": row["calls"],
+                    "errors": row["errors"],
+                    "p50_ms": values[len(values) // 2] if values else None,
+                }
+            )
+        return out
+
+    async def get_client_stats(self, *, since: str | None = None) -> list[dict[str, Any]]:
+        """Who has been calling, by the label the client sent.
+
+        The label is caller-supplied and unverified — a grouping key exactly like
+        `external_user_id`, never a trust boundary. Telling clients apart for
+        real needs named tokens, which is an open question in §24.
+        """
+        clauses = ["channel = 'mcp'"]
+        params: list[Any] = []
+        if since:
+            clauses.append("created_at >= ?")
+            params.append(since)
+        where = " AND ".join(clauses)
+        rows = await self._fetchall(
+            f"""
+            SELECT COALESCE(client_id, '(без метки)') AS client,
+                   COUNT(*) AS calls,
+                   MAX(created_at) AS last_call_at,
+                   SUM(CASE WHEN status != 'ok' THEN 1 ELSE 0 END) AS errors
+            FROM request_logs WHERE {where}
+            GROUP BY client ORDER BY calls DESC
+            """,
+            tuple(params),
+        )
+        return [dict(r) for r in rows]
 
     async def get_usage(
         self, *, external_user_id: str | None = None, since: str | None = None

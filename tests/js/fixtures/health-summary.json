@@ -1,0 +1,107 @@
+{
+ "version": "0.1.0",
+ "uptime_seconds": 0,
+ "db_bytes": 81920,
+ "blob_bytes": 0,
+ "providers": [
+  {
+   "id": "anthropic-api",
+   "enabled": false,
+   "configured": false,
+   "env_var": "ANTHROPIC_API_KEY",
+   "models": 3,
+   "probe": null
+  },
+  {
+   "id": "claude-cli",
+   "enabled": true,
+   "configured": true,
+   "env_var": "CLAUDE_COMMAND",
+   "models": 1,
+   "probe": null
+  },
+  {
+   "id": "codex-cli",
+   "enabled": true,
+   "configured": true,
+   "env_var": "CODEX_COMMAND",
+   "models": 1,
+   "probe": null
+  },
+  {
+   "id": "codex-oauth",
+   "enabled": true,
+   "configured": true,
+   "env_var": "CODEX_AUTH_PATH",
+   "models": 1,
+   "probe": null
+  },
+  {
+   "id": "deepgram",
+   "enabled": false,
+   "configured": false,
+   "env_var": "DEEPGRAM_API_KEY",
+   "models": 1,
+   "probe": null
+  },
+  {
+   "id": "deepseek",
+   "enabled": false,
+   "configured": false,
+   "env_var": "DEEPSEEK_API_KEY",
+   "models": 0,
+   "probe": null
+  },
+  {
+   "id": "elevenlabs",
+   "enabled": false,
+   "configured": false,
+   "env_var": "ELEVENLABS_API_KEY",
+   "models": 1,
+   "probe": null
+  },
+  {
+   "id": "openrouter",
+   "enabled": false,
+   "configured": false,
+   "env_var": "OPENROUTER_API_KEY",
+   "models": 0,
+   "probe": {
+    "provider_id": "openrouter",
+    "status": "not_configured",
+    "detail": "Переменная OPENROUTER_API_KEY не задана",
+    "latency_ms": null,
+    "age_seconds": 0
+   }
+  }
+ ],
+ "providers_usable": 3,
+ "providers_total": 8,
+ "models_active": 8,
+ "models_retired": 0,
+ "models_unpriced": 5,
+ "models_unverified": 3,
+ "catalog_last_seen_at": null,
+ "last_24h": {
+  "requests": 3,
+  "total_tokens": 0,
+  "confirmed_usd": 0.003,
+  "unconfirmed_usd": 0,
+  "notional_usd": 0,
+  "unpriced_requests": 0,
+  "unknown_requests": 0,
+  "errors": 1,
+  "total_usd": 0.003,
+  "is_lower_bound": false
+ },
+ "work": [
+  {
+   "text": "5 моделей без цены — расход по ним считать нечем",
+   "href": "/models"
+  },
+  {
+   "text": "3 моделей с неподтверждённой ценой",
+   "href": "/models"
+  }
+ ]
+}

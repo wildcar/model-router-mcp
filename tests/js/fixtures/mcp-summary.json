@@ -1,0 +1,514 @@
+{
+ "endpoint": "/mcp",
+ "stateless": true,
+ "auth_required": false,
+ "tools": [
+  {
+   "name": "list_models",
+   "description": "List registered models, optionally filtered by modality/tier/provider.",
+   "input_schema": {
+    "properties": {
+     "modality": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Modality"
+     },
+     "tier": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Tier"
+     },
+     "provider": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Provider"
+     }
+    },
+    "title": "list_modelsArguments",
+    "type": "object"
+   },
+   "calls": 0,
+   "errors": 0,
+   "p50_ms": null
+  },
+  {
+   "name": "chat",
+   "description": "Route a chat request to a model and return its text response with usage/cost.\n\n    Provide either `text` (a single user message) or `messages` (OpenAI-shaped\n    history). `model_id` pins a specific model; otherwise the router picks one by\n    `tier`/`provider` hints.\n\n    `fallback` covers the case where the pinned model was retired or is down:\n    `{\"policy\": \"same\"|\"cheaper\"|\"pricier\", \"max_steps\": 1, \"scope\":\n    \"provider\"|\"vendor\"|\"any\"}` (or just the policy name). The reply then carries\n    `requested_model_id` and `fallback_reason` alongside the model actually used.",
+   "input_schema": {
+    "properties": {
+     "external_user_id": {
+      "title": "External User Id",
+      "type": "string"
+     },
+     "text": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Text"
+     },
+     "messages": {
+      "anyOf": [
+       {
+        "items": {
+         "additionalProperties": true,
+         "type": "object"
+        },
+        "type": "array"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Messages"
+     },
+     "model_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Model Id"
+     },
+     "tier": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Tier"
+     },
+     "provider": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Provider"
+     },
+     "params": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Params"
+     },
+     "fallback": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Fallback"
+     }
+    },
+    "required": [
+     "external_user_id"
+    ],
+    "title": "chatArguments",
+    "type": "object"
+   },
+   "calls": 2,
+   "errors": 1,
+   "p50_ms": 120
+  },
+  {
+   "name": "generate_image",
+   "description": "Generate an image from a text prompt. Returns image(s) as base64 and/or\n    URLs, with usage and cost. `fallback` works as in `chat`.",
+   "input_schema": {
+    "properties": {
+     "external_user_id": {
+      "title": "External User Id",
+      "type": "string"
+     },
+     "prompt": {
+      "title": "Prompt",
+      "type": "string"
+     },
+     "model_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Model Id"
+     },
+     "provider": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Provider"
+     },
+     "params": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Params"
+     },
+     "fallback": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Fallback"
+     }
+    },
+    "required": [
+     "external_user_id",
+     "prompt"
+    ],
+    "title": "generate_imageArguments",
+    "type": "object"
+   },
+   "calls": 0,
+   "errors": 0,
+   "p50_ms": null
+  },
+  {
+   "name": "transcribe",
+   "description": "Transcribe base64-encoded audio to text (speech-to-text).\n    `fallback` works as in `chat`.",
+   "input_schema": {
+    "properties": {
+     "external_user_id": {
+      "title": "External User Id",
+      "type": "string"
+     },
+     "audio_b64": {
+      "title": "Audio B64",
+      "type": "string"
+     },
+     "mime": {
+      "default": "audio/ogg",
+      "title": "Mime",
+      "type": "string"
+     },
+     "model_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Model Id"
+     },
+     "provider": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Provider"
+     },
+     "fallback": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Fallback"
+     }
+    },
+    "required": [
+     "external_user_id",
+     "audio_b64"
+    ],
+    "title": "transcribeArguments",
+    "type": "object"
+   },
+   "calls": 0,
+   "errors": 0,
+   "p50_ms": null
+  },
+  {
+   "name": "synthesize_speech",
+   "description": "Synthesize speech from text (text-to-speech). Returns base64 audio.\n    `fallback` works as in `chat`.",
+   "input_schema": {
+    "properties": {
+     "external_user_id": {
+      "title": "External User Id",
+      "type": "string"
+     },
+     "text": {
+      "title": "Text",
+      "type": "string"
+     },
+     "voice": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Voice"
+     },
+     "model_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Model Id"
+     },
+     "provider": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Provider"
+     },
+     "params": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Params"
+     },
+     "fallback": {
+      "anyOf": [
+       {
+        "additionalProperties": true,
+        "type": "object"
+       },
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Fallback"
+     }
+    },
+    "required": [
+     "external_user_id",
+     "text"
+    ],
+    "title": "synthesize_speechArguments",
+    "type": "object"
+   },
+   "calls": 0,
+   "errors": 0,
+   "p50_ms": null
+  },
+  {
+   "name": "run_cli",
+   "description": "Run a prompt through a local CLI engine (`codex` or `claude`).\n\n    `cwd` (optional) must be under a server-allowed root. Returns the engine's\n    text output with usage and cost.",
+   "input_schema": {
+    "properties": {
+     "external_user_id": {
+      "title": "External User Id",
+      "type": "string"
+     },
+     "prompt": {
+      "title": "Prompt",
+      "type": "string"
+     },
+     "engine": {
+      "default": "codex",
+      "title": "Engine",
+      "type": "string"
+     },
+     "cwd": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Cwd"
+     },
+     "timeout_sec": {
+      "anyOf": [
+       {
+        "type": "integer"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Timeout Sec"
+     }
+    },
+    "required": [
+     "external_user_id",
+     "prompt"
+    ],
+    "title": "run_cliArguments",
+    "type": "object"
+   },
+   "calls": 1,
+   "errors": 0,
+   "p50_ms": 61000
+  },
+  {
+   "name": "get_usage",
+   "description": "Aggregated per-user usage: request count, total tokens, total cost (USD).",
+   "input_schema": {
+    "properties": {
+     "external_user_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "External User Id"
+     },
+     "since": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "default": null,
+      "title": "Since"
+     }
+    },
+    "title": "get_usageArguments",
+    "type": "object"
+   },
+   "calls": 0,
+   "errors": 0,
+   "p50_ms": null
+  }
+ ],
+ "retired_tools_called": [],
+ "clients": [
+  {
+   "client": "telecodex",
+   "calls": 2,
+   "last_call_at": "2026-07-26T09:00:00+00:00",
+   "errors": 0
+  },
+  {
+   "client": "(без метки)",
+   "calls": 1,
+   "last_call_at": "2026-07-26T09:00:00+00:00",
+   "errors": 1
+  }
+ ],
+ "window_hours": 24
+}

@@ -14,6 +14,9 @@
    "completion_price": 4e-06,
    "image_price": 0.0,
    "audio_price_per_second": 0.0,
+   "character_price": 0.0,
+   "cache_read_price": 0.0,
+   "cache_write_price": 0.0,
    "context_length": 0,
    "source": "seed",
    "pricing_mode": "per_request",
@@ -26,7 +29,7 @@
    "price_checked_at": null,
    "price_is_verified": false,
    "price_is_unknown": false,
-   "updated_at": "2026-07-26T12:03:56+00:00",
+   "updated_at": "2026-07-26T12:41:56+00:00",
    "revision": 0
   },
   {
@@ -43,6 +46,9 @@
    "completion_price": 7.5e-05,
    "image_price": 0.0,
    "audio_price_per_second": 0.0,
+   "character_price": 0.0,
+   "cache_read_price": 0.0,
+   "cache_write_price": 0.0,
    "context_length": 0,
    "source": "seed",
    "pricing_mode": "per_request",
@@ -55,7 +61,7 @@
    "price_checked_at": null,
    "price_is_verified": false,
    "price_is_unknown": false,
-   "updated_at": "2026-07-26T12:03:56+00:00",
+   "updated_at": "2026-07-26T12:41:56+00:00",
    "revision": 0
   },
   {
@@ -72,6 +78,9 @@
    "completion_price": 1.5e-05,
    "image_price": 0.0,
    "audio_price_per_second": 0.0,
+   "character_price": 0.0,
+   "cache_read_price": 0.0,
+   "cache_write_price": 0.0,
    "context_length": 0,
    "source": "seed",
    "pricing_mode": "per_request",
@@ -84,7 +93,7 @@
    "price_checked_at": null,
    "price_is_verified": false,
    "price_is_unknown": false,
-   "updated_at": "2026-07-26T12:03:56+00:00",
+   "updated_at": "2026-07-26T12:41:56+00:00",
    "revision": 0
   },
   {
@@ -101,6 +110,9 @@
    "completion_price": 0.0,
    "image_price": 0.0,
    "audio_price_per_second": 0.0,
+   "character_price": 0.0,
+   "cache_read_price": 0.0,
+   "cache_write_price": 0.0,
    "context_length": 0,
    "source": "seed",
    "pricing_mode": "per_request",
@@ -112,8 +124,8 @@
    "price_source_kind": "estimate",
    "price_checked_at": null,
    "price_is_verified": false,
-   "price_is_unknown": false,
-   "updated_at": "2026-07-26T12:03:56+00:00",
+   "price_is_unknown": true,
+   "updated_at": "2026-07-26T12:41:56+00:00",
    "revision": 0
   },
   {
@@ -130,6 +142,9 @@
    "completion_price": 0.0,
    "image_price": 0.0,
    "audio_price_per_second": 0.0,
+   "character_price": 0.0,
+   "cache_read_price": 0.0,
+   "cache_write_price": 0.0,
    "context_length": 0,
    "source": "seed",
    "pricing_mode": "per_request",
@@ -141,8 +156,8 @@
    "price_source_kind": "estimate",
    "price_checked_at": null,
    "price_is_verified": false,
-   "price_is_unknown": false,
-   "updated_at": "2026-07-26T12:03:56+00:00",
+   "price_is_unknown": true,
+   "updated_at": "2026-07-26T12:41:56+00:00",
    "revision": 0
   },
   {
@@ -159,6 +174,9 @@
    "completion_price": 0.0,
    "image_price": 0.0,
    "audio_price_per_second": 0.0,
+   "character_price": 0.0,
+   "cache_read_price": 0.0,
+   "cache_write_price": 0.0,
    "context_length": 0,
    "source": "seed",
    "pricing_mode": "per_request",
@@ -170,12 +188,41 @@
    "price_source_kind": "estimate",
    "price_checked_at": null,
    "price_is_verified": false,
-   "price_is_unknown": false,
-   "updated_at": "2026-07-26T12:03:56+00:00",
+   "price_is_unknown": true,
+   "updated_at": "2026-07-26T12:41:56+00:00",
    "revision": 0
   }
  ],
  "total": 6,
  "next_cursor": null,
- "facets": {}
+ "facets": {
+  "modality": {
+   "chat": 3,
+   "cli": 2,
+   "image": 1,
+   "stt": 1,
+   "tts": 1
+  },
+  "provider": {
+   "anthropic-api": 3,
+   "claude-cli": 1,
+   "codex-cli": 1,
+   "codex-oauth": 1,
+   "deepgram": 1,
+   "elevenlabs": 1
+  },
+  "source": {
+   "seed": 8
+  },
+  "price_source_kind": {
+   "estimate": 8
+  },
+  "tier": {
+   "expensive": 7,
+   "cheap": 1
+  },
+  "state": {
+   "active": 8
+  }
+ }
 }

@@ -7,7 +7,7 @@
 // wiped context length and catalog dates and revived retired models.
 
 import { api, ApiError, query } from '../core/api.js';
-import { el, row, clear, fill, toast } from '../core/dom.js';
+import { el, clear, fill, toast } from '../core/dom.js';
 import { pricePerMillion } from '../core/format.js';
 import { readParams, writeParams } from '../core/state.js';
 
@@ -18,29 +18,81 @@ let caps = null;
 let rows = [];
 let selected = null;
 
+// Filters live in the address, so a filtered registry is a link.
+const FACET_FIELDS = ['modality', 'provider', 'source', 'price_source_kind', 'tier', 'state'];
+const FACET_TITLES = {
+  modality: 'Модальность',
+  provider: 'Поставщик',
+  source: 'Строка',
+  price_source_kind: 'Цена откуда',
+  tier: 'Ценовой уровень',
+  state: 'Состояние',
+};
+const STATE_WORDS = { active: 'активные', retired: 'снятые' };
+
+let facets = {};
+const selection = new Map();   // "provider\u0000model_id" -> {service_provider_id, model_id}
+let lastBulk = null;           // what an undo would put back
+
 function filters() {
-  return {
-    source: $('f-source').value,
-    modality: $('f-modality').value,
-    search: $('search').value.trim().toLowerCase(),
-  };
+  const params = readParams();
+  const out = { search: $('search').value.trim() };
+  for (const field of FACET_FIELDS) {
+    if (params[field]) out[field] = params[field];
+  }
+  return out;
 }
 
+function facetLabel(field, value) {
+  if (field === 'state') return STATE_WORDS[value] || value;
+  if (field === 'price_source_kind') {
+    return caps.labels.price_source_kinds[value]?.label || value;
+  }
+  if (field === 'source') return caps.labels.sources[value]?.label || value;
+  return value;
+}
+
+// Counts arrive with the rows, so the sidebar and the table always agree.
+function renderFacets() {
+  const active = filters();
+  fill($('facet-groups'), FACET_FIELDS.filter((f) => facets[f]).map((field) => {
+    const group = el('section', undefined, { className: 'facet-group' });
+    group.appendChild(el('h4', FACET_TITLES[field]));
+    for (const [value, count] of Object.entries(facets[field])) {
+      const line = el('label', undefined, { className: 'facet' });
+      const box = el('input');
+      box.type = 'checkbox';
+      box.checked = active[field] === value;
+      box.addEventListener('change', () => {
+        writeParams({ ...readParams(), [field]: box.checked ? value : undefined });
+        load().catch((e) => toast(e.message, true));
+      });
+      line.appendChild(box);
+      line.appendChild(el('span', facetLabel(field, value)));
+      line.appendChild(el('span', count, { className: 'num muted' }));
+      group.appendChild(line);
+    }
+    return group;
+  }));
+}
+
+// Where the price came from, with everything known about it in the tooltip and
+// the cell dimmed when nobody has confirmed the number.
 function priceOriginCell(model) {
   const kind = caps.labels.price_source_kinds[model.price_source_kind];
-  const cell = el('td', kind?.label || model.price_source_kind, {
+  return el('td', kind?.label || model.price_source_kind, {
     className: model.price_is_verified ? '' : 'muted',
     title: [kind?.help, model.price_source,
             model.price_checked_at && `Проверено: ${model.price_checked_at}`]
       .filter(Boolean).join('\n'),
   });
-  return cell;
 }
 
 function stateCell(model) {
   if (model.is_active) {
     return el('td', 'активна', {
-      title: model.last_seen_at ? `Последняя сверка: ${model.last_seen_at}` : '',
+      title: model.last_seen_at
+        ? `Последняя сверка: ${model.last_seen_at}` : '',
     });
   }
   return el('td', 'снята', {
@@ -51,22 +103,50 @@ function stateCell(model) {
   });
 }
 
+function key(model) {
+  return `${model.service_provider}\u0000${model.model_id}`;
+}
+
+function renderBulkBar() {
+  $('bulk-bar').hidden = selection.size === 0;
+  $('bulk-count').textContent = `выделено ${selection.size}`;
+}
+
 function render() {
-  const { search } = filters();
-  const visible = rows.filter((m) => !search
-    || m.model_id.toLowerCase().includes(search)
-    || (m.display_name || '').toLowerCase().includes(search));
   const body = document.querySelector('#models tbody');
   clear(body);
-  for (const model of visible.slice(0, 500)) {
-    const tr = row([
+  for (const model of rows.slice(0, 500)) {
+    const tr = el('tr');
+
+    const pick = el('td');
+    const box = el('input');
+    box.type = 'checkbox';
+    box.checked = selection.has(key(model));
+    box.addEventListener('click', (event) => event.stopPropagation());
+    box.addEventListener('change', () => {
+      if (box.checked) {
+        selection.set(key(model), {
+          service_provider_id: model.service_provider, model_id: model.model_id,
+        });
+      } else {
+        selection.delete(key(model));
+      }
+      renderBulkBar();
+    });
+    pick.appendChild(box);
+    tr.appendChild(pick);
+
+    for (const cell of [
       model.service_provider,
       { text: model.model_id, className: 'mono' },
       model.modalities.join(','),
       model.tier,
       { text: pricePerMillion(model.prompt_price), className: 'num' },
       { text: pricePerMillion(model.completion_price), className: 'num' },
-    ]);
+    ]) {
+      const spec = (cell === null || typeof cell !== 'object') ? { text: cell } : cell;
+      tr.appendChild(el('td', spec.text, spec));
+    }
     tr.appendChild(priceOriginCell(model));
     tr.appendChild(stateCell(model));
     tr.addEventListener('click', () => select(model));
@@ -77,9 +157,45 @@ function render() {
     }
     body.appendChild(tr);
   }
-  $('count').textContent = visible.length > 500
-    ? `показано 500 из ${visible.length}`
-    : `${visible.length} из ${rows.length}`;
+  $('count').textContent = rows.length > 500
+    ? `показано 500 из ${rows.length}`
+    : `${rows.length} моделей`;
+  renderBulkBar();
+}
+
+async function load() {
+  const answer = await api(`/registry/models${query(filters())}`);
+  rows = answer.items;
+  facets = answer.facets || {};
+  renderFacets();
+  render();
+}
+
+// The confirmation lists what it is about to touch, and the action stays
+// reversible for a few seconds afterwards.
+async function bulkDeprecate() {
+  const models = [...selection.values()];
+  const names = models.slice(0, 10).map((m) => `${m.service_provider_id} · ${m.model_id}`);
+  const more = models.length > names.length ? `\n…и ещё ${models.length - names.length}` : '';
+  if (!window.confirm(
+    `Снять с учёта ${models.length} моделей?\n\n${names.join('\n')}${more}\n\n`
+    + 'Строки не удаляются: журнал и история стоимости на них ссылаются.')) {
+    return;
+  }
+  await api('/registry/models/bulk', {
+    method: 'POST', body: { action: 'deprecate', models },
+  });
+  lastBulk = models;
+  selection.clear();
+  await load();
+  showUndo(`Снято с учёта: ${models.length}`);
+}
+
+function showUndo(text) {
+  $('undo-text').textContent = text;
+  $('undo-bar').hidden = false;
+  clearTimeout(showUndo._t);
+  showUndo._t = setTimeout(() => { $('undo-bar').hidden = true; }, 8000);
 }
 
 function priceField(id, label, perMillion) {
@@ -194,13 +310,6 @@ function replace(updated) {
   select(updated);
 }
 
-async function load() {
-  const { source, modality } = filters();
-  const answer = await api(`/registry/models${query({ source, modality })}`);
-  rows = answer.items;
-  render();
-}
-
 function addModelForm() {
   const card = $('card');
   card.hidden = false;
@@ -251,18 +360,47 @@ function addModelForm() {
   }));
 }
 
-for (const id of ['f-source', 'f-modality']) {
-  $(id).addEventListener('change', () => load().catch((e) => toast(e.message, true)));
-}
-$('search').addEventListener('input', render);
+$('search').addEventListener('input', () => load().catch((e) => toast(e.message, true)));
 $('reload').addEventListener('click', () => load().catch((e) => toast(e.message, true)));
 $('add-model').addEventListener('click', addModelForm);
+$('reset-facets').addEventListener('click', () => {
+  writeParams({});
+  $('search').value = '';
+  load().catch((e) => toast(e.message, true));
+});
+$('select-all').addEventListener('change', (event) => {
+  selection.clear();
+  if (event.target.checked) {
+    for (const model of rows.slice(0, 500)) {
+      selection.set(key(model), {
+        service_provider_id: model.service_provider, model_id: model.model_id,
+      });
+    }
+  }
+  render();
+});
+$('bulk-clear').addEventListener('click', () => { selection.clear(); render(); });
+$('bulk-deprecate').addEventListener('click',
+  () => bulkDeprecate().catch((e) => toast(e.message, true)));
+$('undo-action').addEventListener('click', async () => {
+  if (!lastBulk) return;
+  try {
+    await api('/registry/models/bulk', {
+      method: 'POST', body: { action: 'restore', models: lastBulk },
+    });
+    toast(`Возвращено: ${lastBulk.length}`);
+    lastBulk = null;
+    $('undo-bar').hidden = true;
+    await load();
+  } catch (error) {
+    toast(error.message, true);
+  }
+});
 
 (async () => {
   caps = await api('/capabilities');
   const params = readParams();
-  if (params.source) $('f-source').value = params.source;
-  if (params.modality) $('f-modality').value = params.modality;
+  if (params.search) $('search').value = params.search;
   await load();
   if (params.model) {
     const match = rows.find((m) => m.model_id === params.model);
