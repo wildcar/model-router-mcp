@@ -179,6 +179,9 @@ class DispatchResult:
     steps: list[dict[str, Any]] = field(default_factory=list)
     ignored_params: list[str] = field(default_factory=list)
     finished_at: str | None = None
+    # The stored request payload (uploaded audio, mostly). Carried out so the
+    # console can repeat a transcription without asking for the file again.
+    request_ref: str | None = None
 
 
 class ModelRouter:
@@ -896,6 +899,7 @@ class ModelRouter:
             steps=steps,
             ignored_params=ignored_params(used_adapter, request.modality, request.params),
             finished_at=finished_at,
+            request_ref=request_ref,
         )
 
     # --- blob / text helpers -------------------------------------------

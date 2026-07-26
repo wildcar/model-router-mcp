@@ -343,3 +343,87 @@ def test_models_screen_filters_by_price_provenance(page, live_server):
     assert "$/1M" in card.inner_text()
     assert "было" in card.inner_text()
     assert "переживёт синхронизацию" in card.inner_text()
+
+
+# --- Wave 3: a run is a thing with a state, and the state is on screen -----
+def test_a_run_in_flight_reads_as_running_not_as_an_error(page, live_server):
+    """The log holds calls that have not finished yet.
+
+    Before wave 3 a row appeared only once the run was over, so a five-minute
+    CLI run was simply absent. Now it is present — and it must not be dressed as
+    a failure while it is still perfectly fine.
+    """
+    base, db_path = live_server
+    conn = sqlite3.connect(db_path)
+    with conn:
+        conn.execute(
+            """
+            INSERT INTO request_logs (
+                id, external_user_id, modality, service_provider_id, model_id,
+                status, channel, cost_source, request_text, created_at
+            ) VALUES (5001,?,?,?,?,?,?,?,?,?)
+            """,
+            ("live-user", "cli", "codex-cli", "codex", "running", "ui",
+             "cost_unknown", "разбери репозиторий", "2026-07-26T10:00:00+00:00"),
+        )
+    conn.close()
+
+    page.goto(f"{base}/logs?status=running")
+    page.wait_for_selector("#logs tbody tr")
+    rows = page.locator("#logs").inner_text()
+    assert "выполняется" in rows
+    # No error line under a row that has not failed.
+    assert "ошибка без описания" not in rows
+
+
+def test_the_multi_model_mode_runs_one_row_per_model(page, live_server):
+    """§10.6: the same request against several models, as a table.
+
+    Nothing is configured here, so every run fails — which is the point: the
+    table has to report a per-model outcome, not swallow the batch.
+    """
+    base, _ = live_server
+    # A model to compare against; the test installation has no catalogs.
+    for model_id in ("compare/a", "compare/b"):
+        page.request.post(
+            f"{base}/api/v1/registry/models",
+            data={
+                "service_provider_id": "deepseek",
+                "model_id": model_id,
+                "modalities": ["chat"],
+            },
+        )
+    page.goto(base)
+    page.wait_for_selector("#params")
+    page.get_by_role("tab", name="Несколько").click()
+    for model_id in ("compare/a", "compare/b"):
+        page.select_option("#multi-pick", model_id)
+        page.get_by_role("button", name="Добавить").click()
+    assert page.locator("#chips .chip").count() == 2
+    # The button states what one click is about to do.
+    assert "Запустить 2" in page.locator("#send").inner_text()
+
+    page.locator("#send").click()
+    page.wait_for_selector("#multi:not([hidden]) tbody tr")
+    page.wait_for_function(
+        "() => document.querySelectorAll('#multi tbody tr').length === 2")
+    page.wait_for_function(
+        "() => !document.querySelector('#multi tbody').innerText.includes('выполняется')")
+    table = page.locator("#multi").inner_text()
+    assert table.count("compare/") == 2
+    assert "ошибка" in table
+
+
+def test_the_overview_says_what_a_purge_would_delete(page, live_server):
+    """Retention is offered next to the disk figures, and it says first."""
+    base, _ = live_server
+    page.goto(f"{base}/overview")
+    page.wait_for_selector("#retention tr")
+    section = page.locator("#retention-policy").inner_text()
+    assert "бессрочно" in section          # nothing configured in tests
+    assert "LOG_RETENTION_DAYS" in section
+    rows = page.locator("#retention").inner_text()
+    assert "Будет удалено записей" in rows
+    assert "Файлов без записи" in rows
+    # With nothing to delete the button is not offered as if it did something.
+    assert page.locator("#purge").is_disabled()

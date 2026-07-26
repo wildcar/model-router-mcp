@@ -9,10 +9,12 @@
 
 import { api, ApiError, query } from '../core/api.js';
 import { el, clear, fill, toast } from '../core/dom.js';
-import { costCell, money } from '../core/format.js';
+import { costCell, duration, money, tokens } from '../core/format.js';
 import { bind } from '../core/keys.js';
+import { cancel, idempotencyKey, isDone, start, upload, watch } from '../core/runs.js';
 import { loadLocal, readParams, saveLocal, writeParams } from '../core/state.js';
 import { inspector } from '../components/inspector.js';
+import { timeline } from '../components/timeline.js';
 
 const $ = (id) => document.getElementById(id);
 const PLAN_DEBOUNCE_MS = 300;
@@ -313,6 +315,9 @@ function renderPlan(plan) {
 }
 
 function updateSendButton(estimate) {
+  // In the multi-model mode the button counts runs and multiplies the estimate,
+  // so it owns its own label.
+  if (mode === 'multi') { updateMultiButton(); return; }
   const button = $('send');
   clear(button);
   button.appendChild(document.createTextNode('Отправить'));
@@ -344,46 +349,230 @@ async function refreshPlan() {
 }
 
 // --- sending ------------------------------------------------------------
-const ENDPOINTS = {
-  chat: (body) => ['/chat', { external_user_id: body.external_user_id, text: body.text,
-    model_id: body.model_id, tier: body.tier, provider: body.provider,
-    params: body.params, fallback: body.fallback }],
-  image: (body) => ['/image', { external_user_id: body.external_user_id, prompt: body.text,
-    model_id: body.model_id, provider: body.provider, params: body.params,
-    fallback: body.fallback }],
-  tts: (body) => ['/tts', { external_user_id: body.external_user_id, text: body.text,
-    model_id: body.model_id, provider: body.provider, params: body.params,
-    fallback: body.fallback }],
-  cli: (body) => ['/cli', { external_user_id: body.external_user_id, prompt: body.text,
-    engine: (body.provider || 'codex-cli').replace('-cli', ''), params: body.params }],
-};
+// Runs go through the registry, not through a request held open: the run gets
+// an id, the screen polls it, and closing the tab loses nothing (§10.5).
+const watches = new Map();   // run_id -> watcher, so «Прервать» has something to stop
+let clockTimer = null;
+
+function runBody(body, { modelId = null, batchId = null } = {}) {
+  return {
+    modality: body.modality,
+    external_user_id: body.external_user_id,
+    text: body.text,
+    prompt: body.text,
+    model_id: modelId ?? body.model_id,
+    tier: body.tier,
+    provider: body.provider,
+    engine: (body.provider || 'codex-cli').replace('-cli', ''),
+    params: body.params,
+    fallback: body.fallback,
+    client_request_id: idempotencyKey(),
+    batch_id: batchId,
+    attachment_ref: body.attachment_ref ?? null,
+  };
+}
+
+async function attachmentRef(body) {
+  if (body.modality !== 'stt') return null;
+  const file = $('audio').files[0];
+  if (!file) { toast('Выберите аудиофайл', true); return undefined; }
+  // Uploaded once, referenced afterwards: the same file is not re-sent for a
+  // repeat, and a JSON run body has no way to carry bytes.
+  const stored = await upload(file);
+  return stored.ref;
+}
 
 async function send() {
-  const button = $('send');
-  button.disabled = true;
   const body = requestBody();
+  const ref = await attachmentRef(body);
+  if (ref === undefined) return;      // the file was required and missing
+  body.attachment_ref = ref;
+
+  if (mode === 'multi') return sendMany(body);
+  return sendOne(body);
+}
+
+async function sendOne(body) {
+  setBusy(true);
   try {
-    let run;
-    if (body.modality === 'stt') {
-      const file = $('audio').files[0];
-      if (!file) { toast('Выберите аудиофайл', true); return; }
-      const form = new FormData();
-      form.append('file', file);
-      form.append('external_user_id', body.external_user_id);
-      if (body.model_id) form.append('model_id', body.model_id);
-      if (body.provider) form.append('provider', body.provider);
-      run = await api('/transcribe', { method: 'POST', formData: form });
-    } else {
-      const [path, payload] = ENDPOINTS[body.modality](body);
-      run = await api(path, { method: 'POST', body: payload });
-    }
-    showRun(run);
-    remember(run);
+    const state = await start(runBody(body));
+    showLive(state);
+    const watcher = watch(state.run_id, showLive);
+    watches.set(state.run_id, watcher);
+    const done = await watcher.promise;
+    finishSingle(done);
   } catch (error) {
     if (error instanceof ApiError) showError(error);
     else toast(`Ошибка: ${error.message}`, true);
   } finally {
-    button.disabled = false;
+    setBusy(false);
+  }
+}
+
+function finishSingle(state) {
+  $('live').hidden = true;
+  if (state.status === 'ok') {
+    showRun(state.result);
+    remember(state.result);
+    return;
+  }
+  const envelope = state.error?.error || { message: `Прогон ${state.status}` };
+  showError(new ApiError(envelope, 0));
+}
+
+function setBusy(busy) {
+  $('send').hidden = busy;
+  $('cancel').hidden = !busy;
+  if (!busy) {
+    clearInterval(clockTimer);
+    clockTimer = null;
+  }
+}
+
+function showLive(state) {
+  $('result-empty').hidden = true;
+  $('plan').hidden = true;
+  $('live').hidden = false;
+  const label = caps.labels.statuses?.[state.status];
+  $('live-status').textContent = label ? label.label : state.status;
+  fill($('live-steps'), [timeline(state.steps, elapsedMs(state))]);
+  if (!clockTimer) {
+    const started = Date.now();
+    clockTimer = setInterval(() => {
+      $('live-clock').textContent = `${Math.round((Date.now() - started) / 1000)} с`;
+    }, 250);
+  }
+  // Cancelling addresses this run; a batch is cancelled row by row.
+  $('cancel').dataset.runId = state.run_id;
+}
+
+function elapsedMs(state) {
+  const steps = state.steps || [];
+  return steps.length ? steps[steps.length - 1].at_ms : 0;
+}
+
+async function cancelRun(runId) {
+  if (!runId) return;
+  try {
+    await cancel(runId);
+    toast('Прогон прерван');
+  } catch (error) {
+    toast(`Не удалось прервать: ${error.message}`, true);
+  } finally {
+    watches.get(runId)?.stop();
+    watches.delete(runId);
+  }
+}
+
+// --- multi-model mode ---------------------------------------------------
+const chips = [];   // model ids to compare
+
+function renderChips() {
+  $('multi-empty').hidden = chips.length > 0;
+  fill($('chips'), chips.map((id) => {
+    const chip = el('span', undefined, { className: 'chip' });
+    chip.appendChild(el('span', id, { className: 'mono' }));
+    chip.appendChild(el('button', '×', {
+      className: 'chip-x',
+      title: `Убрать ${id}`,
+      onClick: () => { chips.splice(chips.indexOf(id), 1); renderChips(); },
+    }));
+    return chip;
+  }));
+  updateMultiButton();
+}
+
+function plannedRuns() {
+  return chips.length * Math.max(1, Number($('multi-repeats').value) || 1);
+}
+
+function updateMultiButton() {
+  if (mode !== 'multi') return;
+  const total = plannedRuns();
+  clear($('send'));
+  $('send').appendChild(document.createTextNode(
+    total ? `Запустить ${total} ${total === 1 ? 'прогон' : 'прогонов'}` : 'Выберите модели'));
+  if (lastPlan?.estimate?.value) {
+    $('send').appendChild(el('span', ` · ≈$${money(lastPlan.estimate.value * total)}`,
+      { className: 'est' }));
+  }
+}
+
+async function sendMany(body) {
+  const total = plannedRuns();
+  if (!total) { toast('Добавьте хотя бы одну модель', true); return; }
+  // Above three runs the confirmation states the number and the money, because
+  // one click here is N charges (§10.6).
+  if (total > 3) {
+    const estimate = lastPlan?.estimate?.value
+      ? ` примерно на $${money(lastPlan.estimate.value * total)}`
+      : '';
+    if (!confirm(`Запустить ${total} прогонов${estimate}?`)) return;
+  }
+  const batchId = idempotencyKey();
+  const repeats = Math.max(1, Number($('multi-repeats').value) || 1);
+  $('multi').hidden = false;
+  $('result-empty').hidden = true;
+  $('plan').hidden = true;
+  clear($('multi').querySelector('tbody'));
+
+  const jobs = [];
+  for (const modelId of chips) {
+    for (let i = 0; i < repeats; i += 1) {
+      jobs.push(startRow(runBody(body, { modelId, batchId }), modelId));
+    }
+  }
+  await Promise.allSettled(jobs);
+}
+
+async function startRow(payload, modelId) {
+  const tbody = $('multi').querySelector('tbody');
+  const tr = el('tr');
+  const cells = ['model', 'status', 'time', 'tokens', 'cost', 'text'].map((name) => {
+    const td = el('td', name === 'model' ? modelId : '—',
+      { className: name === 'model' ? 'mono' : (name === 'time' || name === 'cost' ? 'num' : '') });
+    tr.appendChild(td);
+    return td;
+  });
+  tbody.appendChild(tr);
+
+  const update = (state) => {
+    const label = caps.labels.statuses?.[state.status];
+    clear(cells[1]);
+    cells[1].appendChild(el('span', label ? label.label : state.status, {
+      className: state.status === 'ok' ? 'ok' : (state.status === 'error' ? 'err' : 'muted'),
+    }));
+    if (!isDone(state)) {
+      cells[1].appendChild(el('button', 'прервать', {
+        className: 'linkish',
+        onClick: () => cancelRun(state.run_id),
+      }));
+      return;
+    }
+    const run = state.result;
+    if (!run) {
+      cells[5].textContent = state.error?.error?.message || '—';
+      cells[5].className = 'err';
+      return;
+    }
+    cells[2].textContent = duration(run.latency_ms);
+    cells[3].textContent = tokens(run.usage);
+    clear(cells[4]);
+    cells[4].appendChild(costCell(run.cost.value, run.cost.source, caps.labels));
+    cells[5].textContent = (run.text || '').slice(0, 80);
+    tr.addEventListener('click', () => showRun(run));
+    remember(run);
+  };
+
+  try {
+    const state = await start(payload);
+    update(state);
+    const watcher = watch(state.run_id, update);
+    watches.set(state.run_id, watcher);
+    await watcher.promise;
+  } catch (error) {
+    cells[1].textContent = 'ошибка';
+    cells[5].textContent = error.message;
   }
 }
 
@@ -511,16 +700,45 @@ async function boot() {
 
 function setMode(next) {
   mode = next;
-  $('mode-auto').classList.toggle('active', next === 'auto');
-  $('mode-pick').classList.toggle('active', next === 'pick');
+  for (const name of ['auto', 'pick', 'multi']) {
+    $(`mode-${name}`).classList.toggle('active', next === name);
+  }
   $('auto-block').hidden = next !== 'auto';
-  $('pick-block').hidden = next === 'auto';
+  $('pick-block').hidden = next !== 'pick';
+  $('multi-block').hidden = next !== 'multi';
+  if (next === 'multi') fillMultiPick();
   onFormChange();
+}
+
+// Every active model of the current modality, flattened: the cascade is for
+// picking one carefully, this is for stacking several up quickly.
+function fillMultiPick() {
+  const options = [];
+  for (const provider of tree?.children || []) {
+    for (const vendor of provider.children) {
+      for (const family of vendor.children) {
+        for (const variant of family.children) {
+          options.push({ value: variant.value, label: `${provider.value} · ${variant.value}` });
+        }
+      }
+    }
+  }
+  fillSelect($('multi-pick'), options, '— выберите —');
 }
 
 $('modality').addEventListener('change', onModalityChange);
 $('mode-auto').addEventListener('click', () => setMode('auto'));
 $('mode-pick').addEventListener('click', () => setMode('pick'));
+$('mode-multi').addEventListener('click', () => setMode('multi'));
+$('multi-add').addEventListener('click', () => {
+  const value = $('multi-pick').value;
+  if (!value) { toast('Сначала выберите модель', true); return; }
+  if (chips.includes(value)) { toast('Эта модель уже в списке'); return; }
+  chips.push(value);
+  renderChips();
+});
+$('multi-repeats').addEventListener('change', updateMultiButton);
+$('cancel').addEventListener('click', () => cancelRun($('cancel').dataset.runId));
 $('tier').addEventListener('change', onFormChange);
 $('auto-provider').addEventListener('change', onFormChange);
 $('sel-provider').addEventListener('change', () => rebuildCascade(1));

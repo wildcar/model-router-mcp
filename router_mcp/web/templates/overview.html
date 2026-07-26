@@ -42,6 +42,20 @@
   <p id="work-empty" class="hint" hidden>Ничего не требует внимания.</p>
 </section>
 
+{# Retention lives next to the size the tiles report: the number that makes an
+   operator want to delete something is the number they should be looking at
+   while they decide (§21). #}
+<section class="card">
+  <h2>Хранение</h2>
+  <p id="retention-policy" class="hint">—</p>
+  <table class="kv"><tbody id="retention"></tbody></table>
+  <div class="row actions">
+    <button id="purge" type="button" class="danger">Удалить по политике</button>
+    <span class="hint">Записи журнала — единственный след того, что было
+      потрачено. Удаление необратимо.</span>
+  </div>
+</section>
+
 <section class="card">
   <h2>Последние ошибки</h2>
   <table id="errors"><thead><tr>

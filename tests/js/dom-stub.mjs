@@ -227,7 +227,10 @@ export function installGlobals(doc, routes) {
   globalThis.setTimeout = (fn) => { fn(); return 0; };
   globalThis.clearTimeout = () => {};
   globalThis.fetch = async (url, init = {}) => {
-    calls.push({ url, method: init.method || 'GET' });
+    // The body is recorded too: what a page sends is as much a contract as
+    // which endpoint it sends to (an idempotency key that never arrives is an
+    // ordinary-looking POST).
+    calls.push({ url, method: init.method || 'GET', body: init.body });
     const path = String(url).split('?')[0];
     const route = routes[`${init.method || 'GET'} ${path}`] ?? routes[path];
     if (route === undefined) {

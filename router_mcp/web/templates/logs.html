@@ -56,6 +56,11 @@
         <option value="">все</option>
         <option value="ok">ok</option>
         <option value="error">ошибка</option>
+        {# Wave 3: a run is a row from the moment it starts, so these three
+           states are now things the log can actually contain. #}
+        <option value="running">выполняется</option>
+        <option value="cancelled">прерван</option>
+        <option value="interrupted">оборван</option>
       </select>
     </label>
     <label>Модальность

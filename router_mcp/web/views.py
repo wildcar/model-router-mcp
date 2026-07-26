@@ -84,6 +84,7 @@ def _run(
     created_at: str | None,
     finished_at: str | None,
     text: str | None,
+    request_ref: str | None,
     steps: list[dict[str, Any]],
     attachments: list[dict[str, Any]],
     ignored_params: list[str],
@@ -112,6 +113,10 @@ def _run(
         "created_at": created_at,
         "finished_at": finished_at,
         "text": text,
+        # What the request itself carried, when it carried a file. Repeating a
+        # transcription from the log needs the audio, and asking the operator to
+        # find the file again is asking them to prove it was the same one.
+        "request_ref": request_ref,
         "steps": steps,
         "attachments": attachments,
         "ignored_params": ignored_params,
@@ -194,6 +199,7 @@ def run_from_dispatch(
         created_at=None,
         finished_at=result.finished_at,
         text=response.text,
+        request_ref=result.request_ref,
         steps=result.steps,
         attachments=_attachments_from_response(result),
         ignored_params=result.ignored_params,
@@ -254,6 +260,7 @@ def run_from_log(row: dict[str, Any]) -> dict[str, Any]:
         created_at=row.get("created_at"),
         finished_at=row.get("finished_at"),
         text=row.get("response_text"),
+        request_ref=row.get("request_ref"),
         steps=_json_or_empty(row.get("plan_json"), default=[]),
         attachments=attachments,
         ignored_params=[],

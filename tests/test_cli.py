@@ -82,3 +82,79 @@ def test_claude_error_payload_raises():
 def test_claude_non_json_raises():
     with pytest.raises(ProviderError):
         ClaudeCliAdapter._parse_stdout("not json", 0, "")
+
+
+def test_claude_stream_json_takes_the_result_line():
+    """`--output-format stream-json` prints a line per turn and ends with the
+    same result object the single-object format used to be."""
+    out = "\n".join([
+        '{"type":"system","subtype":"init","session_id":"s-1"}',
+        '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read"}]}}',
+        '{"type":"result","subtype":"success","result":"готово","session_id":"s-1",'
+        '"total_cost_usd":0.02,"usage":{"input_tokens":4,"output_tokens":2,'
+        '"cache_read_input_tokens":900,"cache_creation_input_tokens":100}}',
+    ])
+    data = ClaudeCliAdapter._parse_stdout(out, 0, "")
+    assert data["result"] == "готово"
+    usage = ClaudeCliAdapter._usage(data["usage"])
+    # Cache tokens sit outside input_tokens in Anthropic's accounting, and
+    # Usage's contract is that prompt_tokens is the whole prompt.
+    assert usage.prompt_tokens == 1004
+    assert usage.cache_read_tokens == 900
+    assert usage.total_tokens == 1006
+
+
+def test_claude_still_reads_the_single_object_format():
+    """An older CLI, or `--output-format json` left in CLAUDE_COMMAND."""
+    data = ClaudeCliAdapter._parse_stdout('{"result":"ok","usage":{}}', 0, "")
+    assert data["result"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_stdout_arrives_line_by_line(tmp_path):
+    """The whole point of wave 3's CLI change: events are readable while the
+    process is still running, not once it has exited."""
+    script = tmp_path / "chatty.sh"
+    script.write_text('#!/bin/sh\necho one\necho two\necho three\n')
+    script.chmod(0o755)
+
+    seen: list[str] = []
+    result = await _subprocess.run_subprocess(
+        [str(script)], cwd=str(tmp_path), timeout_sec=10, on_line=seen.append
+    )
+    assert seen == ["one", "two", "three"]
+    assert result.stdout == "one\ntwo\nthree\n"
+    assert result.return_code == 0
+
+
+@pytest.mark.asyncio
+async def test_cancelling_kills_the_process(tmp_path):
+    """Otherwise the CLI keeps running — and keeps spending — with nothing left
+    in the service holding a handle to it."""
+    import asyncio
+    import os
+    import signal
+
+    script = tmp_path / "slow.sh"
+    script.write_text('#!/bin/sh\necho "pid $$"\nsleep 30\n')
+    script.chmod(0o755)
+
+    pids: list[int] = []
+    task = asyncio.create_task(
+        _subprocess.run_subprocess(
+            [str(script)], cwd=str(tmp_path), timeout_sec=30,
+            on_line=lambda line: pids.append(int(line.split()[1])),
+        )
+    )
+    for _ in range(100):
+        if pids:
+            break
+        await asyncio.sleep(0.05)
+    assert pids, "the script never reported its pid"
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    await asyncio.sleep(0.2)
+    with pytest.raises(OSError):
+        os.kill(pids[0], signal.SIGKILL)   # already gone

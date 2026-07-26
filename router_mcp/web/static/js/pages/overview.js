@@ -41,6 +41,45 @@ function firstRunSteps(summary) {
   return steps;
 }
 
+function days(value) {
+  return value > 0 ? `${value} дн.` : 'бессрочно';
+}
+
+async function renderRetention() {
+  const state = await api('/retention');
+  $('retention-policy').textContent =
+    `Журнал: ${days(state.log_retention_days)} · файлы ответов: `
+    + `${days(state.blob_retention_days)}. Меняется в .env `
+    + '(LOG_RETENTION_DAYS, BLOB_RETENTION_DAYS).';
+  fill($('retention'), [
+    ['Записей в журнале', String(state.total_logs)],
+    ['Будет удалено записей', String(state.logs_to_delete)],
+    ['Будет удалено файлов', String(state.blobs_to_delete)],
+    // Files nothing points at: a run that stored a file and then failed leaves
+    // one, and until now nothing ever collected them.
+    ['Файлов без записи', String(state.orphan_blobs)],
+  ].map(([key, value]) => {
+    const tr = el('tr');
+    tr.appendChild(el('th', key));
+    tr.appendChild(el('td', value, { className: 'num' }));
+    return tr;
+  }));
+  $('purge').disabled =
+    !(state.logs_to_delete || state.blobs_to_delete || state.orphan_blobs);
+}
+
+async function purge() {
+  const state = await api('/retention');
+  const total = state.logs_to_delete + state.blobs_to_delete + state.orphan_blobs;
+  if (!confirm(
+    `Удалить ${state.logs_to_delete} записей журнала и `
+    + `${state.blobs_to_delete + state.orphan_blobs} файлов? Отменить нельзя.`)) return;
+  const result = await api('/retention/purge', { method: 'POST' });
+  toast(`Удалено: ${result.deleted_logs} записей, ${result.deleted_blobs} файлов`);
+  if (!total) return;
+  await renderRetention();
+}
+
 async function boot() {
   const summary = await api('/health/summary');
   const caps = await api('/capabilities');
@@ -95,6 +134,8 @@ async function boot() {
     ]));
   }
 
+  await renderRetention();
+
   // Nothing configured and nothing logged means this is a fresh install.
   if (!summary.models_active || (!summary.providers_usable && !day.requests)) {
     $('first-run').hidden = false;
@@ -107,5 +148,8 @@ async function boot() {
     }));
   }
 }
+
+$('purge').addEventListener('click',
+  () => purge().catch((error) => toast(error.message, true)));
 
 boot().catch((error) => toast(`Не удалось собрать обзор: ${error.message}`, true));

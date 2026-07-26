@@ -112,6 +112,20 @@ button.small { padding:2px 8px; font-size:11px; }
 table.kv { width:100%; font-size:12px; }
 table.kv th { width:38%; text-align:left; color:var(--muted); font-weight:400; vertical-align:top; }
 
+/* A run in flight: the elapsed clock and the timeline as it fills. */
+.live { border:1px solid var(--accent); border-radius:var(--radius,6px); padding:10px 14px; margin-bottom:14px; }
+.live-head { display:flex; justify-content:space-between; margin:0 0 8px; font-size:12px; }
+button.danger { border-color:var(--err); color:var(--err); }
+button.linkish { background:transparent; border:0; padding:0 0 0 8px; font-size:11px; color:var(--muted); text-decoration:underline; }
+
+/* Multi-model mode: chips of models, then a row per run. */
+.chips { display:flex; gap:6px; flex-wrap:wrap; margin:6px 0; }
+.chips .chip { display:inline-flex; gap:6px; align-items:center; }
+.chip-x { background:transparent; border:0; padding:0; color:var(--muted); font-size:13px; line-height:1; }
+table.multi { width:100%; font-size:12px; margin-bottom:14px; }
+table.multi tbody tr { cursor:pointer; }
+table.multi td { padding:3px 6px; border-bottom:1px solid var(--border); }
+
 /* Session feed */
 .feed { display:flex; gap:8px; flex-wrap:wrap; }
 .feed-item { display:flex; gap:8px; align-items:center; font-size:12px; }

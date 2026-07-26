@@ -7,6 +7,7 @@
 import { api, ApiError, query } from '../core/api.js';
 import { el, row, clear, toast } from '../core/dom.js';
 import { costCell, localTime, money, timeZoneLabel, tokens, duration } from '../core/format.js';
+import { idempotencyKey, start, watch } from '../core/runs.js';
 import { readParams, writeParams } from '../core/state.js';
 import { inspector } from '../components/inspector.js';
 import { initSpend, loadSpend } from './spend.js';
@@ -41,6 +42,28 @@ function modelCell(r) {
   });
 }
 
+// Six states, not two: a run is a row from the moment it starts, so the log
+// holds calls in flight, calls the operator stopped and calls a restart cut
+// off. Each gets its own word from the server glossary — «ошибка» for a run
+// that is still going would be a lie, and «ok» for one that was interrupted a
+// more expensive one.
+const STATUS_CLASS = {
+  ok: 'ok',
+  error: 'err',
+  running: 'warn',
+  queued: 'muted',
+  cancelled: 'muted',
+  interrupted: 'warn',
+};
+
+function statusCell(status) {
+  const label = labels?.statuses?.[status];
+  return el('span', label ? label.label : status, {
+    className: STATUS_CLASS[status] || '',
+    title: label ? label.help : '',
+  });
+}
+
 // The error goes under its row, with the failure text and a way out of it.
 function errorRow(r, columns) {
   const cell = el('td', undefined, { className: 'log-error' });
@@ -61,9 +84,7 @@ function logRow(r) {
     { node: modelCell(r) },
     r.modality,
     r.channel || '—',
-    r.status === 'ok'
-      ? el('span', 'ok', { className: 'ok' })
-      : el('span', r.status, { className: 'err' }),
+    statusCell(r.status),
     { text: duration(r.latency_ms), className: 'num' },
     { text: tokens({
         prompt: r.prompt_tokens,
@@ -93,13 +114,30 @@ async function loadLogs({ append = false } = {}) {
   const columns = document.querySelectorAll('#logs thead th').length;
   for (const r of answer.items) {
     body.appendChild(logRow(r));
-    if (r.status !== 'ok') body.appendChild(errorRow(r, columns));
+    // A run still going has no failure to explain; only a finished one does.
+    if (r.status !== 'ok' && r.status !== 'running' && r.status !== 'queued') {
+      body.appendChild(errorRow(r, columns));
+    }
   }
   shown += answer.items.length;
   cursor = answer.next_cursor;
   $('more').hidden = cursor === null;
   $('count').textContent = `показано ${shown} из ${answer.total}`;
   writeParams({ ...params, log: readParams().log });
+  scheduleLiveRefresh(answer.items);
+}
+
+// While something is running the first page refreshes itself. Not a general
+// auto-refresh: it stops as soon as nothing is in flight, so a log left open on
+// a quiet service is not a request every three seconds forever.
+const LIVE_REFRESH_MS = 3000;
+let liveTimer = null;
+
+function scheduleLiveRefresh(items) {
+  clearTimeout(liveTimer);
+  const live = items.some((r) => r.status === 'running' || r.status === 'queued');
+  if (!live || cursor !== null) return;
+  liveTimer = setTimeout(() => loadLogs().catch(() => {}), LIVE_REFRESH_MS);
 }
 
 // Opening a row uses the very same inspector the «Прогон» screen shows after a
@@ -122,6 +160,14 @@ async function openEntry(id) {
         window.location.href = to;
       },
     }));
+    // The audio is still in the blob store, so a transcription can be repeated
+    // from here — on another model, without the operator hunting for the file
+    // and hoping it is the same one.
+    if (run.modality === 'stt' && run.request_ref) {
+      head.appendChild(el('button', 'Повторить распознавание', {
+        onClick: () => repeatTranscription(run).catch((e) => toast(e.message, true)),
+      }));
+    }
     head.appendChild(el('button', 'Закрыть', {
       onClick: () => {
         card.hidden = true;
@@ -133,6 +179,24 @@ async function openEntry(id) {
     card.scrollIntoView({ block: 'nearest' });
   } catch (e) {
     toast(e instanceof ApiError ? e.message : String(e), true);
+  }
+}
+
+async function repeatTranscription(run) {
+  if (!confirm('Отправить тот же файл ещё раз? Это стоит денег.')) return;
+  const state = await start({
+    modality: 'stt',
+    external_user_id: run.client_id || 'web-tester',
+    model_id: run.model.model_id,
+    attachment_ref: run.request_ref,
+    client_request_id: idempotencyKey(),
+  });
+  toast('Отправлено, ждём результат…');
+  const finished = await watch(state.run_id, () => {}).promise;
+  await loadLogs();
+  if (finished.log_id) {
+    writeParams({ ...readParams(), log: finished.log_id });
+    openEntry(finished.log_id);
   }
 }
 

@@ -26,6 +26,7 @@
         <span class="segmented" role="tablist">
           <button type="button" id="mode-auto" class="seg active" role="tab">Авто</button>
           <button type="button" id="mode-pick" class="seg" role="tab">Выбрать самому</button>
+          <button type="button" id="mode-multi" class="seg" role="tab">Несколько</button>
         </span>
       </legend>
 
@@ -72,6 +73,23 @@
           <span class="under" id="model-id-state"></span>
         </label>
       </div>
+      {# Multi-model mode: the same request against several models at once.
+         Not a separate screen — the left column would be duplicated whole
+         (§10.6). Each chip becomes its own run under one batch id. #}
+      <div id="multi-block" hidden>
+        <div class="row">
+          <label class="grow">Модель для сравнения
+            <select id="multi-pick"></select>
+            <span class="under">Выберите и нажмите «Добавить»</span>
+          </label>
+          <button type="button" id="multi-add">Добавить</button>
+          <label>Повторов
+            <input id="multi-repeats" type="number" min="1" max="5" value="1">
+          </label>
+        </div>
+        <div id="chips" class="chips"></div>
+        <p id="multi-empty" class="hint">Пока не выбрано ни одной модели.</p>
+      </div>
       <p id="registry-freshness" class="hint"></p>
     </fieldset>
 
@@ -117,12 +135,36 @@
       <span class="hint">ничего не отправляем и не тратим</span>
       <span class="spacer"></span>
       <button id="send" type="button" class="primary">Отправить</button>
+      {# The send button turns into this while the run is going: the elapsed
+         time and a way out. A long run with no stop button is a long run you
+         pay for twice (§10.5). #}
+      <button id="cancel" type="button" class="danger" hidden>Прервать</button>
     </div>
   </section>
 
   <section class="card run-result">
     <h2>Результат</h2>
     <div id="plan" class="plan" hidden></div>
+    <div id="live" class="live" hidden>
+      <p class="live-head">
+        <span id="live-status">выполняется</span>
+        <span id="live-clock" class="num"></span>
+      </p>
+      <div id="live-steps"></div>
+    </div>
+    <table id="multi" class="multi" hidden>
+      <thead>
+        <tr>
+          <th scope="col">модель</th>
+          <th scope="col">статус</th>
+          <th scope="col" class="num">время</th>
+          <th scope="col">токены</th>
+          <th scope="col" class="num">$</th>
+          <th scope="col">ответ</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
     <div id="inspector"></div>
     <p id="result-empty" class="hint">Ответ появится здесь. Ctrl+Enter отправляет.</p>
   </section>

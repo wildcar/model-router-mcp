@@ -162,11 +162,17 @@ async def _drain(
 
 
 async def _terminate(proc: asyncio.subprocess.Process) -> None:
-    if proc.returncode is not None:
-        return
-    proc.terminate()
     try:
-        await asyncio.wait_for(proc.wait(), timeout=5)
-    except asyncio.TimeoutError:
-        proc.kill()
-        await proc.wait()
+        if proc.returncode is None:
+            proc.terminate()
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=5)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+    finally:
+        # Close the pipes now rather than leaving them to the garbage collector,
+        # which may run after the event loop is gone and complain about it.
+        transport = getattr(proc, "_transport", None)
+        if transport is not None:
+            transport.close()

@@ -28,12 +28,24 @@ const ROUTES = {
   '/api/v1/logs/4821': fixture('run-ok'),
   '/api/v1/usage': fixture('usage'),
   '/api/v1/health/summary': fixture('health-summary'),
+  '/api/v1/retention': { log_retention_days: 90, blob_retention_days: 30,
+    log_cutoff: '2026-04-27T00:00:00+00:00', blob_cutoff: '2026-06-26T00:00:00+00:00',
+    logs_to_delete: 12, blobs_to_delete: 4, orphan_blobs: 1, total_logs: 8213 },
+  'POST /api/v1/retention/purge': { deleted_logs: 12, deleted_blobs: 5,
+    logs_to_delete: 12, blobs_to_delete: 4, orphan_blobs: 1, total_logs: 8213,
+    log_retention_days: 90, blob_retention_days: 30 },
   '/api/v1/mcp/summary': fixture('mcp-summary'),
   'POST /api/v1/providers/openrouter/probe': { provider_id: 'openrouter', status: 'ok',
     detail: 'Каталог ответил, моделей 345', latency_ms: 210, age_seconds: 3 },
   'POST /api/v1/mcp/probe': { status: 'ok', detail: 'инструментов 7', tools: 7, latency_ms: 4 },
   'POST /api/v1/registry/models/bulk': { action: 'deprecate', changed: [], count: 0 },
   'POST /api/v1/plan': fixture('plan'),
+  // A run is accepted, then polled. The stub answers the poll with a finished
+  // run so the page module walks the whole path in one turn.
+  'POST /api/v1/runs': { run_id: 'r-1', status: 'running', steps: [], result: null,
+    error: null, log_id: null },
+  '/api/v1/runs/r-1': { run_id: 'r-1', status: 'ok', log_id: 4821,
+    steps: fixture('run-ok').steps, result: fixture('run-ok'), error: null },
   'POST /api/v1/registry/refresh': { providers: [
     { provider_id: 'openrouter', seen: 345, added: 2, updated: 14, deprecated: 1, skipped: null },
     { provider_id: 'deepseek', seen: 0, added: 0, updated: 0, deprecated: 0, skipped: 'not configured' },
@@ -99,6 +111,13 @@ await runPage('overview', 'overview', (doc) => {
   check('обзор: список работы или явное «ничего не требует внимания»', hasWork);
   check('обзор: ошибки перечислены или названы отсутствующими',
     rowsOf(doc, 'errors') > 0 || doc.getElementById('no-errors')?.hidden === false);
+  // Retention: the policy in words, and what a purge would take with it.
+  check('обзор: политика хранения названа',
+    text(doc, 'retention-policy').includes('90 дн.'), text(doc, 'retention-policy'));
+  check('обзор: показано, что будет удалено',
+    doc.getElementById('retention').children.length === 4);
+  check('обзор: файлы без записи посчитаны отдельно',
+    doc.querySelector('#retention').textContent.includes('Файлов без записи'));
 });
 
 await runPage('logs', 'logs', async (doc, _calls, settleNow) => {
@@ -163,7 +182,7 @@ await runPage('connections', 'connections', async (doc, _calls, settleNow) => {
   check('MCP: самопроба отвечает', text(doc, 'mcp-probe-result').includes('ok'));
 });
 
-await runPage('run', 'run', (doc, calls) => {
+await runPage('run', 'run', async (doc, calls, settleNow) => {
   check('прогон: модальности загружены', doc.getElementById('modality').children.length > 1);
   check('прогон: параметры построены по матрице',
     doc.getElementById('params').children.length > 0);
@@ -176,9 +195,37 @@ await runPage('run', 'run', (doc, calls) => {
   check('прогон: план запрошен без отправки',
     calls.some((c) => c.url.includes('/plan') && c.method === 'POST'));
   check('прогон: ни одного вызова модели при загрузке',
-    !calls.some((c) => c.method === 'POST' && /\/(chat|image|tts|cli|transcribe)$/.test(c.url)));
+    !calls.some((c) => c.method === 'POST' && /\/(chat|image|tts|cli|runs)$/.test(c.url)));
 
   doc.getElementById('show-plan').dispatch('click');
+
+  // Multi-model mode: chips in, one run per chip, one table row per run.
+  doc.getElementById('mode-multi').dispatch('click');
+  await settleNow();
+  check('мультипрогон: список моделей заполнен',
+    doc.getElementById('multi-pick').children.length > 1);
+  const pick = doc.getElementById('multi-pick');
+  pick.value = pick.children[1].value;
+  doc.getElementById('multi-add').dispatch('click');
+  check('мультипрогон: чип добавлен', doc.getElementById('chips').children.length === 1);
+  check('мультипрогон: кнопка считает прогоны',
+    doc.getElementById('send').textContent.includes('Запустить 1'),
+    doc.getElementById('send').textContent);
+
+  doc.getElementById('send').dispatch('click');
+  await settleNow();
+  check('мультипрогон: прогон отправлен через реестр',
+    calls.some((c) => c.method === 'POST' && c.url.endsWith('/runs')));
+  check('мультипрогон: ключ идемпотентности приложен',
+    calls.some((c) => c.method === 'POST' && c.url.endsWith('/runs')
+      && JSON.parse(c.body).client_request_id));
+  check('мультипрогон: состояние опрошено',
+    calls.some((c) => c.url.includes('/runs/r-1')));
+  const table = doc.querySelector('#multi tbody');
+  check('мультипрогон: строка результата заполнена',
+    table.children.length === 1 && table.textContent.includes('8.42 с')
+      && table.textContent.includes('0.000412'),
+    table.textContent.slice(0, 120));
 });
 
 // The inspector and the timeline are exercised through a run with retries.
