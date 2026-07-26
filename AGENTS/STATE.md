@@ -282,18 +282,16 @@ it as a managed service on this host.
 
 ## Next
 
-- Развернуть на прод волнами по `deploy/DEPLOY.md`. Колонки `tasks`, `task`,
-  `compute_price_per_second` и `compute_seconds` приедут миграцией на первом
-  перезапуске; после него имеет смысл вызвать `POST /api/registry/refresh`,
-  чтобы строки OpenRouter получили правильные задачи от каталога (миграция
-  переносит в них ту же ошибку, что лежит в `modality`, а синхронизация её
-  исправляет).
+- ✅ Развёрнуто на прод (2026-07-26 22:3x UTC, `f8a94a2`) и проверено живьём;
+  подробности в верхней записи `HISTORY.md`. `blob.wildcar.org` поднят с
+  сертификатом, Replicate работает по всем трём моделям, консоль не задета.
 - Вбить ставки за секунду расчёта для трёх моделей Replicate: API их не
-  публикует, цены на страницах моделей. До этого прогоны честно пишутся как
-  «нет методики», а не как бесплатные.
-- DNS и сертификат на `blob.wildcar.org`, затем `PUBLIC_BLOB_BASE_URL` и
-  `PUBLIC_BLOB_SIGNING_KEY` в прод `.env`. До этого `image-to-image` из консоли
-  работает только на файлах до 256 КБ.
+  публикует, цены на страницах моделей. Сейчас прогоны честно пишутся как
+  «нет методики», а не как бесплатные — то есть расход по Replicate в отчётах
+  занижен и помечен нижней границей.
+- Проверить `image-to-image` из самой консоли на большом файле: механика
+  подписанной ссылки проверена через API, но браузерная загрузка > 256 КБ
+  ещё не прогонялась руками.
 - Deploy the registry-freshness pack to prod, run `POST /api/registry/refresh`
   there, and fill real prices for the live DeepSeek models in `/registry`
   (they arrive from the catalog with `price_source_kind='unknown'`).
