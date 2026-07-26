@@ -8,6 +8,7 @@ from RetryClientMixin.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import re
@@ -35,6 +36,23 @@ IMAGE_HTTP_RE = re.compile(r"^https?://.+\.(?:png|jpe?g|webp|gif)(?:\?.*)?$", re
 # OpenRouter is the one provider whose catalog carries prices, so rows it
 # produces are the only ones marked as API-sourced.
 PRICE_SOURCE = "api:openrouter GET /models (pricing)"
+
+
+
+def _image_part(att: Attachment) -> dict[str, Any] | None:
+    """One image as an OpenAI-shaped content part, or None if it is not an image.
+
+    Inline as a data URI: the provider fetches nothing, so nothing has to be
+    publicly reachable for a chat with a picture to work.
+    """
+    if att.kind != "image":
+        return None
+    if att.url:
+        return {"type": "image_url", "image_url": {"url": att.url}}
+    if att.data is None:
+        return None
+    encoded = base64.b64encode(att.data).decode()
+    return {"type": "image_url", "image_url": {"url": f"data:{att.mime};base64,{encoded}"}}
 
 
 class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
@@ -273,8 +291,38 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
     # --- helpers --------------------------------------------------------
     @staticmethod
     def _build_messages(request: RouterRequest) -> list[dict[str, Any]]:
+        """The OpenAI-shaped message list, with images as content parts.
+
+        Attachments used to be dropped here without a word, so a vision request
+        reached the model as its text alone and came back "send me an image".
+        Declaring `image-to-text` and then not sending the image is the exact
+        failure ADR-0006 exists to prevent, one level down.
+        """
+        images = [
+            part for part in (_image_part(att) for att in request.attachments) if part
+        ]
         if request.messages:
-            return request.messages
+            messages = [dict(m) for m in request.messages]
+            if images:
+                # Onto the last user turn, which is what the images are about.
+                for message in reversed(messages):
+                    if message.get("role") in (None, "user"):
+                        content = message.get("content")
+                        parts = (
+                            [{"type": "text", "text": content}]
+                            if isinstance(content, str)
+                            else list(content or [])
+                        )
+                        message["content"] = parts + images
+                        break
+                else:
+                    messages.append({"role": "user", "content": images})
+            return messages
+        if images:
+            parts: list[dict[str, Any]] = []
+            if request.text:
+                parts.append({"type": "text", "text": request.text})
+            return [{"role": "user", "content": parts + images}]
         if request.text is not None:
             return [{"role": "user", "content": request.text}]
         raise ProviderError("Request has neither `text` nor `messages`")

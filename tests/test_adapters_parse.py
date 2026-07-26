@@ -231,3 +231,59 @@ def test_codex_image_params_are_no_longer_fixed_by_the_environment():
     payload = adapter._payload("кот", size="1024x1024", quality="high")
     tool = payload["tools"][0]
     assert tool["size"] == "1024x1024" and tool["quality"] == "high"
+
+
+# --- vision actually sends the picture -------------------------------------
+def _vision_request():
+    from router_mcp.domain.messages import Attachment
+
+    return RouterRequest(
+        task=Task.IMAGE_TO_TEXT,
+        external_user_id="u",
+        text="что на картинке?",
+        attachments=[Attachment(kind="image", mime="image/png", data=b"\x89PNG")],
+    )
+
+
+def test_openrouter_puts_the_image_in_the_message():
+    """Declaring `image-to-text` and then sending the text alone is the same
+    failure as the taxonomy itself, one level down — and the model answers
+    «пришлите изображение»."""
+    messages = OpenRouterAdapter._build_messages(_vision_request())
+    parts = messages[0]["content"]
+    assert parts[0] == {"type": "text", "text": "что на картинке?"}
+    assert parts[1]["type"] == "image_url"
+    assert parts[1]["image_url"]["url"].startswith("data:image/png;base64,")
+
+
+def test_openrouter_attaches_the_image_to_the_last_user_turn():
+    from router_mcp.domain.messages import Attachment
+
+    request = RouterRequest(
+        task=Task.IMAGE_TO_TEXT,
+        external_user_id="u",
+        messages=[{"role": "system", "content": "будь краток"},
+                  {"role": "user", "content": "и что тут?"}],
+        attachments=[Attachment(kind="image", mime="image/png", data=b"\x89PNG")],
+    )
+    messages = OpenRouterAdapter._build_messages(request)
+    assert messages[0]["content"] == "будь краток"      # untouched
+    assert messages[1]["content"][1]["type"] == "image_url"
+
+
+def test_openrouter_without_images_is_unchanged():
+    """A plain chat must keep sending a bare string, not a one-element list."""
+    messages = OpenRouterAdapter._build_messages(
+        RouterRequest(task=Task.TEXT_TO_TEXT, external_user_id="u", text="привет")
+    )
+    assert messages == [{"role": "user", "content": "привет"}]
+
+
+def test_anthropic_uses_its_own_image_block():
+    system, turns = ClaudeApiAdapter._build_messages(_vision_request())
+    assert system is None
+    blocks = turns[0]["content"]
+    assert blocks[0]["type"] == "image"
+    assert blocks[0]["source"]["media_type"] == "image/png"
+    assert blocks[0]["source"]["type"] == "base64"
+    assert blocks[1] == {"type": "text", "text": "что на картинке?"}

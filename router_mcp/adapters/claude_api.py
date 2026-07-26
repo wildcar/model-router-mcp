@@ -9,6 +9,7 @@ normalized prompt/completion fields.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 from typing import Any
@@ -132,6 +133,30 @@ class ClaudeApiAdapter(RetryClientMixin, ProviderAdapter):
 
     @staticmethod
     def _build_messages(request: RouterRequest) -> tuple[str | None, list[dict[str, Any]]]:
+        """`(system, turns)`, with images as Anthropic content blocks.
+
+        Its own shape, not the OpenAI one: `{"type": "image", "source": {...}}`
+        with the bytes base64-encoded and the media type named separately.
+        Attachments used to be dropped here silently, so a vision request arrived
+        as its text alone.
+        """
+        images = [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": att.mime,
+                    "data": base64.b64encode(att.data).decode(),
+                },
+            }
+            for att in request.attachments
+            if att.kind == "image" and att.data
+        ]
+        if images and not request.messages:
+            parts: list[dict[str, Any]] = list(images)
+            if request.text:
+                parts.append({"type": "text", "text": request.text})
+            return None, [{"role": "user", "content": parts}]
         if request.messages:
             system_parts: list[str] = []
             turns: list[dict[str, Any]] = []
