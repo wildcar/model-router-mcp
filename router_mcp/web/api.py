@@ -19,12 +19,13 @@ from typing import Any
 from fastapi import APIRouter, File, Form, Request, Response, UploadFile
 from pydantic import BaseModel
 
-from router_mcp.domain.errors import BadRequest, NotFound
+from router_mcp.domain.errors import BadRequest, Conflict, NotFound
 from router_mcp.domain.messages import Attachment, FallbackPolicy, RouterRequest
 from router_mcp.domain.modality import Modality
 from router_mcp.mcp_server.serialize import model_to_dict
 from router_mcp.registry.models import RegistryModel
 from router_mcp.runtime import get_core
+from router_mcp.web import capabilities
 from router_mcp.web.views import page, run_from_dispatch, run_from_log
 
 api_router = APIRouter()
@@ -135,6 +136,58 @@ class ManualModelBody(BaseModel):
 
 class ProviderPatch(BaseModel):
     enabled: bool
+
+
+@api_router.get("/capabilities")
+async def api_capabilities() -> dict[str, Any]:
+    """What this installation can do: the parameter matrix, the providers, what
+    the server fixes, and the glossary. The console draws its forms from here
+    rather than from a copy of the matrix maintained by hand."""
+    core = get_core()
+    return capabilities.build(
+        core.settings,
+        core.adapters,
+        await core.db.get_service_providers(),
+        await core.db.get_enabled_provider_ids(),
+    )
+
+
+class PlanBody(BaseModel):
+    modality: str = "chat"
+    external_user_id: str = "web-tester"
+    text: str | None = None
+    messages: list[dict[str, Any]] | None = None
+    model_id: str | None = None
+    tier: str | None = None
+    provider: str | None = None
+    params: dict[str, Any] | None = None
+    fallback: dict[str, Any] | str | None = None
+
+
+@api_router.post("/plan")
+async def api_plan(body: PlanBody) -> dict[str, Any]:
+    """The dry run. Nothing is sent, nothing is spent, nothing is logged.
+
+    Answers 200 even when no model can serve the request: "почему запрос не
+    ушёл" is the case this screen exists for, and an error status would leave
+    the console with nothing to render.
+    """
+    try:
+        modality = Modality.from_str(body.modality)
+    except ValueError as exc:
+        raise BadRequest(str(exc)) from exc
+    request = RouterRequest(
+        modality=modality,
+        external_user_id=body.external_user_id,
+        model_id=body.model_id,
+        tier=body.tier,
+        provider_hint=body.provider,
+        text=body.text,
+        messages=body.messages,
+        params=body.params or {},
+        fallback=parse_fallback(body.fallback),
+    )
+    return await get_core().router.explain(request)
 
 
 @api_router.get("/models")
@@ -381,6 +434,159 @@ async def api_registry_models(
     models = await core.db.list_registry_models(source=source, modality=modality, active_only=False)
     items = [model_to_dict(m) for m in models]
     return page(items, total=len(items))
+
+
+@api_router.get("/registry/tree")
+async def api_registry_tree(modality: str | None = None) -> dict[str, Any]:
+    """The cascade the picker needs: provider → vendor → model → variant.
+
+    Built here because the identifier split is domain knowledge. The client used
+    to cut `model_id` on `/` and `:`, guessing at a structure the database
+    already stores — `model_provider` is its own column.
+    """
+    core = get_core()
+    models = await core.db.list_registry_models(modality=modality, active_only=True)
+    enabled = await core.db.get_enabled_provider_ids()
+
+    providers: dict[str, dict[str, Any]] = {}
+    for m in models:
+        base, _, variant = m.model_id.partition(":")
+        base = base.split("/")[-1]
+        provider = providers.setdefault(
+            m.service_provider_id,
+            {
+                "value": m.service_provider_id,
+                "count": 0,
+                "enabled": m.service_provider_id in enabled,
+                "configured": (
+                    m.service_provider_id in core.adapters
+                    and core.adapters[m.service_provider_id].is_configured()
+                ),
+                "children": {},
+            },
+        )
+        vendor = provider["children"].setdefault(
+            m.model_provider, {"value": m.model_provider, "count": 0, "children": {}}
+        )
+        family = vendor["children"].setdefault(
+            base, {"value": base, "count": 0, "children": []}
+        )
+        family["children"].append(
+            {
+                "value": m.model_id,
+                # The variant carries its price, because "cheap" as a word tells
+                # an operator nothing they can act on.
+                "label": f"{variant or 'базовая'} · ${(m.prompt_price + m.completion_price) * 1e6:.3f}/1M",
+                "tier": m.tier,
+                "price_source_kind": m.price_source_kind,
+            }
+        )
+        provider["count"] += 1
+        vendor["count"] += 1
+        family["count"] += 1
+
+    def _sorted(node: dict[str, Any]) -> list[dict[str, Any]]:
+        out = []
+        for value in sorted(node.values(), key=lambda n: n["value"]):
+            children = value["children"]
+            if isinstance(children, dict):
+                value = {**value, "children": _sorted(children)}
+            else:
+                value = {**value, "children": sorted(children, key=lambda c: c["value"])}
+            out.append(value)
+        return out
+
+    return {"total": len(models), "children": _sorted(providers)}
+
+
+class ModelPatch(BaseModel):
+    """Partial edit of one registry row, addressed by the pair.
+
+    Every field is optional and only what is sent is written. The old whole-row
+    write was the bug: it filled everything the form did not carry with
+    defaults, so editing a price wiped the context length and the catalog dates
+    and brought a retired model back to life as active.
+    """
+
+    prompt_price: float | None = None       # USD per 1M tokens, as shown
+    completion_price: float | None = None   # USD per 1M tokens, as shown
+    image_price: float | None = None
+    audio_price_per_second: float | None = None
+    display_name: str | None = None
+    tier: str | None = None
+    price_source: str | None = None
+    price_source_kind: str | None = None
+    pricing_mode: str | None = None
+    subscription_id: int | None = None
+    # Optimistic locking: the revision the operator's copy of the row carried.
+    revision: int | None = None
+    # Drop the local price and take the catalog's again on the next sync.
+    revert_price: bool = False
+
+
+@api_router.patch("/registry/models/{service_provider_id}/{model_id:path}")
+async def api_patch_model(
+    service_provider_id: str, model_id: str, body: ModelPatch
+) -> dict[str, Any]:
+    core = get_core()
+    model = await core.db.get_registry_model(service_provider_id, model_id)
+    if model is None:
+        raise NotFound(f"No model {service_provider_id}/{model_id}")
+
+    fields: dict[str, Any] = {}
+    if body.revert_price:
+        # Hand the row back to the catalog: the next sync overwrites the price
+        # because the provenance is no longer "manual".
+        fields["price_source_kind"] = "api" if model.source == "catalog" else "estimate"
+        fields["price_source"] = None
+        fields["price_checked_at"] = None
+    else:
+        # The form works in USD per million tokens; the registry stores per token.
+        for name, per_million in (
+            ("prompt_price", body.prompt_price),
+            ("completion_price", body.completion_price),
+        ):
+            if per_million is not None:
+                fields[name] = per_million / 1e6
+        for name, value in (
+            ("image_price", body.image_price),
+            ("audio_price_per_second", body.audio_price_per_second),
+            ("display_name", body.display_name),
+            ("tier", body.tier),
+            ("price_source", body.price_source),
+            ("pricing_mode", body.pricing_mode),
+            ("subscription_id", body.subscription_id),
+        ):
+            if value is not None:
+                fields[name] = value
+        touched_price = any(
+            k in fields
+            for k in ("prompt_price", "completion_price", "image_price",
+                      "audio_price_per_second")
+        )
+        if touched_price:
+            # A hand-entered price survives synchronisation, and the criterion is
+            # the origin of the *price*, not the origin of the *row*. Keyed on
+            # the row, a price typed into a catalog row was wiped by the next
+            # sync; keyed on the price, the row stays a catalog row and keeps
+            # receiving name, context and modality updates.
+            fields.setdefault("price_source_kind", body.price_source_kind or "manual")
+            fields["price_checked_at"] = datetime.now(timezone.utc).isoformat(
+                timespec="seconds"
+            )
+        elif body.price_source_kind is not None:
+            fields["price_source_kind"] = body.price_source_kind
+
+    if not fields:
+        raise BadRequest("Nothing to update")
+    updated = await core.db.update_registry_model(
+        service_provider_id, model_id, fields, if_revision=body.revision
+    )
+    if updated is None:
+        raise Conflict(
+            "Строку изменили, пока она была открыта. Обновите и повторите правку."
+        )
+    return model_to_dict(updated)
 
 
 @api_router.post("/registry/models")

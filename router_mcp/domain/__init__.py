@@ -7,6 +7,7 @@ inward, towards these types, to keep the import graph acyclic.
 from router_mcp.domain.errors import (
     AccessDenied,
     BadRequest,
+    Conflict,
     ModelRetired,
     ModelUnavailable,
     NotConfigured,
@@ -31,6 +32,7 @@ __all__ = [
     "Usage",
     "RouterError",
     "BadRequest",
+    "Conflict",
     "UnknownModel",
     "ModelRetired",
     "ModelUnavailable",

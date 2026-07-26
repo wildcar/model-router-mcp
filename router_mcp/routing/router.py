@@ -52,6 +52,21 @@ logger = logging.getLogger(__name__)
 
 _TIER_ORDER = {"free": 0, "cheap": 1, "expensive": 2}
 _TEXT_TRUNCATE = 4000
+# What a cost estimate assumes about the answer, since its length is the one
+# number nobody can know before the call. Stated on screen next to the figure.
+_ASSUMED_COMPLETION_TOKENS = 500
+
+
+def _pair(model: RegistryModel) -> dict[str, Any]:
+    """A model is addressed by the pair, never by the id alone: two providers can
+    serve the same id at different prices."""
+    return {
+        "provider": model.service_provider_id,
+        "model_id": model.model_id,
+        "display_name": model.display_name,
+        "is_active": model.is_active,
+        "deprecated_at": model.deprecated_at,
+    }
 
 
 def _last_status(trace: list[dict[str, Any]]) -> int | None:
@@ -100,6 +115,17 @@ class Attempt:
     adapter: ProviderAdapter
     model: RegistryModel
     reason: str | None = None
+
+
+@dataclass(slots=True)
+class Candidate:
+    """One model the fallback ladder looked at, and what became of it."""
+
+    model: RegistryModel
+    verdict: str  # "eligible" | "filtered"
+    why: str
+    price: float  # prompt + completion, USD per token
+    rank: int | None = None  # position on the ladder, for eligible ones
 
 
 @dataclass(slots=True)
@@ -152,12 +178,16 @@ class ModelRouter:
         attempt = (await self.plan(request))[0]
         return attempt.adapter, attempt.model
 
-    async def plan(self, request: RouterRequest) -> list[Attempt]:
+    async def plan(
+        self, request: RouterRequest, *, allow_sync: bool = True
+    ) -> list[Attempt]:
         """Ordered attempts: the resolved model first, then policy substitutes.
 
         Planning up-front keeps dispatch honest: the substitutes are chosen from
         the registry state at the time of the request, not re-derived after each
         failure, so a retry storm cannot walk the whole catalog.
+
+        `allow_sync=False` keeps the dry run off the network — see `explain`.
         """
         policy = request.fallback or FallbackPolicy()
         enabled = await self._db.get_enabled_provider_ids()
@@ -185,7 +215,7 @@ class ModelRouter:
             else:
                 first_reason = problem.reason
         else:
-            model = await self._pick_by_hints(request, enabled)
+            model = await self._pick_by_hints(request, enabled, allow_sync=allow_sync)
             if model is None:
                 raise RouterError(
                     f"No configured provider available for modality {request.modality.value}"
@@ -197,7 +227,9 @@ class ModelRouter:
             exclude = {a.model.model_id for a in attempts}
             if request.model_id:
                 exclude.add(request.model_id)
-            for sub in await self._substitutes(request, reference, policy, exclude):
+            for sub in await self._substitutes(
+                request, reference, policy, exclude, allow_sync=allow_sync
+            ):
                 attempts.append(
                     Attempt(
                         self._adapters[sub.service_provider_id],
@@ -217,13 +249,14 @@ class ModelRouter:
         return attempts
 
     async def _pick_by_hints(
-        self, request: RouterRequest, enabled: set[str]
+        self, request: RouterRequest, enabled: set[str], *, allow_sync: bool = True
     ) -> RegistryModel | None:
         """Modality (+ tier/provider hints) selection, then the per-modality default."""
         candidates = await self._registry.get_models(
             modality=request.modality.value,
             tier=request.tier,
             provider=request.provider_hint,
+            allow_sync=allow_sync,
         )
         candidates = [m for m in candidates if m.service_provider_id in enabled]
         candidates.sort(key=self._candidate_sort_key(request))
@@ -294,53 +327,95 @@ class ModelRouter:
             )
         return None
 
+    async def _ladder(
+        self,
+        request: RouterRequest,
+        reference: RegistryModel | None,
+        policy: FallbackPolicy,
+        exclude: set[str],
+        *,
+        allow_sync: bool = True,
+    ) -> list[Candidate]:
+        """Every model the policy considered, in ladder order, with a verdict.
+
+        Dispatch only needs the eligible head of this list, but the console needs
+        the whole thing: "почему запрос ушёл не на ту модель" is answered by the
+        rows that were dropped, not by the one that won.
+        """
+        enabled = await self._db.get_enabled_provider_ids()
+        pool = await self._registry.get_models(
+            modality=request.modality.value, allow_sync=allow_sync
+        )
+        ref = (
+            reference.prompt_price + reference.completion_price
+            if reference is not None
+            else None
+        )
+
+        considered: list[Candidate] = []
+        eligible: list[Candidate] = []
+        for model in pool:
+            if model.model_id in exclude:
+                continue
+            price = model.prompt_price + model.completion_price
+            adapter = self._adapters.get(model.service_provider_id)
+            if model.price_is_unknown:
+                # A price ladder cannot place a model whose price nobody knows,
+                # and stepping "one cheaper" onto it would be a guess.
+                verdict, why = "filtered", "цены нет, на лестницу не ставится"
+            elif not self._in_scope(model, reference, request, policy.scope):
+                verdict, why = "filtered", "вне области подстановки"
+            elif model.service_provider_id not in enabled:
+                verdict, why = "filtered", "поставщик выключен"
+            elif adapter is None or not adapter.is_configured():
+                verdict, why = "filtered", "поставщик не настроен"
+            elif ref is not None and policy.policy == FallbackPolicy.CHEAPER and price >= ref:
+                verdict, why = "filtered", "не дешевле опорной"
+            elif ref is not None and policy.policy == FallbackPolicy.PRICIER and price <= ref:
+                verdict, why = "filtered", "не дороже опорной"
+            else:
+                verdict, why = "eligible", ""
+            candidate = Candidate(model=model, verdict=verdict, why=why, price=price)
+            considered.append(candidate)
+            if verdict == "eligible":
+                eligible.append(candidate)
+
+        eligible.sort(key=lambda c: (c.price, c.model.model_id))
+        if ref is None:
+            # Nothing to step from (the id was never in the registry): the
+            # cheapest working model is the least surprising answer.
+            ordered = eligible
+        elif policy.policy == FallbackPolicy.CHEAPER:
+            ordered = list(reversed(eligible))  # closest step down first
+        elif policy.policy == FallbackPolicy.PRICIER:
+            ordered = eligible
+        else:  # SAME: nearest price in either direction, cheaper on a tie
+            ordered = sorted(eligible, key=lambda c: (abs(c.price - ref), c.price))
+        for rank, candidate in enumerate(ordered, start=1):
+            candidate.rank = rank
+            candidate.why = (
+                "ближайшая ступень" if rank <= max(policy.max_steps, 0) else "дальше по лестнице"
+            )
+        rejected = [c for c in considered if c.verdict == "filtered"]
+        return ordered + sorted(rejected, key=lambda c: (c.price, c.model.model_id))
+
     async def _substitutes(
         self,
         request: RouterRequest,
         reference: RegistryModel | None,
         policy: FallbackPolicy,
         exclude: set[str],
+        *,
+        allow_sync: bool = True,
     ) -> list[RegistryModel]:
         """Walk the price ladder in the direction the policy asked for."""
         if policy.max_steps <= 0:
             return []
-        enabled = await self._db.get_enabled_provider_ids()
-        candidates = [
-            m
-            for m in await self._registry.get_models(modality=request.modality.value)
-            if m.model_id not in exclude
-            # A price ladder cannot place a model whose price nobody knows, and
-            # stepping "one cheaper" onto an unpriced model would be a guess.
-            and not m.price_is_unknown
-            and self._in_scope(m, reference, request, policy.scope)
-            and m.service_provider_id in enabled
-            and (m.service_provider_id in self._adapters)
-            and self._adapters[m.service_provider_id].is_configured()
-        ]
-        if not candidates:
-            return []
-        candidates.sort(key=lambda m: (m.prompt_price + m.completion_price, m.model_id))
-
-        if reference is None:
-            # Nothing to step from (the id was never in the registry): the
-            # cheapest working model is the least surprising answer.
-            ordered = candidates
-        else:
-            ref = reference.prompt_price + reference.completion_price
-            if policy.policy == FallbackPolicy.CHEAPER:
-                ordered = [m for m in candidates if m.prompt_price + m.completion_price < ref]
-                ordered.reverse()  # closest step down first
-            elif policy.policy == FallbackPolicy.PRICIER:
-                ordered = [m for m in candidates if m.prompt_price + m.completion_price > ref]
-            else:  # SAME: nearest price in either direction, cheaper on a tie
-                ordered = sorted(
-                    candidates,
-                    key=lambda m: (
-                        abs(m.prompt_price + m.completion_price - ref),
-                        m.prompt_price + m.completion_price,
-                    ),
-                )
-        return ordered[: policy.max_steps]
+        ladder = await self._ladder(
+            request, reference, policy, exclude, allow_sync=allow_sync
+        )
+        chosen = [c.model for c in ladder if c.verdict == "eligible"]
+        return chosen[: policy.max_steps]
 
     @staticmethod
     def _in_scope(
@@ -377,6 +452,144 @@ class ModelRouter:
             )
 
         return key
+
+    async def explain(self, request: RouterRequest) -> dict[str, Any]:
+        """The dry run: what would happen, without anything happening.
+
+        Two properties this owes the caller. It never touches the network — the
+        button says "ничего не отправляем и не тратим", and a plan that quietly
+        polls eight catalogs breaks that promise. And when there is nothing to
+        run it still answers successfully, describing the problem: "почему
+        запрос не ушёл" is exactly the case the screen exists for.
+        """
+        policy = request.fallback or FallbackPolicy()
+        enabled = await self._db.get_enabled_provider_ids()
+
+        requested: RegistryModel | None = None
+        problem: _Problem | None = None
+        if request.model_id:
+            requested = await self._db.get_registry_model_by_id(
+                request.model_id, active_only=False
+            )
+            if requested is not None and not requested.supports(request.modality):
+                problem = _Problem(
+                    f"модель {request.model_id!r} не поддерживает модальность "
+                    f"{request.modality.value}",
+                    RouterError("modality mismatch"),
+                )
+            else:
+                problem = self._problem_with(requested, request.model_id, enabled)
+
+        attempts: list[Attempt] = []
+        blocked: str | None = None
+        try:
+            attempts = await self.plan(request, allow_sync=False)
+        except RouterError as exc:
+            blocked = str(exc)
+
+        exclude = {request.model_id} if request.model_id else set()
+        ladder = await self._ladder(
+            request, requested, policy, exclude, allow_sync=False
+        )
+
+        will_call = attempts[0].model if attempts else None
+        pool_total = len(
+            await self._registry.get_models(
+                modality=request.modality.value, allow_sync=False
+            )
+        )
+        return {
+            "modality": request.modality.value,
+            "requested": _pair(requested) if requested else (
+                {"provider": request.provider_hint, "model_id": request.model_id}
+                if request.model_id
+                else None
+            ),
+            "problem": problem.reason if problem else None,
+            "blocked": blocked,
+            "policy": {
+                "policy": policy.policy,
+                "scope": policy.scope,
+                "max_steps": policy.max_steps,
+            },
+            "considered": pool_total,
+            "eligible": sum(1 for c in ladder if c.verdict == "eligible"),
+            "candidates": [
+                {
+                    "rank": c.rank,
+                    "provider": c.model.service_provider_id,
+                    "model_id": c.model.model_id,
+                    "price_per_1m": round(c.price * 1e6, 6),
+                    "price_source_kind": c.model.price_source_kind,
+                    "verdict": c.verdict,
+                    "why": c.why,
+                }
+                for c in ladder[:20]
+            ],
+            "will_call": _pair(will_call) if will_call else None,
+            "estimate": self._estimate(request, will_call),
+            "plan": [
+                {
+                    "provider": a.model.service_provider_id,
+                    "model_id": a.model.model_id,
+                    "reason": a.reason,
+                }
+                for a in attempts
+            ],
+        }
+
+    def _estimate(
+        self, request: RouterRequest, model: RegistryModel | None
+    ) -> dict[str, Any]:
+        """A price before the money is spent.
+
+        The prompt is measured; the answer cannot be, so a fixed assumption is
+        used and stated. For the modalities with no pricing method at all the
+        answer is "неизвестна" — never a confident zero (§7.5).
+        """
+        if model is None:
+            return {"value": None, "source": "unpriced", "assumption": None}
+        if model.price_is_unknown:
+            return {
+                "value": None,
+                "source": "unpriced",
+                "assumption": "у модели нет цены в реестре",
+            }
+        if request.modality in (Modality.IMAGE, Modality.STT, Modality.TTS, Modality.CLI):
+            per_unit = {
+                Modality.IMAGE: model.image_price,
+                Modality.STT: model.audio_price_per_second,
+                Modality.TTS: model.audio_price_per_second,
+                Modality.CLI: 0.0,
+            }[request.modality]
+            if not per_unit:
+                return {
+                    "value": None,
+                    "source": "unpriced",
+                    "assumption": "для этой модальности ставки в реестре нет",
+                }
+            unit = "изображение" if request.modality is Modality.IMAGE else "секунду"
+            return {
+                "value": per_unit,
+                "source": "computed" if model.price_is_verified else "estimated",
+                "assumption": f"за одну {unit}",
+            }
+        text = request.text or json.dumps(request.messages or [], ensure_ascii=False)
+        # Four characters to a token is the usual rule of thumb; it is a rough
+        # figure and the screen says so rather than implying precision.
+        prompt_tokens = max(1, len(text) // 4)
+        completion_tokens = _ASSUMED_COMPLETION_TOKENS
+        value = (
+            prompt_tokens * model.prompt_price + completion_tokens * model.completion_price
+        )
+        return {
+            "value": value,
+            "source": "computed" if model.price_is_verified else "estimated",
+            "assumption": (
+                f"промпт ≈{prompt_tokens} токенов (по длине текста), "
+                f"ответ {completion_tokens} токенов"
+            ),
+        }
 
     async def dispatch(self, request: RouterRequest) -> DispatchResult:
         t0 = time.monotonic()

@@ -36,6 +36,11 @@ def model_to_dict(m: RegistryModel) -> dict[str, Any]:
         "price_source_kind": m.price_source_kind,
         "price_checked_at": m.price_checked_at,
         "price_is_verified": m.price_is_verified,
+        "price_is_unknown": m.price_is_unknown,
+        "updated_at": m.updated_at,
+        # Sent back on an edit as an optimistic lock: a second-resolution
+        # timestamp cannot tell two edits in the same second apart.
+        "revision": m.revision,
     }
 
 

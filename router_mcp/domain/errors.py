@@ -69,6 +69,13 @@ class UnknownModel(RouterError):
     http_status = 404
 
 
+class Conflict(RouterError):
+    """The resource changed under the caller (optimistic-lock failure)."""
+
+    code = "conflict"
+    http_status = 409
+
+
 class ModelRetired(RouterError):
     """The registry row exists but the provider has retired the model."""
 

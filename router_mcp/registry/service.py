@@ -150,9 +150,16 @@ class RegistryService:
         if old is None:
             return dataclasses.replace(fresh, last_seen_at=stamp, deprecated_at=None)
 
-        # Only a catalog that publishes prices may rewrite them, and only for
-        # rows an admin has not taken over.
-        prices_authoritative = fresh.price_source_kind == "api" and old.source != "manual"
+        # Only a catalog that publishes prices may rewrite them, and only where
+        # the stored price is not one a human put there.
+        #
+        # The criterion is the origin of the *price*, not the origin of the
+        # *row*. Keyed on the row, a price typed into a catalog row was wiped by
+        # the very next sync — which is where corrected prices went. Keyed on the
+        # price, the row stays a catalog row and keeps receiving name, context
+        # and modality updates while the number a human vouched for survives.
+        human_priced = old.price_source_kind in ("manual", "page")
+        prices_authoritative = fresh.price_source_kind == "api" and not human_priced
         if prices_authoritative:
             prices = {
                 "prompt_price": fresh.prompt_price,
@@ -195,8 +202,16 @@ class RegistryService:
         provider: str | None = None,
         force_refresh: bool = False,
         active_only: bool = True,
+        allow_sync: bool = True,
     ) -> list[RegistryModel]:
-        await self.sync_all(force=force_refresh)
+        """Registry rows, refreshing from the providers first if the TTL says so.
+
+        `allow_sync=False` is for the dry run: a plan that reaches out to every
+        provider's catalog is neither dry nor fast, and "показать план" promises
+        that nothing leaves the host.
+        """
+        if allow_sync:
+            await self.sync_all(force=force_refresh)
         return await self._db.list_registry_models(
             modality=modality,
             tier=tier,

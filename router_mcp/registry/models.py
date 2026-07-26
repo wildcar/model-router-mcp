@@ -48,6 +48,11 @@ class RegistryModel:
     price_source: str | None = None
     price_source_kind: str = "estimate"
     price_checked_at: str | None = None
+    # Last write to the row, both set by the database. `revision` is what the
+    # console sends back on an edit: a timestamp has second resolution, and two
+    # writes inside one second would slip through the optimistic lock.
+    updated_at: str | None = None
+    revision: int = 0
     extra: dict = field(default_factory=dict)
 
     @property

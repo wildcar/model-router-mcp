@@ -164,6 +164,8 @@ def _row_to_model(row: aiosqlite.Row) -> RegistryModel:
         price_source=row["price_source"],
         price_source_kind=row["price_source_kind"] or "estimate",
         price_checked_at=row["price_checked_at"],
+        updated_at=row["updated_at"],
+        revision=row["revision"],
     )
 
 
@@ -243,6 +245,10 @@ class Database:
                     price_source TEXT,
                     price_source_kind TEXT NOT NULL DEFAULT 'estimate',
                     price_checked_at DATETIME,
+                    -- Bumped on every write. The optimistic lock counts on it
+                    -- rather than on updated_at: two edits inside the same
+                    -- second carry the same timestamp and the lock would pass.
+                    revision INTEGER NOT NULL DEFAULT 0,
                     created_at DATETIME NOT NULL,
                     updated_at DATETIME NOT NULL,
                     UNIQUE(service_provider_id, model_id),
@@ -336,6 +342,7 @@ class Database:
             "price_source": "TEXT",
             "price_source_kind": "TEXT NOT NULL DEFAULT 'estimate'",
             "price_checked_at": "DATETIME",
+            "revision": "INTEGER NOT NULL DEFAULT 0",
         },
         "request_logs": {
             "finish_reason": "TEXT",
@@ -461,6 +468,7 @@ class Database:
                 VALUES ({", ".join("?" for _ in cols)}, ?, ?)
                 ON CONFLICT(service_provider_id, model_id) DO UPDATE SET
                     {", ".join(f"{c}=excluded.{c}" for c in cols if c not in ("service_provider_id", "model_id"))},
+                    revision=revision + 1,
                     updated_at=excluded.updated_at
                 """,
                 (*row.values(), _now(), _now()),
@@ -502,6 +510,7 @@ class Database:
                 SET is_active = 0,
                     deprecated_at = COALESCE(deprecated_at, ?),
                     replaced_by = COALESCE(?, replaced_by),
+                    revision = revision + 1,
                     updated_at = ?
                 WHERE service_provider_id = ? AND model_id = ?
                 """,
@@ -553,6 +562,66 @@ class Database:
             tuple(params),
         )
         return [_row_to_model(r) for r in rows]
+
+    async def get_registry_model(
+        self, service_provider_id: str, model_id: str
+    ) -> RegistryModel | None:
+        """One row by its pair — the way a model is actually addressed."""
+        row = await self._fetchone(
+            "SELECT * FROM registry_models WHERE service_provider_id = ? AND model_id = ?",
+            (service_provider_id, model_id),
+        )
+        return _row_to_model(row) if row is not None else None
+
+    # Columns a partial edit is allowed to touch. Everything else — the pair
+    # itself, `source`, `is_active`, the catalog dates — belongs to the sync, and
+    # the whole-row write that used to serve as "edit" quietly reset all of it.
+    _PATCHABLE_MODEL_COLUMNS = frozenset(
+        {
+            "display_name", "tier", "prompt_price", "completion_price",
+            "image_price", "audio_price_per_second", "context_length",
+            "pricing_mode", "subscription_id", "price_source",
+            "price_source_kind", "price_checked_at",
+        }
+    )
+
+    async def update_registry_model(
+        self,
+        service_provider_id: str,
+        model_id: str,
+        fields: dict[str, Any],
+        *,
+        if_revision: int | None = None,
+    ) -> RegistryModel | None:
+        """Write only the named columns. Returns None if the optimistic lock lost.
+
+        `if_revision` is the revision the operator's copy of the row carried; a
+        mismatch means a sync (or another tab) wrote in between, and silently
+        overwriting that is how a corrected price disappears.
+        """
+        unknown = set(fields) - self._PATCHABLE_MODEL_COLUMNS
+        if unknown:
+            raise ValueError(f"Not patchable: {sorted(unknown)}")
+        if not fields:
+            return await self.get_registry_model(service_provider_id, model_id)
+        assignments = ", ".join(f"{name} = ?" for name in fields)
+        params: list[Any] = [*fields.values(), _now(), service_provider_id, model_id]
+        guard = ""
+        if if_revision is not None:
+            guard = " AND revision = ?"
+            params.append(if_revision)
+        conn = await self._get_conn()
+        async with self._write_lock:
+            cur = await conn.execute(
+                f"UPDATE registry_models SET {assignments}, "
+                f"revision = revision + 1, updated_at = ? "
+                f"WHERE service_provider_id = ? AND model_id = ?{guard}",
+                tuple(params),
+            )
+            await conn.commit()
+            if cur.rowcount == 0:
+                return None
+        return await self.get_registry_model(service_provider_id, model_id)
 
     async def get_registry_model_by_id(
         self, model_id: str, *, active_only: bool = True
