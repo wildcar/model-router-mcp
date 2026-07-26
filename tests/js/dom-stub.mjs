@@ -47,6 +47,14 @@ class Node {
   get children() { return this.childNodes.filter((n) => n instanceof Node); }
   get firstChild() { return this.childNodes[0] || null; }
 
+  // Properties a browser reflects onto the attribute of the same name. Pages
+  // set them either way (`node.href = …` or `setAttribute`), and a stub that
+  // kept the two apart would report a link as empty when it is not.
+  get href() { return this.attributes.href ?? ''; }
+  set href(value) { this.attributes.href = String(value); }
+  get src() { return this.attributes.src ?? ''; }
+  set src(value) { this.attributes.src = String(value); }
+
   get className() { return this._className; }
   set className(value) {
     this._className = value || '';

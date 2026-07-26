@@ -45,6 +45,11 @@ function template(name) {
 const failures = [];
 const notes = [];
 
+/** Let the module's promise chain run to completion. */
+async function settle(turns = 30) {
+  for (let i = 0; i < turns; i += 1) await new Promise((r) => setImmediate(r));
+}
+
 function check(name, condition, detail = '') {
   if (condition) notes.push(`  ok   ${name}`);
   else failures.push(`  FAIL ${name}${detail ? ` — ${detail}` : ''}`);
@@ -63,11 +68,12 @@ async function runPage(page, templateName, assertions) {
     failures.push(`  FAIL ${page} threw on load — ${error.message}`);
     return;
   }
-  // Give the module's promise chain a few turns to settle.
-  for (let i = 0; i < 20; i += 1) await new Promise((r) => setImmediate(r));
+  await settle();
   if (errors.length) failures.push(`  FAIL ${page} rejected — ${errors[0]}`);
   console.log(`\n${page}: ${calls.length} запросов к API`);
-  assertions(doc, calls);
+  // Assertions may click something that loads asynchronously, so they get
+  // `settle` and may be async themselves.
+  await assertions(doc, calls, settle);
   console.log(notes.splice(0).join('\n'));
 }
 
@@ -82,7 +88,7 @@ await runPage('overview', 'overview', (doc) => {
     rowsOf(doc, 'errors') > 0 || doc.getElementById('no-errors')?.hidden === false);
 });
 
-await runPage('logs', 'logs', (doc) => {
+await runPage('logs', 'logs', async (doc, _calls, settleNow) => {
   check('журнал: строки отрисованы', rowsOf(doc, 'logs') > 0);
   check('журнал: подпись часового пояса на месте', text(doc, 'tz').includes('UTC'));
   check('журнал: счётчик показан', text(doc, 'count').includes('показано'));
@@ -90,6 +96,22 @@ await runPage('logs', 'logs', (doc) => {
   const body = doc.querySelector('#logs tbody');
   check('журнал: текст ошибки виден', body.textContent.includes('UnknownModel'),
     body.textContent.slice(0, 80));
+
+  // The spend tab renders from the same page module, and loads asynchronously.
+  doc.getElementById('tab-spend').dispatch('click');
+  await settleNow();
+  check('расход: вкладка открывается', doc.getElementById('pane-spend').hidden === false);
+  const totals = text(doc, 's-totals');
+  check('расход: подтверждённые и неподтверждённые ставки разведены',
+    totals.includes('подтверждённые ставки') && totals.includes('неподтверждённые ставки'),
+    totals.slice(0, 120));
+  check('расход: условная стоимость подписки названа отдельно',
+    totals.includes('не списывалась'));
+  check('расход: итог 12.00, без условных 0.84',
+    totals.includes('12.000000'), totals.slice(0, 200));
+  check('расход: строки сгруппированы', rowsOf(doc, 'spend') > 0);
+  check('расход: ссылка на выгрузку ведёт на CSV',
+    (doc.getElementById('s-export').attributes.href || '').includes('/usage/export'));
 });
 
 await runPage('models', 'models', (doc) => {

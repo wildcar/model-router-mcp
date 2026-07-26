@@ -136,3 +136,12 @@ table.kv th { width:38%; text-align:left; color:var(--muted); font-weight:400; v
 
 .sync-report { border-top:1px solid var(--border); padding-top:8px; margin-top:8px; font-size:12px; }
 .sync-report h4 { margin:0 0 4px; }
+
+/* Spend tab: four different kinds of money, kept visibly apart. */
+.totals-head { display:flex; gap:10px; align-items:baseline; margin-bottom:8px; }
+.totals-head b { font-size:20px; }
+.totals-list { list-style:none; padding:0; margin:0; font-size:12px; }
+.totals-list li { display:grid; grid-template-columns:220px 130px 1fr auto; gap:10px; padding:2px 0; }
+.spark { display:flex; align-items:flex-end; gap:2px; height:44px; margin:14px 0; }
+.spark-bar { width:8px; background:var(--accent); opacity:.7; border-radius:2px 2px 0 0; }
+.spark-bar:hover { opacity:1; }

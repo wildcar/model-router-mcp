@@ -9,6 +9,7 @@ import { el, row, clear, toast } from '../core/dom.js';
 import { costCell, localTime, money, timeZoneLabel, tokens, duration } from '../core/format.js';
 import { readParams, writeParams } from '../core/state.js';
 import { inspector } from '../components/inspector.js';
+import { initSpend, loadSpend } from './spend.js';
 
 const $ = (id) => document.getElementById(id);
 const PAGE_SIZE = 50;
@@ -27,20 +28,6 @@ function filters() {
     with_retries: $('f-retries').checked,
     unverified_cost: $('f-unverified').checked,
   };
-}
-
-async function loadUsage() {
-  const answer = await api('/usage');
-  const body = document.querySelector('#usage tbody');
-  clear(body);
-  for (const r of answer.items) {
-    body.appendChild(row([
-      r.external_user_id,
-      { text: r.requests, className: 'num' },
-      { text: r.total_tokens, className: 'num' },
-      { text: money(r.total_cost_usd), className: 'num' },
-    ]));
-  }
 }
 
 // The model cell says which pair actually ran and, when it is not the one that
@@ -155,7 +142,7 @@ function openDeepLink() {
 }
 
 function reload() {
-  Promise.all([loadUsage(), loadLogs()]).catch((e) => toast(`Ошибка: ${e.message}`, true));
+  loadLogs().catch((e) => toast(`Ошибка: ${e.message}`, true));
 }
 
 for (const id of ['f-user', 'f-status', 'f-modality', 'f-channel',
@@ -176,9 +163,28 @@ $('f-fallback').checked = initial.with_fallback === 'true';
 $('f-retries').checked = initial.with_retries === 'true';
 $('f-unverified').checked = initial.unverified_cost === 'true';
 
+// Which tab is open lives in the address, like every other bit of screen state.
+function showTab(name) {
+  const spend = name === 'spend';
+  $('pane-spend').hidden = !spend;
+  $('pane-requests').hidden = spend;
+  $('tab-spend').classList.toggle('active', spend);
+  $('tab-requests').classList.toggle('active', !spend);
+  writeParams({ ...readParams(), tab: spend ? 'spend' : undefined });
+  if (spend) loadSpend().catch((e) => toast(`Ошибка: ${e.message}`, true));
+}
+
+$('tab-requests').addEventListener('click', () => showTab('requests'));
+$('tab-spend').addEventListener('click', () => showTab('spend'));
+initSpend();
+
 // The glossary comes from the server so one concept keeps one name across the
 // table, the inspector and the reports.
 api('/capabilities')
   .then((caps) => { labels = caps.labels; })
   .catch(() => {})   // raw codes are ugly, never wrong
-  .finally(() => { reload(); openDeepLink(); });
+  .finally(() => {
+    reload();
+    openDeepLink();
+    if (readParams().tab === 'spend') showTab('spend');
+  });

@@ -1,14 +1,50 @@
 {% extends "base.html" %}
 {% block title %}Логи — Model Router{% endblock %}
 {% block content %}
-<section class="card">
-  <h2>Статистика по пользователям</h2>
-  <table id="usage"><thead><tr>
-    <th>Метка пользователя</th><th class="num">Запросов</th>
-    <th class="num">Токенов</th><th class="num">Стоимость, $</th>
-  </tr></thead><tbody></tbody></table>
-</section>
+{# Two tabs, not two screens: «Расход» is the same period and the same user
+   filter over the same rows, rendered differently (§13.1). #}
+<nav class="tabs" role="tablist">
+  <button type="button" id="tab-requests" class="tab active" role="tab">Запросы</button>
+  <button type="button" id="tab-spend" class="tab" role="tab">Расход</button>
+</nav>
 
+<div id="pane-spend" hidden>
+  <section class="card">
+    <div class="row">
+      <label>Период
+        <select id="s-period">
+          <option value="1">сутки</option>
+          <option value="7">7 дней</option>
+          <option value="30" selected>30 дней</option>
+          <option value="">всё время</option>
+        </select>
+      </label>
+      <label>Группировка
+        <select id="s-group">
+          <option value="user">пользователь</option>
+          <option value="model">модель</option>
+          <option value="provider">поставщик</option>
+          <option value="channel">канал</option>
+          <option value="day">день</option>
+        </select>
+      </label>
+      <span class="spacer"></span>
+      <a id="s-export" href="#" download>Выгрузить CSV</a>
+    </div>
+    <div id="s-totals" class="totals"></div>
+    <div id="s-spark" class="spark"></div>
+    <table id="spend"><thead><tr>
+      <th scope="col" id="s-bucket-head">Пользователь</th>
+      <th scope="col" class="num">Запросов</th>
+      <th scope="col" class="num">Токенов</th>
+      <th scope="col" class="num">промпт / кэш / рассуждение</th>
+      <th scope="col" class="num">$</th>
+      <th scope="col" class="num">подтверждено</th>
+    </tr></thead><tbody></tbody></table>
+  </section>
+</div>
+
+<div id="pane-requests">
 <section class="card" id="detail" hidden></section>
 
 <section class="card">
@@ -58,4 +94,5 @@
     <button id="more" type="button" hidden>Ещё 50</button>
   </div>
 </section>
+</div>
 {% endblock %}

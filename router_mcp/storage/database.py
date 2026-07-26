@@ -865,6 +865,110 @@ class Database:
         row = await self._fetchone("SELECT * FROM request_logs WHERE id = ?", (log_id,))
         return dict(row) if row is not None else None
 
+    # What a spend row can be grouped by. A closed map, not string
+    # interpolation: these go straight into GROUP BY.
+    USAGE_GROUPINGS = {
+        "user": "external_user_id",
+        "model": "model_id",
+        "provider": "service_provider_id",
+        "channel": "channel",
+        "day": "substr(created_at, 1, 10)",
+    }
+
+    # Sums that must never be added together. Real money, money that was never
+    # charged, and requests whose cost nobody can state are three different
+    # facts, and one total hides all three (§7.2, §7.3).
+    _CONFIRMED_SOURCES = ("computed", "provider", "manual")
+    _UNCONFIRMED_SOURCES = ("estimated",)
+    _NOTIONAL_SOURCES = ("provider_notional",)
+    _NO_METHOD_SOURCES = ("unpriced",)
+    _UNKNOWN_SOURCES = ("cost_unknown",)
+
+    async def get_spend(
+        self,
+        *,
+        group_by: str = "user",
+        external_user_id: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """Spend grouped one way, plus the totals split by how much to trust them.
+
+        Returns `(rows, totals)`. `totals` keeps confirmed, unconfirmed and
+        notional money apart and counts the requests nobody can price, so the
+        screen can label the sum a lower bound instead of a fact.
+        """
+        column = self.USAGE_GROUPINGS.get(group_by)
+        if column is None:
+            raise ValueError(f"Unknown grouping {group_by!r}")
+
+        clauses: list[str] = []
+        params: list[Any] = []
+        if external_user_id:
+            clauses.append("external_user_id = ?")
+            params.append(external_user_id)
+        if since:
+            clauses.append("created_at >= ?")
+            params.append(since)
+        if until:
+            clauses.append("created_at <= ?")
+            params.append(until)
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+
+        def _sum(sources: tuple[str, ...]) -> str:
+            listed = ", ".join(f"'{s}'" for s in sources)
+            return f"COALESCE(SUM(CASE WHEN cost_source IN ({listed}) THEN cost_usd END), 0)"
+
+        def _count(sources: tuple[str, ...]) -> str:
+            listed = ", ".join(f"'{s}'" for s in sources)
+            return f"SUM(CASE WHEN cost_source IN ({listed}) THEN 1 ELSE 0 END)"
+
+        select = f"""
+            SELECT {column} AS bucket,
+                   COUNT(*) AS requests,
+                   COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                   COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+                   COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+                   COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+                   COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
+                   {_sum(self._CONFIRMED_SOURCES)} AS confirmed_usd,
+                   {_sum(self._UNCONFIRMED_SOURCES)} AS unconfirmed_usd,
+                   {_sum(self._NOTIONAL_SOURCES)} AS notional_usd,
+                   {_count(self._NO_METHOD_SOURCES)} AS unpriced_requests,
+                   {_count(self._UNKNOWN_SOURCES)} AS unknown_requests,
+                   SUM(CASE WHEN status != 'ok' THEN 1 ELSE 0 END) AS errors
+            FROM request_logs
+            {where}
+            GROUP BY bucket
+        """
+        rows = await self._fetchall(select, tuple(params))
+        items = [dict(r) for r in rows]
+        for item in items:
+            money = item["confirmed_usd"] + item["unconfirmed_usd"]
+            item["total_usd"] = money
+            item["confirmed_share"] = (
+                item["confirmed_usd"] / money if money else None
+            )
+        items.sort(key=lambda r: r["total_usd"], reverse=True)
+
+        totals = {
+            "requests": sum(r["requests"] for r in items),
+            "total_tokens": sum(r["total_tokens"] for r in items),
+            "confirmed_usd": sum(r["confirmed_usd"] for r in items),
+            "unconfirmed_usd": sum(r["unconfirmed_usd"] for r in items),
+            "notional_usd": sum(r["notional_usd"] for r in items),
+            "unpriced_requests": sum(r["unpriced_requests"] for r in items),
+            "unknown_requests": sum(r["unknown_requests"] for r in items),
+            "errors": sum(r["errors"] for r in items),
+        }
+        totals["total_usd"] = totals["confirmed_usd"] + totals["unconfirmed_usd"]
+        # With unpriced or timed-out requests in the selection the sum is a floor
+        # and nothing else, and the screen has to say so.
+        totals["is_lower_bound"] = bool(
+            totals["unpriced_requests"] or totals["unknown_requests"]
+        )
+        return items, totals
+
     async def get_usage(
         self, *, external_user_id: str | None = None, since: str | None = None
     ) -> list[UsageRow]:

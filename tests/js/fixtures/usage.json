@@ -1,1 +1,89 @@
-{"items":[{"external_user_id":"web-tester","requests":1,"total_tokens":0,"total_cost_usd":0.0}],"total":1,"next_cursor":null,"facets":{}}
+{
+ "items": [
+  {
+   "bucket": "bot-77",
+   "requests": 3,
+   "total_tokens": 3003,
+   "prompt_tokens": 2400,
+   "completion_tokens": 0,
+   "cache_read_tokens": 600,
+   "reasoning_tokens": 150,
+   "confirmed_usd": 8.1,
+   "unconfirmed_usd": 3.9,
+   "notional_usd": 0.84,
+   "unpriced_requests": 0,
+   "unknown_requests": 0,
+   "errors": 0,
+   "total_usd": 12.0,
+   "confirmed_share": 0.6749999999999999
+  },
+  {
+   "bucket": "web-tester",
+   "requests": 2,
+   "total_tokens": 2007,
+   "prompt_tokens": 1600,
+   "completion_tokens": 0,
+   "cache_read_tokens": 400,
+   "reasoning_tokens": 100,
+   "confirmed_usd": 0,
+   "unconfirmed_usd": 0,
+   "notional_usd": 0,
+   "unpriced_requests": 1,
+   "unknown_requests": 1,
+   "errors": 0,
+   "total_usd": 0,
+   "confirmed_share": null
+  }
+ ],
+ "total": 2,
+ "next_cursor": null,
+ "facets": {
+  "totals": {
+   "requests": 5,
+   "total_tokens": 5010,
+   "confirmed_usd": 8.1,
+   "unconfirmed_usd": 3.9,
+   "notional_usd": 0.84,
+   "unpriced_requests": 1,
+   "unknown_requests": 1,
+   "errors": 0,
+   "total_usd": 12.0,
+   "is_lower_bound": true
+  },
+  "group_by": "user",
+  "groupings": [
+   "channel",
+   "day",
+   "model",
+   "provider",
+   "user"
+  ],
+  "daily": [
+   {
+    "day": "2026-07-20",
+    "requests": 1,
+    "usd": 8.1
+   },
+   {
+    "day": "2026-07-21",
+    "requests": 1,
+    "usd": 3.9
+   },
+   {
+    "day": "2026-07-22",
+    "requests": 1,
+    "usd": 0
+   },
+   {
+    "day": "2026-07-23",
+    "requests": 1,
+    "usd": 0
+   },
+   {
+    "day": "2026-07-24",
+    "requests": 1,
+    "usd": 0
+   }
+  ]
+ }
+}

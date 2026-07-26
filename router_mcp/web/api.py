@@ -13,6 +13,8 @@ the cursor or the provenance of a price.
 from __future__ import annotations
 
 import base64
+import csv
+import io
 from datetime import datetime, timezone
 from typing import Any
 
@@ -359,19 +361,76 @@ async def api_log(log_id: int) -> dict[str, Any]:
 
 
 @api_router.get("/usage")
-async def api_usage(user: str | None = None, since: str | None = None) -> dict[str, Any]:
+async def api_usage(
+    group_by: str = "user",
+    user: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+) -> dict[str, Any]:
+    """Spend, grouped, with the totals split by how much each number is worth.
+
+    Confirmed rates, unconfirmed rates, notional subscription money and the
+    requests nobody can price are four different facts; one total hides all
+    four, and `is_lower_bound` says when the sum is only a floor (§7.2).
+    """
     core = get_core()
-    rows = await core.db.get_usage(external_user_id=user, since=since)
-    items = [
-        {
-            "external_user_id": r.external_user_id,
-            "requests": r.requests,
-            "total_tokens": r.total_tokens,
-            "total_cost_usd": r.total_cost_usd,
-        }
-        for r in rows
+    try:
+        items, totals = await core.db.get_spend(
+            group_by=group_by, external_user_id=user, since=since, until=until
+        )
+    except ValueError as exc:
+        raise BadRequest(str(exc)) from exc
+    # Per-day series for the sparkline, independent of the chosen grouping.
+    daily, _ = await core.db.get_spend(
+        group_by="day", external_user_id=user, since=since, until=until
+    )
+    daily.sort(key=lambda r: r["bucket"])
+    return page(
+        items,
+        total=len(items),
+        facets={
+            "totals": totals,
+            "group_by": group_by,
+            "groupings": sorted(core.db.USAGE_GROUPINGS),
+            "daily": [
+                {"day": r["bucket"], "requests": r["requests"], "usd": r["total_usd"]}
+                for r in daily
+            ],
+        },
+    )
+
+
+@api_router.get("/usage/export")
+async def api_usage_export(
+    group_by: str = "user",
+    user: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+) -> Response:
+    """The same numbers as CSV. Columns stay split by price source: collapsing
+    them into one total in an export would launder the distinction the screen
+    works to keep."""
+    core = get_core()
+    try:
+        items, _totals = await core.db.get_spend(
+            group_by=group_by, external_user_id=user, since=since, until=until
+        )
+    except ValueError as exc:
+        raise BadRequest(str(exc)) from exc
+    columns = [
+        "bucket", "requests", "total_tokens", "prompt_tokens", "completion_tokens",
+        "cache_read_tokens", "reasoning_tokens", "confirmed_usd", "unconfirmed_usd",
+        "notional_usd", "unpriced_requests", "unknown_requests", "errors",
     ]
-    return page(items, total=len(items))
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=columns, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(items)
+    return Response(
+        content=buffer.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="usage-{group_by}.csv"'},
+    )
 
 
 # --- registry admin -----------------------------------------------------
