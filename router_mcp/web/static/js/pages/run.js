@@ -43,25 +43,38 @@ function providersFor(task) {
   return caps.providers.filter((p) => p.id in byTask);
 }
 
+// With a provider pinned the form is exact. Without one the router will choose,
+// and the candidates no longer agree on their knobs: codex-oauth answers text
+// with `instructions` and `reasoning_effort` where OpenRouter and DeepSeek take
+// `temperature` and `top_p`. The intersection of those is empty, so showing only
+// what every candidate accepts now means showing nothing at all.
+//
+// So the union, with each field naming the providers that read it. Sending a
+// field the chosen adapter ignores costs nothing and is reported afterwards as
+// «проигнорировано» — whereas a form with no fields hides half the API.
 function paramSpecs() {
   const provider = currentProvider();
   const byProvider = caps.params_by_task[currentTask()] || {};
   if (provider) return byProvider[provider]?.params || [];
 
-  // With no provider pinned the router will choose one, so the form shows the
-  // parameters every candidate accepts — a union would offer fields the chosen
-  // adapter drops. Configured providers are the candidates; if none is
-  // configured we fall back to all of them, because the form still has to
-  // describe what the request would take. The plan says separately that nothing
-  // can run.
+  const readers = new Map();   // param name -> [provider ids]
+  const specs = new Map();     // param name -> the spec, first one wins
   const configured = Object.entries(byProvider)
-    .filter(([id]) => caps.providers.find((p) => p.id === id)?.configured)
-    .map(([, spec]) => spec);
-  const entries = configured.length ? configured : Object.values(byProvider);
-  if (!entries.length) return [];
-  const [first, ...rest] = entries;
-  return first.params.filter(
-    (param) => rest.every((spec) => spec.params.some((p) => p.name === param.name)));
+    .filter(([id]) => caps.providers.find((p) => p.id === id)?.configured);
+  // Nothing configured yet is a first-run installation: describe what the
+  // request would take anyway. The plan says separately that nothing can run.
+  const entries = configured.length ? configured : Object.entries(byProvider);
+  for (const [id, spec] of entries) {
+    for (const param of spec.params) {
+      if (!specs.has(param.name)) specs.set(param.name, param);
+      readers.set(param.name, [...(readers.get(param.name) || []), id]);
+    }
+  }
+  return [...specs.values()].map((param) => {
+    const who = readers.get(param.name) || [];
+    if (who.length === entries.length) return param;
+    return { ...param, help: `${param.help} · читают: ${who.join(', ')}` };
+  });
 }
 
 function renderParams() {

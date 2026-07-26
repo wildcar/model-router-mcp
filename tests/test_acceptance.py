@@ -57,6 +57,9 @@ def live_server(tmp_path_factory):
         "ANTHROPIC_API_KEY": "",
         "DEEPGRAM_API_KEY": "",
         "ELEVENLABS_API_KEY": "",
+        "REPLICATE_API_TOKEN": "",
+        # A path rather than a key, and just as much a live credential.
+        "CODEX_AUTH_PATH": "",
         "AUTH_TOKEN": "",
     }
     process = subprocess.Popen(

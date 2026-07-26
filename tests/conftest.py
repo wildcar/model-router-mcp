@@ -27,14 +27,18 @@ def client(app_db_path, tmp_path_factory):
         DB_PATH=app_db_path,
         BLOB_DIR=str(tmp_path / "blobs"),
         LOG_FILE=str(tmp_path / "log.txt"),
-        # Every provider key is cleared explicitly: Settings still reads the
-        # repo .env, and a configured adapter would make the catalog sync call
-        # the real API during tests.
+        # Every credential is cleared explicitly: Settings still reads the repo
+        # .env, and a configured adapter would call the real API during tests.
         OPENROUTER_API_KEY=None,
         DEEPSEEK_API_KEY=None,
         ANTHROPIC_API_KEY=None,
         DEEPGRAM_API_KEY=None,
         ELEVENLABS_API_KEY=None,
+        REPLICATE_API_TOKEN=None,
+        # This one is a path, not a key, so it was missed while codex-oauth could
+        # only generate images and no test asked for one. The moment it also
+        # answered text, a chat run in the suite reached the live ChatGPT backend.
+        CODEX_AUTH_PATH=None,
         CATALOG_SYNC_INTERVAL_SECONDS=0,
     )
     with TestClient(build_app(settings)) as c:

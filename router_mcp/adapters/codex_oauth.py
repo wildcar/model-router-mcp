@@ -1,9 +1,21 @@
-"""Codex OAuth adapter — image generation via the ChatGPT backend.
+"""Codex OAuth adapter — text, vision and image generation via the ChatGPT backend.
 
-Ported from ort_bot/services/codex_image.py: loads an OAuth auth.json (flat or
-providers.openai-codex layout), streams a /responses image_generation call, and
-refreshes the access token on 401/403. Returns the generated PNG as bytes so the
-router persists it to the blob store.
+One credential, one endpoint (`/responses`), three tasks:
+
+* `text-to-text` and `image-to-text` — a plain streamed answer, no tools;
+* `text-to-image` — the same call with the `image_generation` tool required.
+
+It used to declare only image generation, which is where the taxonomy work
+started: the provider was tagged `{IMAGE}` because it can produce a picture, and
+that single fact said nothing about it also *reading* pictures and nothing about
+it being unable to *edit* one. `image-to-image` is still absent from
+`supported_tasks` — this backend cannot do it, and the router now refuses such a
+request instead of quietly sending it to gpt-image-2 and returning a brand-new
+image (ADR-0006).
+
+Loads an OAuth auth.json (flat or providers.openai-codex layout) and refreshes
+the access token on 401/403. Binary results come back as bytes so the router
+persists them to the blob store.
 
 NOTE: the OAuth refresh token is single-use and rotates on refresh, and OpenAI
 revokes the whole token family when a rotated-away token is reused (see
@@ -36,19 +48,21 @@ CODEX_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 CODEX_TOKEN_REFRESH_URL = "https://auth.openai.com/oauth/token"
 
 
-class CodexImageAdapter(ProviderAdapter):
+class CodexOAuthAdapter(ProviderAdapter):
     name = "codex-oauth"
     env_var = "CODEX_AUTH_PATH"
-    # Generation only, on purpose. The same backend answers text prompts and
-    # reads images, and that branch is a separate piece of work; declaring the
-    # capability before the code exists would lie to the router. Editing an
-    # existing image it cannot do at all, so `image-to-image` will never appear
-    # here and a request for it gets a clear refusal instead of quietly landing
-    # on gpt-image-2 (ADR-0006).
-    supported_tasks = {Task.TEXT_TO_IMAGE}
-    # Size, quality and both model ids are fixed by configuration; the caller
-    # only supplies the prompt.
-    SUPPORTED_PARAMS = {Task.TEXT_TO_IMAGE: ()}
+    # No `image-to-image`: this backend cannot change a picture it is given, and
+    # that absence is the whole point of declaring tasks rather than media.
+    supported_tasks = {Task.TEXT_TO_TEXT, Task.IMAGE_TO_TEXT, Task.TEXT_TO_IMAGE}
+    _TEXT_PARAMS = ("instructions", "reasoning_effort")
+    SUPPORTED_PARAMS = {
+        Task.TEXT_TO_TEXT: _TEXT_PARAMS,
+        Task.IMAGE_TO_TEXT: _TEXT_PARAMS,
+        # `size` and `quality` used to be reachable only through the environment,
+        # so the console described a fixed picture it could not change. The env
+        # values remain the defaults.
+        Task.TEXT_TO_IMAGE: ("size", "quality"),
+    }
 
     def __init__(
         self,
@@ -77,23 +91,164 @@ class CodexImageAdapter(ProviderAdapter):
         await self._client.aclose()
 
     async def generate(self, request: RouterRequest, model: RegistryModel) -> RouterResponse:
+        if request.task is Task.TEXT_TO_IMAGE:
+            return await self._generate_image(request, model)
+        return await self._generate_text(request, model)
+
+    # --- text and vision -------------------------------------------------
+    async def _generate_text(
+        self, request: RouterRequest, model: RegistryModel
+    ) -> RouterResponse:
+        payload = self._text_payload(request, model)
+        result = await self._with_recovery(payload, self._read_text_stream)
+        text, usage_raw = result
+        if not text.strip():
+            raise ProviderError(
+                f"Codex model {model.model_id or self._main_model} returned no text"
+            )
+        return RouterResponse(
+            task=request.task,
+            provider=self.name,
+            model_id=model.model_id or self._main_model,
+            usage=self._parse_usage(usage_raw),
+            text=text,
+            raw_meta={"provider_request_id": (usage_raw or {}).get("response_id")},
+        )
+
+    def _text_payload(self, request: RouterRequest, model: RegistryModel) -> dict[str, Any]:
+        content: list[dict[str, Any]] = []
+        prompt = (request.text or "").strip()
+        if prompt:
+            content.append({"type": "input_text", "text": prompt})
+        # Images travel as data URIs, which is the only form `/responses` takes
+        # inline; the router has already loaded the bytes from the blob store.
+        for att in request.attachments:
+            if att.kind != "image":
+                continue
+            uri = att.url or self._data_uri(att)
+            if uri:
+                content.append({"type": "input_image", "image_url": uri})
+        if not content:
+            raise ProviderError("Request carries neither text nor an image")
+
+        payload: dict[str, Any] = {
+            "model": model.model_id or self._main_model,
+            "store": False,
+            "stream": True,
+            "input": self._history(request) + [
+                {"type": "message", "role": "user", "content": content}
+            ],
+        }
+        instructions = request.params.get("instructions")
+        if instructions:
+            payload["instructions"] = str(instructions)
+        effort = request.params.get("reasoning_effort")
+        if effort:
+            payload["reasoning"] = {"effort": str(effort)}
+        return payload
+
+    @staticmethod
+    def _history(request: RouterRequest) -> list[dict[str, Any]]:
+        """Earlier turns, when the caller sent a history rather than one prompt."""
+        out: list[dict[str, Any]] = []
+        for message in request.messages or []:
+            role = str(message.get("role") or "user")
+            text = message.get("content")
+            if not isinstance(text, str) or not text.strip():
+                continue
+            kind = "output_text" if role == "assistant" else "input_text"
+            out.append(
+                {"type": "message", "role": role, "content": [{"type": kind, "text": text}]}
+            )
+        return out
+
+    @staticmethod
+    def _data_uri(att: Attachment) -> str | None:
+        if not att.data:
+            return None
+        return f"data:{att.mime};base64,{base64.b64encode(att.data).decode()}"
+
+    @staticmethod
+    def _parse_usage(raw: dict[str, Any] | None) -> Usage:
+        """`/responses` reports `input_tokens`/`output_tokens`, with the cached
+        part *inside* the input total — which is the contract `Usage` wants, so
+        the cache count is recorded without adjusting the prompt figure."""
+        block = (raw or {}).get("usage") or {}
+        details = block.get("input_tokens_details") or {}
+        return Usage(
+            prompt_tokens=block.get("input_tokens"),
+            completion_tokens=block.get("output_tokens"),
+            total_tokens=block.get("total_tokens"),
+            cache_read_tokens=details.get("cached_tokens"),
+            reasoning_tokens=(block.get("output_tokens_details") or {}).get(
+                "reasoning_tokens"
+            ),
+            raw=dict(block),
+        )
+
+    async def _read_text_stream(self, response: httpx.Response) -> tuple[str, dict[str, Any]]:
+        """Assemble the answer from the delta events, and keep the final usage.
+
+        Deltas are joined with no separator: they are token fragments, and a
+        newline between them would mangle every answer.
+        """
+        chunks: list[str] = []
+        final: dict[str, Any] = {}
+        async for event in self._events(response):
+            kind = event.get("type")
+            if kind == "response.output_text.delta":
+                delta = event.get("delta")
+                if isinstance(delta, str):
+                    chunks.append(delta)
+            elif kind in ("response.completed", "response.incomplete"):
+                payload = event.get("response") or {}
+                final = {
+                    "usage": payload.get("usage") or {},
+                    "response_id": payload.get("id"),
+                    "status": payload.get("status"),
+                }
+            elif kind == "error":
+                raise ProviderError(str(event.get("message") or "Codex stream error"))
+        if not chunks:
+            # Some models answer in one piece rather than in deltas.
+            text = self._text_from_output(final)
+            if text:
+                chunks.append(text)
+        return "".join(chunks), final
+
+    @staticmethod
+    def _text_from_output(final: dict[str, Any]) -> str:
+        parts: list[str] = []
+        for item in (final.get("output") or []):
+            for piece in (item or {}).get("content") or []:
+                value = (piece or {}).get("text")
+                if isinstance(value, str):
+                    parts.append(value)
+        return "".join(parts)
+
+    # --- image generation ------------------------------------------------
+    async def _generate_image(
+        self, request: RouterRequest, model: RegistryModel
+    ) -> RouterResponse:
         prompt = (request.text or "").strip()
         if not prompt:
             raise ProviderError("generate_image requires a non-empty `prompt`")
-        tokens = self._load_tokens()
-        try:
-            data_uri = await self._generate_with_tokens(prompt, tokens)
-        except AccessDenied:
-            refreshed = await self._recover_tokens(tokens)
-            data_uri = await self._generate_with_tokens(prompt, refreshed)
+        size = str(request.params.get("size") or self._size)
+        quality = str(request.params.get("quality") or self._quality)
+        payload = self._payload(prompt, size=size, quality=quality)
 
-        raw_b64 = data_uri.split(",", 1)[1]
-        image_bytes = base64.b64decode(raw_b64)
+        async def read(response: httpx.Response) -> str | None:
+            return await self._extract_image_b64_from_stream(response)
+
+        image_b64 = await self._with_recovery(payload, read)
+        if not image_b64:
+            raise ProviderError("Codex image backend returned no image")
+        image_bytes = base64.b64decode(image_b64)
         return RouterResponse(
             task=Task.TEXT_TO_IMAGE,
             provider=self.name,
             model_id=model.model_id or self._image_model,
-            usage=Usage(images=1, raw={"size": self._size, "quality": self._quality}),
+            usage=Usage(images=1, raw={"size": size, "quality": quality}),
             attachments=[Attachment(kind="image", mime="image/png", data=image_bytes)],
         )
 
@@ -152,7 +307,7 @@ class CodexImageAdapter(ProviderAdapter):
             "ChatGPT-Account-ID": resolved or "",
         }
 
-    def _payload(self, prompt: str) -> dict[str, Any]:
+    def _payload(self, prompt: str, *, size: str, quality: str) -> dict[str, Any]:
         return {
             "model": self._main_model,
             "store": False,
@@ -168,8 +323,8 @@ class CodexImageAdapter(ProviderAdapter):
                 {
                     "type": "image_generation",
                     "model": self._image_model,
-                    "size": self._size,
-                    "quality": self._quality,
+                    "size": size,
+                    "quality": quality,
                     "output_format": "png",
                     "background": "opaque",
                     "partial_images": 1,
@@ -182,10 +337,25 @@ class CodexImageAdapter(ProviderAdapter):
             },
         }
 
-    async def _generate_with_tokens(self, prompt: str, tokens: dict[str, str]) -> str:
+    async def _with_recovery(self, payload: dict[str, Any], read: Any) -> Any:
+        """One `/responses` call, retried once on an expired token.
+
+        The token dance is identical for text and for images, so it lives here
+        rather than in each branch: two copies of a single-use-refresh-token
+        recovery is two chances to break the rotation chain.
+        """
+        tokens = self._load_tokens()
+        try:
+            return await self._stream(payload, tokens, read)
+        except AccessDenied:
+            refreshed = await self._recover_tokens(tokens)
+            return await self._stream(payload, refreshed, read)
+
+    async def _stream(
+        self, payload: dict[str, Any], tokens: dict[str, str], read: Any
+    ) -> Any:
         access_token = tokens["access_token"]
         account_id = tokens.get("account_id")
-        payload = self._payload(prompt)
         response: httpx.Response | None = None
         for attempt in range(1, self._retries + 2):
             try:
@@ -200,24 +370,21 @@ class CodexImageAdapter(ProviderAdapter):
                     if response.status_code in (429, 500, 502, 503, 504):
                         if attempt > self._retries:
                             raise ProviderUnavailable(
-                                f"Codex image backend unavailable: HTTP {response.status_code}"
+                                f"Codex backend unavailable: HTTP {response.status_code}"
                             )
                         continue
                     if response.status_code >= 400:
                         body = (await response.aread()).decode("utf-8", errors="replace")
                         raise ProviderError(
-                            f"Codex image backend error HTTP {response.status_code}: {body[:500]}"
+                            f"Codex backend error HTTP {response.status_code}: {body[:500]}"
                         )
-                    image_b64 = await self._extract_image_b64_from_stream(response)
-                    if image_b64:
-                        return f"data:image/png;base64,{image_b64}"
-                    raise ProviderError("Codex image backend returned no image")
+                    return await read(response)
             except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
                 if attempt > self._retries:
-                    raise ProviderUnavailable("Could not reach Codex image backend") from exc
+                    raise ProviderUnavailable("Could not reach the Codex backend") from exc
                 continue
         status = response.status_code if response is not None else "unknown"
-        raise ProviderUnavailable(f"Codex image backend unavailable: {status}")
+        raise ProviderUnavailable(f"Codex backend unavailable: {status}")
 
     async def _recover_tokens(self, failed: dict[str, str]) -> dict[str, str]:
         """After a 401/403, prefer tokens another writer (the codex CLI shares
@@ -263,8 +430,10 @@ class CodexImageAdapter(ProviderAdapter):
         assert self._auth_path is not None
         self._auth_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
-    async def _extract_image_b64_from_stream(self, response: httpx.Response) -> str | None:
-        latest_partial: str | None = None
+    @staticmethod
+    async def _events(response: httpx.Response) -> Any:
+        """The SSE stream as parsed JSON objects. Shared by both branches, so the
+        framing is understood in one place."""
         async for raw_line in response.aiter_lines():
             line = raw_line.strip()
             if not line or line.startswith(":") or not line.startswith("data:"):
@@ -276,9 +445,15 @@ class CodexImageAdapter(ProviderAdapter):
                 event = json.loads(data)
             except json.JSONDecodeError:
                 continue
-            event_type = event.get("type") if isinstance(event, dict) else None
+            if isinstance(event, dict):
+                yield event
+
+    async def _extract_image_b64_from_stream(self, response: httpx.Response) -> str | None:
+        latest_partial: str | None = None
+        async for event in self._events(response):
+            event_type = event.get("type")
             if event_type == "error":
-                message = event.get("message") if isinstance(event, dict) else None
+                message = event.get("message")
                 raise ProviderError(str(message or "Codex image stream returned an error"))
             found = self._extract_image_b64(event)
             if found:

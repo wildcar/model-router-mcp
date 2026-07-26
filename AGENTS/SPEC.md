@@ -29,7 +29,7 @@ service and administering the registry.
 ```
 MCP client ─┐                         ┌─ adapters/* (one per provider):
             ├─→ FastAPI app ──────────┤    openrouter (chat+image), deepseek &
-Web browser ┘   ├─ /mcp  (FastMCP …)  │    claude_api (chat), codex_image (image),
+Web browser ┘   ├─ /mcp  (FastMCP …)  │    claude_api (chat), codex_oauth (text/vision/image),
                 │                     │    deepgram (stt), elevenlabs (tts),
                 │                     └    codex_cli & claude_cli (cli)
                 ├─ /api/v1/* (JSON API; also mounted at /api for old pages)
@@ -472,7 +472,7 @@ router_mcp/
   domain/              modality, messages, errors, progress (pure types and
                        the ContextVar sink work in flight reports through)
   adapters/            base (ABC + RetryClientMixin), _subprocess (CLI helper),
-                       openrouter, deepseek, claude_api, codex_image, deepgram,
+                       openrouter, deepseek, claude_api, codex_oauth, deepgram,
                        elevenlabs, codex_cli, claude_cli
   registry/            models (RegistryModel), service (per-provider catalog sync)
   routing/router.py    ModelRouter.resolve + dispatch

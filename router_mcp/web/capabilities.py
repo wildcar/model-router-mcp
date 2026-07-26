@@ -66,6 +66,26 @@ PARAM_SPECS: dict[str, dict[str, Any]] = {
         "Имеет смысл только у рассуждающих моделей; остальные его игнорируют",
         default=None,
     ),
+    "size": _param(
+        "size", "select", "Размер картинки",
+        "Ширина на высоту в пикселях. Пусто — размер из настроек сервера",
+        options=["1024x1024", "1024x1536", "1536x1024"], default=None,
+    ),
+    "quality": _param(
+        "quality", "select", "Качество картинки",
+        "Выше качество — дольше и дороже",
+        options=["low", "medium", "high"], default=None,
+    ),
+    "instructions": _param(
+        "instructions", "text", "Системная инструкция",
+        "Что модели держать в голове поверх запроса. Пусто — без инструкции",
+        default=None,
+    ),
+    "reasoning_effort": _param(
+        "reasoning_effort", "select", "Глубина рассуждения",
+        "Сколько модели думать перед ответом. Дольше — дороже",
+        options=["low", "medium", "high"], default=None,
+    ),
     "voice": _param(
         "voice", "text", "Голос",
         "Имя или идентификатор голоса у поставщика. Пусто — голос по умолчанию",

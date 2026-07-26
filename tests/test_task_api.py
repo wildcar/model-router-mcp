@@ -69,8 +69,10 @@ def test_capabilities_still_carries_the_group_keyed_matrix(client):
 def test_a_provider_lists_its_tasks(client):
     providers = {p["id"]: p for p in client.get("/api/v1/capabilities").json()["providers"]}
     codex = providers["codex-oauth"]
-    assert codex["tasks"] == ["text-to-image"]
-    assert codex["modalities"] == ["image"]
+    # Three tasks behind one credential, and editing is deliberately not one.
+    assert codex["tasks"] == ["image-to-text", "text-to-image", "text-to-text"]
+    assert "image-to-image" not in codex["tasks"]
+    assert codex["modalities"] == ["chat", "image"]
 
 
 def test_the_log_can_be_filtered_by_task(client):

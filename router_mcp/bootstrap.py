@@ -15,7 +15,7 @@ from router_mcp.adapters.claude_api import PRICING_PAGE as anthropic_pricing_pag
 from router_mcp.adapters.claude_api import ClaudeApiAdapter
 from router_mcp.adapters.claude_cli import ClaudeCliAdapter
 from router_mcp.adapters.codex_cli import CodexCliAdapter
-from router_mcp.adapters.codex_image import CodexImageAdapter
+from router_mcp.adapters.codex_oauth import CodexOAuthAdapter
 from router_mcp.adapters.deepgram import DeepgramAdapter
 from router_mcp.adapters.deepseek import PRICING_PAGE as deepseek_pricing_page
 from router_mcp.adapters.deepseek import DeepSeekAdapter
@@ -86,6 +86,7 @@ def _seed_model(
     name: str,
     task: Task,
     price_source: str | None = None,
+    extra_tasks: tuple[Task, ...] = (),
     **prices,
 ) -> RegistryModel:
     """A fixed-catalog registry row for a provider without a live catalog."""
@@ -95,7 +96,7 @@ def _seed_model(
         model_id=model_id,
         display_name=name,
         modalities=(),
-        tasks=(task,),
+        tasks=(task, *extra_tasks),
         tier=prices.pop("tier", "expensive"),
         source="seed",
         price_source=price_source,
@@ -149,11 +150,11 @@ def _build_adapters(settings: Settings) -> list[ProviderSpec]:
         ),
         ProviderSpec(
             id="codex-oauth",
-            display_name="Codex (OAuth image)",
-            adapter_key="codex_image",
+            display_name="Codex (OAuth)",
+            adapter_key="codex_oauth",
             base_url=settings.codex_base_url,
             pricing_url="https://platform.openai.com/docs/pricing",
-            adapter=CodexImageAdapter(
+            adapter=CodexOAuthAdapter(
                 auth_path=settings.codex_auth_path,
                 base_url=settings.codex_base_url,
                 main_model=settings.codex_image_main_model,
@@ -161,11 +162,19 @@ def _build_adapters(settings: Settings) -> list[ProviderSpec]:
                 size=settings.codex_image_size,
                 quality=settings.codex_image_quality,
             ),
+            # Two models, because there are two: the image tool and the model
+            # that answers text and reads pictures. One seeded row was why the
+            # provider looked like it could only draw.
             seed_models=[
                 _seed_model(
                     "codex-oauth", "openai", settings.codex_image_tool_model,
                     "Codex image generation", Task.TEXT_TO_IMAGE, tier="expensive",
-                )
+                ),
+                _seed_model(
+                    "codex-oauth", "openai", settings.codex_image_main_model,
+                    "Codex (текст и vision)", Task.TEXT_TO_TEXT, tier="expensive",
+                    extra_tasks=(Task.IMAGE_TO_TEXT,),
+                ),
             ],
         ),
         ProviderSpec(
