@@ -213,6 +213,11 @@ it as a managed service on this host.
   a «Запрос» tab and a second JSON block; «Ответ» still opens first. Text is cut
   at 4000 characters, the history at 50 messages, both stated on screen. Rows
   written before the column show their `request_text` and nothing invented.
+  Deployed and verified on prod (2026-07-26 15:45 UTC, `2dc723a`): the column
+  came by migration on the first restart, a failure that never reached a provider
+  keeps its request (#8221), a message history round-trips (#8222, #8223), and
+  #8218 from before the change opens with its text and nulls. Those three rows
+  under `request-tab-check` are verification, not traffic.
 - ✅ Tests green: `pytest` (173 passed). Three harnesses: pytest for the service,
   `tests/js/` for the page modules under node against a stub DOM, and Playwright
   for the acceptance list. The last two skip when node or the browser is absent —
