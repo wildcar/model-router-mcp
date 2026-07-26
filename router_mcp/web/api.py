@@ -698,8 +698,14 @@ class ModelPatch(BaseModel):
 
     prompt_price: float | None = None       # USD per 1M tokens, as shown
     completion_price: float | None = None   # USD per 1M tokens, as shown
+    # Also per 1M tokens: a cached prompt token is billed at its own rate, and
+    # without it accounting charges cache reads at the prompt rate and marks the
+    # whole figure estimated.
+    cache_read_price: float | None = None
+    cache_write_price: float | None = None
     image_price: float | None = None
     audio_price_per_second: float | None = None
+    character_price: float | None = None    # USD per character (TTS)
     display_name: str | None = None
     tier: str | None = None
     price_source: str | None = None
@@ -733,12 +739,15 @@ async def api_patch_model(
         for name, per_million in (
             ("prompt_price", body.prompt_price),
             ("completion_price", body.completion_price),
+            ("cache_read_price", body.cache_read_price),
+            ("cache_write_price", body.cache_write_price),
         ):
             if per_million is not None:
                 fields[name] = per_million / 1e6
         for name, value in (
             ("image_price", body.image_price),
             ("audio_price_per_second", body.audio_price_per_second),
+            ("character_price", body.character_price),
             ("display_name", body.display_name),
             ("tier", body.tier),
             ("price_source", body.price_source),
@@ -750,7 +759,8 @@ async def api_patch_model(
         touched_price = any(
             k in fields
             for k in ("prompt_price", "completion_price", "image_price",
-                      "audio_price_per_second")
+                      "audio_price_per_second", "character_price",
+                      "cache_read_price", "cache_write_price")
         )
         if touched_price:
             # A hand-entered price survives synchronisation, and the criterion is

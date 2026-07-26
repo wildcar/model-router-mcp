@@ -174,3 +174,26 @@ def test_api_patch_round_trip(client):
 def test_api_patch_unknown_pair_is_404(client):
     r = client.patch("/api/v1/registry/models/openrouter/nope/nope", json={"tier": "cheap"})
     assert r.status_code == 404
+
+
+def test_cache_rates_are_reachable_through_the_api(client):
+    """Without this field accounting charges cache reads at the prompt rate and
+    marks the whole figure estimated — a several-fold overstatement that has to
+    be fixable from the console, not only from SQL."""
+    client.post(
+        "/api/v1/registry/models",
+        json={
+            "service_provider_id": "deepseek",
+            "model_id": "demo/cached",
+            "modalities": ["chat"],
+        },
+    )
+    patched = client.patch(
+        "/api/v1/registry/models/deepseek/demo/cached",
+        json={"prompt_price": 0.435, "completion_price": 0.87,
+              "cache_read_price": 0.003625},
+    ).json()
+    assert patched["prompt_price"] == pytest.approx(0.435e-6)
+    assert patched["cache_read_price"] == pytest.approx(0.003625e-6)
+    # Touching a cache rate is touching a price, so provenance follows.
+    assert patched["price_source_kind"] == "manual"

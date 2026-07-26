@@ -245,6 +245,16 @@ function select(model) {
   card.appendChild(el('h3', 'Цены'));
   card.appendChild(priceField('edit-prompt', 'Промпт', model.prompt_price));
   card.appendChild(priceField('edit-completion', 'Ответ', model.completion_price));
+  // A cached prompt token costs roughly a tenth of a fresh one. Leaving this at
+  // zero means accounting charges cache reads at the prompt rate and marks the
+  // whole figure estimated, so the field has to be reachable.
+  card.appendChild(priceField('edit-cache-read', 'Чтение кэша', model.cache_read_price));
+  if (!model.cache_read_price) {
+    card.appendChild(el('p',
+      'Ставка чтения кэша не задана: кэшированные токены считаются по цене промпта, '
+      + 'и вся сумма помечается прикидкой.',
+      { className: 'hint warn' }));
+  }
 
   const origin = caps.labels.price_source_kinds[model.price_source_kind];
   card.appendChild(el('p', `Откуда: ${origin?.label || model.price_source_kind}`,
@@ -285,12 +295,16 @@ function confirmJump(name, was, now) {
 async function save(model) {
   const prompt = Number($('edit-prompt').value);
   const completion = Number($('edit-completion').value);
+  const cacheRead = Number($('edit-cache-read').value);
   if (!confirmJump('Промпт', model.prompt_price * 1e6, prompt)) return;
   if (!confirmJump('Ответ', model.completion_price * 1e6, completion)) return;
   const updated = await api(
     `/registry/models/${encodeURIComponent(model.service_provider)}/${model.model_id}`,
     { method: 'PATCH', body: {
-      prompt_price: prompt, completion_price: completion, revision: model.revision } });
+      prompt_price: prompt,
+      completion_price: completion,
+      cache_read_price: cacheRead,
+      revision: model.revision } });
   toast('Цена сохранена');
   replace(updated);
 }
