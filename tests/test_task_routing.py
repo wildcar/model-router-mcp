@@ -260,3 +260,19 @@ async def test_every_attachment_is_stored_not_only_the_first(core):
     router._persist_request_attachment(request)
     assert all(att.ref for att in request.attachments)
     assert len(set(blobs.list_refs()) - before) == 2
+
+
+async def test_the_dry_run_names_the_task_not_the_group(core):
+    """«не поддерживает модальность image» was wrong twice over: wrong word, and
+    the model does bill in that group — it just cannot do this with it."""
+    router, _, _ = core
+    plan = await router.explain(
+        RouterRequest(
+            task=Task.IMAGE_TO_IMAGE,
+            external_user_id="u",
+            model_id="gen-only",
+            text="правь",
+            attachments=[Attachment(kind="image", mime="image/png", data=b"png")],
+        )
+    )
+    assert plan["problem"] == "модель 'gen-only' не умеет image-to-image"

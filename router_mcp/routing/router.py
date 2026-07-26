@@ -512,9 +512,12 @@ class ModelRouter:
             )
             if requested is not None and not requested.supports(request.task):
                 problem = _Problem(
-                    f"модель {request.model_id!r} не поддерживает модальность "
-                    f"{request.modality.value}",
-                    RouterError("modality mismatch"),
+                    # The task, not the group: «не поддерживает модальность image»
+                    # was both the wrong word and the wrong fact — the model does
+                    # bill in that group, it just cannot do this with it.
+                    f"модель {request.model_id!r} не умеет "
+                    f"{request.task.value}",
+                    RouterError("task mismatch"),
                 )
             else:
                 problem = self._problem_with(requested, request.model_id, enabled)
