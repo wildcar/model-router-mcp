@@ -75,8 +75,7 @@ async function loadProviders() {
   const tb = document.querySelector('#providers tbody');
   tb.innerHTML = '';
   for (const p of ps) {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${p.id}</td><td>${p.display_name}</td><td>${p.adapter}</td>`;
+    const tr = row([p.id, p.display_name, p.adapter]);
     const td = document.createElement('td');
     const cb = document.createElement('input');
     cb.type = 'checkbox'; cb.checked = p.enabled;
@@ -161,11 +160,15 @@ async function loadModels() {
   const tb = document.querySelector('#models tbody');
   tb.innerHTML = '';
   for (const m of models.slice(0, 1000)) {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${m.service_provider}</td><td>${m.model_id}</td>` +
-      `<td>${m.modalities.join(',')}</td><td>${m.tier}</td>` +
-      `<td class="num">${pricePerMillion(m.prompt_price)}</td>` +
-      `<td class="num">${pricePerMillion(m.completion_price)}</td><td>${m.source}</td>`;
+    const tr = row([
+      m.service_provider,
+      m.model_id,
+      m.modalities.join(','),
+      m.tier,
+      { text: pricePerMillion(m.prompt_price), className: 'num' },
+      { text: pricePerMillion(m.completion_price), className: 'num' },
+      m.source,
+    ]);
     tr.appendChild(priceOriginCell(m));
     tr.appendChild(statusCell(m));
     const td = document.createElement('td');

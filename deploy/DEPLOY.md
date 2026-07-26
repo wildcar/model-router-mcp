@@ -85,6 +85,17 @@ sudo certbot --nginx -d router.example.com
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
+Timeouts matter here: `/mcp` and `/api/cli` get 3600s, the rest of the console
+600s. nginx defaults to 60s when `proxy_read_timeout` is unset, which answers 504
+on a long `codex`/`claude` run while the subprocess keeps working. After editing
+the config on a host that already runs it, copy it over and reload:
+
+```bash
+sudo cp deploy/nginx-model-router.conf /etc/nginx/sites-available/model-router
+# re-apply your server_name edit, then
+sudo nginx -t && sudo systemctl reload nginx
+```
+
 ## Updating (routine)
 
 ```bash

@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-07-26 · Console UI concept v2 plus two P1 fixes it surfaced
+- What: `docs/UI_CONCEPT.md` (v1, superseded) plus three reviews in `docs/reviews/` merged into `docs/UI_CONCEPT_v2.md`; fixed the two defects the reviews found in existing code - stored XSS in the console tables (`el()`/`row()` helpers, no `innerHTML` with data, regression test) and the missing nginx read timeout that answered 504 on long CLI runs.
+- Why: The console showed the result and hid the path (plan, retries, raw JSON, latency, error text all exist in the data and never reached the screen); the two fixes are prerequisites for any UI work.
+- Files: docs/UI_CONCEPT.md, docs/UI_CONCEPT_v2.md, docs/reviews/*, router_mcp/web/static/app.js, router_mcp/web/templates/{logs,registry,test}.html, tests/test_escaping.py, deploy/{nginx-model-router.conf,DEPLOY.md}, AGENTS/STATE.md
+- Next: copy the nginx config to prod and reload; decide whether wave 0 of the concept starts now.
+
 ## 2026-07-25 · Registry freshness: sync, price provenance, fallback
 - What: `ResponseTruncated` + logged `finish_reason`; per-provider `list_catalog()` with TTL/background/manual sync that deprecates (never deletes) retired models and stops seeds resurrecting them; price provenance fields with `cost_source='estimated'` for unconfirmed prices; per-request fallback policy (same/cheaper/pricier) with the substitution reported in the response and the log.
 - Why: User feedback after the DeepSeek v4-pro switch: the registry served retired ids, a max_tokens cutoff read as "empty response", and the v4-pro price was copied from deepseek-chat.

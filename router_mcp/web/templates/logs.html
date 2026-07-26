@@ -28,10 +28,12 @@ async function loadUsage() {
   const tb = document.querySelector('#usage tbody');
   tb.innerHTML = '';
   for (const r of rows) {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${r.external_user_id}</td><td>${r.requests}</td>` +
-      `<td>${r.total_tokens}</td><td>${(r.total_cost_usd ?? 0).toFixed(6)}</td>`;
-    tb.appendChild(tr);
+    tb.appendChild(row([
+      r.external_user_id,
+      r.requests,
+      r.total_tokens,
+      (r.total_cost_usd ?? 0).toFixed(6),
+    ]));
   }
 }
 
@@ -43,20 +45,28 @@ async function loadLogs() {
   const tb = document.querySelector('#logs tbody');
   tb.innerHTML = '';
   for (const r of rows) {
-    const tr = document.createElement('tr');
-    const status = r.status === 'ok' ? r.status : `<span class="err">${r.status}</span>`;
     // A substituted model and an estimated price both have to be visible here:
     // the log is where a surprising bill gets explained.
     const model = r.requested_model_id
-      ? `<span title="Запрошена ${r.requested_model_id}: ${(r.fallback_reason || '').replace(/"/g, '&quot;')}">${r.model_id ?? '–'} ⇄</span>`
-      : (r.model_id ?? '–');
-    const cost = (r.cost_usd ?? 0).toFixed(6) +
-      (r.cost_source === 'estimated' ? ' <span title="Цена модели не подтверждена">≈</span>' : '');
-    tr.innerHTML = `<td>${r.id}</td><td>${r.created_at}</td><td>${r.external_user_id}</td>` +
-      `<td>${model}</td><td>${r.modality}</td><td>${status}</td>` +
-      `<td>${r.total_tokens ?? '–'}</td><td>${cost}</td>` +
-      `<td class="trunc" title="${(r.request_text || '').replace(/"/g, '&quot;')}">${(r.request_text || '').slice(0, 60)}</td>`;
-    tb.appendChild(tr);
+      ? el('span', `${r.model_id ?? '–'} ⇄`,
+           { title: `Запрошена ${r.requested_model_id}: ${r.fallback_reason || ''}` })
+      : el('span', r.model_id ?? '–');
+    const cost = el('span', (r.cost_usd ?? 0).toFixed(6));
+    if (r.cost_source === 'estimated') {
+      cost.appendChild(el('span', ' ≈', { title: 'Цена модели не подтверждена' }));
+    }
+    tb.appendChild(row([
+      r.id,
+      r.created_at,
+      r.external_user_id,
+      { node: model },
+      r.modality,
+      r.status === 'ok' ? r.status : el('td', r.status, { className: 'err' }),
+      r.total_tokens ?? '–',
+      { node: cost },
+      { text: (r.request_text || '').slice(0, 60), className: 'trunc',
+        title: r.request_text || '' },
+    ]));
   }
 }
 

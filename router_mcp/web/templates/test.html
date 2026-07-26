@@ -205,17 +205,29 @@ function onModalityChange() {
 
 function showMeta(res) {
   const u = res.usage || {};
-  const bits = [`Провайдер: <b>${res.provider}</b>`, `Модель: <b>${res.model_id}</b>`];
+  // Provider-echoed values (model ids, substitution reasons) land here, so the
+  // line is assembled from text nodes rather than an HTML string.
+  const bits = [
+    ['Провайдер: ', res.provider],
+    ['Модель: ', res.model_id],
+  ];
   if (res.requested_model_id) {
-    bits.push(`<b>Подмена</b>: запрошена ${res.requested_model_id} (${res.fallback_reason})`);
+    bits.push(['Подмена: ', `запрошена ${res.requested_model_id} (${res.fallback_reason})`]);
   }
   if (u.total_tokens != null) {
-    bits.push(`Токены (промпт/ответ): ${u.prompt_tokens ?? '–'}/${u.completion_tokens ?? '–'}`);
+    bits.push(['Токены (промпт/ответ): ', `${u.prompt_tokens ?? '–'}/${u.completion_tokens ?? '–'}`]);
   }
-  if (u.audio_seconds != null) bits.push(`Аудио: ${u.audio_seconds}s`);
-  if (u.images != null) bits.push(`Изображений: ${u.images}`);
-  bits.push(`Стоимость: <b>$${(res.cost_usd ?? 0).toFixed(6)}</b> (${res.cost_source})`);
-  $('meta').innerHTML = bits.join(' · ');
+  if (u.audio_seconds != null) bits.push(['Аудио: ', `${u.audio_seconds}s`]);
+  if (u.images != null) bits.push(['Изображений: ', String(u.images)]);
+  bits.push(['Стоимость: ', `$${(res.cost_usd ?? 0).toFixed(6)} (${res.cost_source})`]);
+
+  const meta = $('meta');
+  meta.textContent = '';
+  bits.forEach(([label, value], i) => {
+    if (i) meta.appendChild(document.createTextNode(' · '));
+    meta.appendChild(document.createTextNode(label));
+    meta.appendChild(el('b', value));
+  });
 }
 
 function resetResult() {

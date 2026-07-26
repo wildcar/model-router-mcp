@@ -73,7 +73,26 @@ it as a managed service on this host.
   4. Fallback policy per request: `{policy: same|cheaper|pricier, max_steps, scope}`
      on chat/image/tts/stt (API + MCP), substitutions reported via
      `requested_model_id` / `fallback_reason` in the response and the log.
-- ✅ Tests green: `pytest` (48 passed). Note: `tests/test_web.py` now clears every
+- ✅ UI/UX concept for the console, v2 (2026-07-26): `docs/UI_CONCEPT.md` (first
+  pass, superseded), three reviews in `docs/reviews/` (API/MCP, frontend
+  architecture, unprepared operator), and `docs/UI_CONCEPT_v2.md` merging them.
+  Five screens instead of seven, a glossary with visible field captions, a
+  six-state money model, output-escaping rules, an in-process run registry with
+  polling instead of SSE. Backend asks are split into wave 0..3 with contracts;
+  nothing implemented yet.
+- ✅ Two P1 defects found by the reviews, both fixed (2026-07-26):
+  1. Stored XSS: the log/registry/test pages built rows by interpolating
+     `external_user_id`, `request_text`, `model_id` and `fallback_reason` into
+     `innerHTML`. `el()`/`row()` helpers in `static/app.js` now set text as text;
+     `tests/test_escaping.py` fails the build if `innerHTML` is ever assigned
+     anything but an empty literal. Verified by running the real template scripts
+     against a stub DOM with `<img onerror>` payloads.
+  2. nginx `location /` had no `proxy_read_timeout`, so `POST /api/cli` answered
+     504 after 60s while the subprocess kept running (adapter limit 1800s). A
+     dedicated `location ~ ^/api/(cli|runs)` gets 3600s with buffering off; the
+     rest of the console gets 600s (image generation allows 180s plus a retry).
+     Needs `cp` + `nginx -t` + reload on the prod host, see `deploy/DEPLOY.md`.
+- ✅ Tests green: `pytest` (51 passed). Note: `tests/test_web.py` now clears every
   provider key explicitly — Settings still reads the repo `.env`, and a configured
   adapter made the sync call the live DeepSeek API during tests.
 - ✅ Process: humanizer-ru skill vendored to `.claude/skills/humanizer-ru/` and made
@@ -84,6 +103,11 @@ it as a managed service on this host.
 - Deploy the registry-freshness pack to prod, run `POST /api/registry/refresh`
   there, and fill real prices for the live DeepSeek models in `/registry`
   (they arrive from the catalog with `price_source_kind='unknown'`).
+- Copy the updated nginx config to the prod host and reload it, then re-run a
+  long `/api/cli` request to confirm the 504 is gone.
+- Decide whether to start wave 0 of `docs/UI_CONCEPT_v2.md` (the remaining items
+  are the unified `Run` envelope, the error contract, the log-column projection
+  and the `request_logs` migration).
 - Phase 5 (cont.): subscription/amortization UI; tune seed prices.
 - Phase 6: hardening, optional streaming for long CLI/chat runs.
 
