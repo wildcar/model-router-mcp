@@ -69,6 +69,9 @@ on it; adapters never touch storage/mcp directly.
 18. ✅ Web contract: `/api/v1`, the `Run` envelope, the typed error envelope, `{items, total, next_cursor, facets}` lists, cursor-paged and column-projected log. [console wave 0]
 19. ✅ Call provenance and execution detail in the log: channel/tool/client, HTTP retries, upstream status and request id, token breakdown (cache/reasoning), `finished_at`.
 20. ✅ Response files are served safely: MIME whitelist for inline rendering, `nosniff`, immutable cache, byte ranges.
+21. ✅ Capabilities: the parameter matrix is derived from adapters (`SUPPORTED_PARAMS`), served with the glossary and the server-fixed settings. [console wave 1]
+22. ✅ Dry run: `POST /api/v1/plan` explains what would happen without touching the network, and answers even when nothing can run.
+23. ✅ Console screens: five-item navigation, the «Прогон» form built from capabilities, one inspector with a two-level timeline over the `Run` envelope, partial price editing with provenance-based protection.
 
 ## Catalog freshness, price provenance, fallback
 
@@ -216,6 +219,70 @@ Blobs render inline only for `image/*` and `audio/*`; everything else is
 immutable long cache (the ref is generated per payload) and byte-range support
 so an audio player can seek.
 
+## Console contract (21–23)
+
+Wave 1 of `docs/UI_CONCEPT_v2.md`.
+
+### Capabilities
+
+`GET /api/v1/capabilities` answers with `providers`, `params`, `server`,
+`labels` and a `schema_version`. `params` is keyed modality → provider and comes
+from `ProviderAdapter.SUPPORTED_PARAMS` (see the ADR-0001 addendum), with
+per-provider `model_overrides` for what a pair cannot express. `server` lists
+what the caller cannot change — timeouts, retries, allowed cwd roots — as
+derived facts plus the *name* of the environment variable, never a value or a
+path. `labels` is the glossary from `web/labels.py`: one word per concept, in
+one file, each with the visible explanation that belongs under a control rather
+than in a tooltip.
+
+### Dry run
+
+`POST /api/v1/plan` returns the requested pair, the problem with it if any, the
+policy in words, the candidate ladder with a verdict and a reason per model, the
+pair that would be called, and a cost estimate that states its assumption. Two
+invariants: it never reaches the network (`RegistryService.get_models` grew
+`allow_sync=False`), and it answers 200 even when nothing can run, because
+"почему запрос не ушёл" is the case the screen exists for.
+
+### Registry edits
+
+`GET /api/v1/registry/tree` builds the picker cascade (provider → vendor →
+family → variant, with counts and prices) server-side; splitting `model_id` in
+the browser guesses at a structure the database stores in its own column.
+
+`PATCH /api/v1/registry/models/{provider}/{model_id}` writes only the columns it
+is given, out of a closed set that excludes the pair, `source`, `is_active` and
+the catalog dates. Prices arrive as USD per million and are stored per token.
+Concurrency is guarded by a `revision` counter, not by `updated_at`: a
+second-resolution timestamp cannot tell two edits inside one second apart.
+
+Price protection is keyed on the origin of the **price**, not of the row. A
+number a human vouched for (`price_source_kind` of `manual` or `page`) survives
+synchronisation while the row stays a catalog row and keeps receiving name,
+context and modality updates. `revert_price` hands it back to the catalog.
+
+### Screens
+
+Five: Обзор · Прогон · Модели · Журнал · Подключения. Filters, search, page,
+sorting, the selected row, the active tab and `?log=` live in the address; the
+live tail, collapsed nodes, the prompt draft and the theme do not.
+
+The «Прогон» form is generated from capabilities, so a field is present exactly
+when the adapter behind the chosen pair reads it. Model choice has two modes
+(Авто with the server's reason line, and Выбрать самому with the server-built
+cascade plus a `model_id` field that reports found / retired / provider-off as
+it is typed). Fallback is one select in plain words, with `max_steps` under
+"ещё настройки". The plan is recomputed 300 ms after any discrete change, and
+the send button carries the estimate.
+
+One inspector component serves «Прогон» and «Журнал», over the single `Run`
+envelope, with four tabs — Ответ, Шаги, JSON, Сырьё. Its timeline has two
+levels: provider attempts, and the HTTP retries inside each one with the wait
+the provider asked for.
+
+Frontend stack: native ES modules, no htmx, no Alpine, no build step — see
+ADR-0005, which supersedes §18 of the concept.
+
 ## Project structure
 
 ```
@@ -237,16 +304,23 @@ router_mcp/
   blobs/store.py       on-disk blob store
   mcp_server/          tools (FastMCP), serialize
   web/                 api (JSON, mounted at /api/v1 and /api), views (Run and
-                       error envelopes), pages (Jinja2 frames), templates/,
+                       error envelopes), capabilities (matrix from adapters),
+                       labels (the glossary), pages (Jinja2 frames), templates/,
                        static/{app.css, css/tokens.css,
-                       js/core/{api,dom,format,state,keys}.js, js/pages/*.js}
+                       js/core/{api,dom,format,state,keys}.js,
+                       js/components/{json-view,inspector,timeline}.js,
+                       js/pages/{run,models,logs,overview,connections}.js}
 tests/                 conftest (one app per session), test_smoke (chain),
                        test_web (app), test_web_views (envelope parity),
                        test_api_filters (log filters/cursor), test_blobs
                        (file-serving headers), test_escaping (no innerHTML),
+                       test_capabilities (matrix matches the adapters),
+                       test_plan (dry run stays offline), test_registry_patch
+                       (partial edit, price survives sync), test_pages_js
+                       (page modules against a stub DOM, skipped without node),
                        test_modalities, test_adapters_parse, test_cli,
                        test_fallback, test_registry_sync, test_auth;
-                       mcp_probe.py (manual)
+                       js/ (DOM stub + API fixtures), mcp_probe.py (manual)
 ```
 
 Frontend rule: templates are markup only; behaviour lives in native ES modules

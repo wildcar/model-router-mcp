@@ -11,11 +11,15 @@
 </head>
 <body>
   <header>
-    <h1>Model Router MCP</h1>
+    <h1>Model Router</h1>
+    {# Five items, not seven: «Матрица» became a mode of «Прогон», «Расход» a tab
+       of «Журнал», and MCP a tab of «Подключения» (§9). #}
     <nav>
-      <a href="/" class="{{ 'active' if active == 'test' else '' }}">Тестирование</a>
-      <a href="/registry" class="{{ 'active' if active == 'registry' else '' }}">Реестр</a>
-      <a href="/logs" class="{{ 'active' if active == 'logs' else '' }}">Логи</a>
+      <a href="/overview" class="{{ 'active' if active == 'overview' }}">Обзор</a>
+      <a href="/" class="{{ 'active' if active == 'run' }}">Прогон</a>
+      <a href="/models" class="{{ 'active' if active == 'models' }}">Модели</a>
+      <a href="/logs" class="{{ 'active' if active == 'logs' }}">Журнал</a>
+      <a href="/connections" class="{{ 'active' if active == 'connections' }}">Подключения</a>
       <span class="spacer"></span>
       <a href="/mcp" title="MCP Streamable HTTP endpoint">/mcp</a>
     </nav>

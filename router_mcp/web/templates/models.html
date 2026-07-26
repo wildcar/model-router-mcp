@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Модели — Model Router{% endblock %}
+{% block content %}
+<div class="models-layout">
+  <section class="card">
+    <div class="row">
+      <label class="grow">Поиск <input id="search" type="search" placeholder="model_id или название"></label>
+      <label>Строка
+        <select id="f-source">
+          <option value="">все</option>
+          <option value="catalog">из каталога</option>
+          <option value="manual">добавлена вручную</option>
+          <option value="seed">из заготовки</option>
+        </select>
+      </label>
+      <label>Модальность
+        <select id="f-modality">
+          <option value="">все</option>
+          <option value="chat">chat</option>
+          <option value="image">image</option>
+          <option value="stt">stt</option>
+          <option value="tts">tts</option>
+          <option value="cli">cli</option>
+        </select>
+      </label>
+      <button id="reload" type="button">Обновить</button>
+      <button id="add-model" type="button">Добавить вручную</button>
+    </div>
+    <p class="hint">Цены в <b>USD за 1&nbsp;000&nbsp;000 токенов</b>.
+      <b>Промпт</b> — входные токены, <b>Ответ</b> — выходные.
+      Щёлкните строку, чтобы открыть карточку.</p>
+    <table id="models"><thead><tr>
+      <th scope="col">Поставщик</th><th scope="col">model_id</th>
+      <th scope="col">Мод.</th><th scope="col">Уровень</th>
+      <th scope="col" class="num">Промпт, $/1M</th><th scope="col" class="num">Ответ, $/1M</th>
+      <th scope="col">Цена откуда</th><th scope="col">Состояние</th>
+    </tr></thead><tbody></tbody></table>
+    <p id="count" class="hint"></p>
+  </section>
+
+  <aside class="card model-card" id="card" hidden></aside>
+</div>
+{% endblock %}

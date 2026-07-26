@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Обзор — Model Router{% endblock %}
+{% block content %}
+{# The health summary, the error feed and the work list need
+   /api/v1/health/summary, which is wave 2. What this screen can already answer
+   honestly is the first-run question: which providers are configured, whether
+   the registry has anything in it, and what to do next (§14). #}
+<section class="card" id="first-run" hidden>
+  <h2>Сервис запущен, данных пока нет</h2>
+  <ol id="steps"></ol>
+  <p class="hint">Сервис отправляет запросы к разным моделям через один интерфейс,
+    считает стоимость и пишет журнал. Консоль нужна для проверки и настройки.</p>
+</section>
+
+<div class="tiles">
+  <section class="card tile">
+    <h3>Поставщики</h3>
+    <p class="big num" id="providers-count">—</p>
+    <p class="hint" id="providers-detail"></p>
+    <a href="/connections">подробнее →</a>
+  </section>
+  <section class="card tile">
+    <h3>Реестр</h3>
+    <p class="big num" id="models-count">—</p>
+    <p class="hint" id="models-detail"></p>
+    <a href="/models">открыть →</a>
+  </section>
+  <section class="card tile">
+    <h3>За сутки</h3>
+    <p class="big num" id="requests-count">—</p>
+    <p class="hint" id="requests-detail"></p>
+    <a href="/logs">журнал →</a>
+  </section>
+</div>
+
+<section class="card">
+  <h2>Последние ошибки</h2>
+  <table id="errors"><thead><tr>
+    <th scope="col">Время</th><th scope="col">Метка</th><th scope="col">Канал</th>
+    <th scope="col">Мод.</th><th scope="col">Ошибка</th><th scope="col"></th>
+  </tr></thead><tbody></tbody></table>
+  <p id="no-errors" class="hint" hidden>Ошибок за последние сутки нет.</p>
+</section>
+{% endblock %}

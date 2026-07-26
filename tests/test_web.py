@@ -16,10 +16,25 @@ def test_health_is_status_only(client):
 
 
 def test_pages_render(client):
-    for path in ("/", "/registry", "/logs"):
+    for path in ("/", "/overview", "/models", "/logs", "/connections"):
         r = client.get(path)
         assert r.status_code == 200
         assert "Model Router" in r.text
+
+
+def test_navigation_has_five_items(client):
+    """Five, not seven: «Матрица» is a mode of «Прогон», «Расход» a tab of
+    «Журнал», MCP a tab of «Подключения» (§9)."""
+    body = client.get("/").text
+    for item in ("Обзор", "Прогон", "Модели", "Журнал", "Подключения"):
+        assert f">{item}</a>" in body
+
+
+def test_old_registry_link_still_resolves(client):
+    """The screen split in two; a bookmark must not 404."""
+    r = client.get("/registry", follow_redirects=False)
+    assert r.status_code == 301
+    assert r.headers["location"] == "/models"
 
 
 def test_models_filtered_unknown_modality_empty(client):

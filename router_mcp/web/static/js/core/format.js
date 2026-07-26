@@ -16,24 +16,30 @@ export function money(value) {
   return Number(value).toFixed(6);
 }
 
-// The six states a cost can be in, as a short marker plus a spelled-out title.
-// A bare number would let an unconfirmed rate pass for a confirmed one.
-const COST_SOURCES = {
-  computed: { mark: '', title: 'Ставка подтверждена каталогом' },
-  provider: { mark: '✓', title: 'Сумму назвал провайдер' },
-  estimated: { mark: '≈', title: 'Ставка не подтверждена' },
-  manual: { mark: '✎', title: 'Цену ввёл администратор' },
-  amortized: { mark: '∿', title: 'Размазано по подписке' },
-  provider_notional: { mark: '( )', title: 'Условная стоимость: работа по подписке, деньги не списывались' },
-  unpriced: { mark: '—', title: 'Методики цены нет: потребление есть, ставка нулевая' },
-  cost_unknown: { mark: '?', title: 'Ответ не дошёл: запрос, скорее всего, отработан и оплачен' },
+// The marker each price state wears. The wording comes from the server
+// glossary (`labels.cost_sources`) so one concept keeps one name across the
+// form, the table, the facet and the report; only the symbol lives here,
+// because it is presentation.
+const COST_MARKS = {
+  computed: '',
+  provider: '✓',
+  estimated: '≈',
+  manual: '✎',
+  amortized: '∿',
+  provider_notional: '( )',
+  unpriced: '—',
+  cost_unknown: '?',
 };
 
-export function costCell(value, source) {
-  const spec = COST_SOURCES[source] || { mark: '?', title: `Источник цены: ${source ?? 'неизвестен'}` };
+// A figure with no source is the kind of confidently wrong number the console
+// exists to prevent, so the marker and the explanation are not optional.
+export function costCell(value, source, labels = null) {
+  const spec = labels?.cost_sources?.[source];
+  const title = spec ? `${spec.label} — ${spec.help}` : `Источник цены: ${source ?? 'неизвестен'}`;
   const known = source !== 'unpriced' && source !== 'cost_unknown';
-  const node = el('span', known ? money(value) : '—', { className: 'num', title: spec.title });
-  if (spec.mark) node.appendChild(el('span', ` ${spec.mark}`, { className: 'muted' }));
+  const node = el('span', known ? money(value) : '—', { className: 'num', title });
+  const mark = COST_MARKS[source] ?? '?';
+  if (mark) node.appendChild(el('span', ` ${mark}`, { className: 'muted' }));
   return node;
 }
 

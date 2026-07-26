@@ -1,0 +1,70 @@
+{
+ "modality": "chat",
+ "requested": null,
+ "problem": null,
+ "blocked": null,
+ "policy": {
+  "policy": "off",
+  "scope": "provider",
+  "max_steps": 1
+ },
+ "considered": 350,
+ "eligible": 345,
+ "candidates": [
+  {
+   "rank": 1,
+   "provider": "openrouter",
+   "model_id": "openrouter/auto",
+   "price_per_1m": -2000000.0,
+   "price_source_kind": "api",
+   "verdict": "eligible",
+   "why": "ближайшая ступень"
+  },
+  {
+   "rank": 2,
+   "provider": "openrouter",
+   "model_id": "openrouter/auto-beta",
+   "price_per_1m": -2000000.0,
+   "price_source_kind": "api",
+   "verdict": "eligible",
+   "why": "дальше по лестнице"
+  },
+  {
+   "rank": 3,
+   "provider": "openrouter",
+   "model_id": "openrouter/bodybuilder",
+   "price_per_1m": -2000000.0,
+   "price_source_kind": "api",
+   "verdict": "eligible",
+   "why": "дальше по лестнице"
+  },
+  {
+   "rank": 4,
+   "provider": "openrouter",
+   "model_id": "openrouter/fusion",
+   "price_per_1m": -2000000.0,
+   "price_source_kind": "api",
+   "verdict": "eligible",
+   "why": "дальше по лестнице"
+  }
+ ],
+ "will_call": {
+  "provider": "openrouter",
+  "model_id": "cohere/north-mini-code:free",
+  "display_name": "Cohere: North Mini Code (free)",
+  "is_active": true,
+  "deprecated_at": null
+ },
+ "estimate": {
+  "value": 0.0,
+  "source": "computed",
+  "assumption": "промпт ≈1 токенов (по длине текста), ответ 500 токенов"
+ },
+ "plan": [
+  {
+   "provider": "openrouter",
+   "model_id": "cohere/north-mini-code:free",
+   "reason": null
+  }
+ ]
+}

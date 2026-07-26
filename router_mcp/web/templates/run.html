@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}Прогон — Model Router{% endblock %}
+{% block content %}
+{# Two columns: the request on the left, the result on the right. Everything
+   inside the request column is filled by static/js/pages/run.js from
+   /api/v1/capabilities — a field exists here only when the adapter behind the
+   chosen pair reads it (§5). #}
+<div class="run-layout">
+  <section class="card run-request">
+    <h2>Запрос</h2>
+
+    <div class="row">
+      <label>Модальность
+        <select id="modality"></select>
+        <span class="under">Какого рода запрос</span>
+      </label>
+      <label>Метка пользователя
+        <input id="user" type="text" value="web-tester">
+        <span class="under">Любая строка для группировки статистики.
+          На доступ и маршрутизацию не влияет</span>
+      </label>
+    </div>
+
+    <fieldset class="block">
+      <legend>Модель
+        <span class="segmented" role="tablist">
+          <button type="button" id="mode-auto" class="seg active" role="tab">Авто</button>
+          <button type="button" id="mode-pick" class="seg" role="tab">Выбрать самому</button>
+        </span>
+      </legend>
+
+      <div id="auto-block">
+        <div class="row">
+          <label>Ценовой уровень
+            <select id="tier">
+              <option value="">— любой —</option>
+              <option value="free">free</option>
+              <option value="cheap">cheap</option>
+              <option value="expensive">expensive</option>
+            </select>
+            <span class="under">Проставлен в реестре по сумме ставок</span>
+          </label>
+          <label>Поставщик
+            <select id="auto-provider"><option value="">— любой —</option></select>
+            <span class="under">Через кого идёт запрос и чей ключ тратится</span>
+          </label>
+        </div>
+        <p id="auto-choice" class="hint"></p>
+      </div>
+
+      <div id="pick-block" hidden>
+        <div class="row">
+          <label>Поставщик
+            <select id="sel-provider"><option value="">— любой —</option></select>
+            <span class="under">Через кого идёт запрос</span>
+          </label>
+          <label>Вендор
+            <select id="sel-vendor"><option value="">— любой —</option></select>
+            <span class="under">Кто сделал модель</span>
+          </label>
+        </div>
+        <div class="row">
+          <label class="grow">Модель
+            <select id="sel-family"><option value="">— любая —</option></select>
+          </label>
+          <label class="grow">Вариант
+            <select id="sel-variant"><option value="">— любой —</option></select>
+          </label>
+        </div>
+        <label class="grow">model_id
+          <input id="model-id" type="text" placeholder="напр. openai/gpt-4o-mini">
+          <span class="under" id="model-id-state"></span>
+        </label>
+      </div>
+      <p id="registry-freshness" class="hint"></p>
+    </fieldset>
+
+    <fieldset class="block">
+      <legend>Если модель недоступна</legend>
+      <select id="fallback"></select>
+      <details id="more-fallback">
+        <summary>ещё настройки</summary>
+        <label>Сколько замен пробовать
+          <input id="fallback-steps" type="number" min="0" max="5" value="1">
+        </label>
+      </details>
+    </fieldset>
+
+    <fieldset class="block" id="params-block">
+      <legend>Параметры генерации</legend>
+      <div class="row" id="params"></div>
+      <p id="params-empty" class="hint" hidden>
+        Адаптер этого поставщика не читает ни одного параметра генерации.
+      </p>
+    </fieldset>
+
+    <fieldset class="block">
+      <legend>Промпт</legend>
+      <label class="grow" id="text-field">
+        <textarea id="prompt" rows="6" placeholder="Введите текст…"></textarea>
+        <span class="under">Черновик сохраняется в браузере автоматически</span>
+      </label>
+      <label class="grow" id="file-field" hidden>Аудиофайл для распознавания
+        <input id="audio" type="file" accept="audio/*">
+      </label>
+    </fieldset>
+
+    <details class="block" id="server-block">
+      <summary>🔒 Настройки сервера</summary>
+      <table class="kv"><tbody id="server-settings"></tbody></table>
+      <p class="hint">Значения задаются в <code>.env</code> и перезапуском сервиса.
+        Секреты и пути на экране не показываются.</p>
+    </details>
+
+    <div class="row actions">
+      <button id="show-plan" type="button">Показать план</button>
+      <span class="hint">ничего не отправляем и не тратим</span>
+      <span class="spacer"></span>
+      <button id="send" type="button" class="primary">Отправить</button>
+    </div>
+  </section>
+
+  <section class="card run-result">
+    <h2>Результат</h2>
+    <div id="plan" class="plan" hidden></div>
+    <div id="inspector"></div>
+    <p id="result-empty" class="hint">Ответ появится здесь. Ctrl+Enter отправляет.</p>
+  </section>
+</div>
+
+<section class="card" id="feed-card" hidden>
+  <h2>Последние прогоны</h2>
+  <div id="feed" class="feed"></div>
+</section>
+{% endblock %}

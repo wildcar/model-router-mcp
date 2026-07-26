@@ -1,0 +1,55 @@
+{
+ "schema_version": 1,
+ "run_id": null,
+ "log_id": 4821,
+ "status": "ok",
+ "modality": "chat",
+ "channel": "ui",
+ "tool": null,
+ "client_id": null,
+ "model": {"provider": "deepseek", "model_id": "deepseek-chat", "display_name": "deepseek-chat"},
+ "requested_model": "deepseek-v4-pro",
+ "fallback": {
+  "kind": "after_failure",
+  "trigger": "deepseek-v4-pro",
+  "reason": "deepseek-v4-pro failed: RateLimited: HTTP 429"
+ },
+ "usage": {
+  "prompt": 1042, "completion": 318, "total": 1360,
+  "cache_read": 890, "cache_write": null, "reasoning": 120,
+  "audio_seconds": null, "images": null, "characters": null,
+  "raw": {"prompt_tokens": 1042, "prompt_cache_hit_tokens": 890, "completion_tokens": 318}
+ },
+ "cost": {"value": 0.000412, "source": "estimated", "breakdown": []},
+ "latency_ms": 8420,
+ "attempts": 3,
+ "provider_status": 200,
+ "provider_request_id": "req-77f0",
+ "finish_reason": "length",
+ "created_at": "2026-07-26T09:22:07+00:00",
+ "finished_at": "2026-07-26T09:22:15+00:00",
+ "text": "Привет. Ниже разбор по пунктам… <script>alert(1)</script>",
+ "steps": [
+  {"at_ms": 0, "kind": "plan", "title": "plan built",
+   "planned": [{"provider": "deepseek", "model_id": "deepseek-v4-pro"},
+               {"provider": "deepseek", "model_id": "deepseek-chat"}]},
+  {"at_ms": 2, "kind": "attempt", "title": "attempt 1", "provider": "deepseek",
+   "model_id": "deepseek-v4-pro", "status": "error", "reason": null,
+   "error": "RateLimited: HTTP 429",
+   "retries": [
+    {"at_ms": 0, "status": 429, "retry_after_s": 5, "wait_s": 5},
+    {"at_ms": 5412, "status": 429, "retry_after_s": 3, "wait_s": 3}
+   ]},
+  {"at_ms": 8020, "kind": "attempt", "title": "attempt 2", "provider": "deepseek",
+   "model_id": "deepseek-chat", "status": "ok",
+   "reason": "deepseek-v4-pro failed: RateLimited: HTTP 429",
+   "retries": [{"at_ms": 0, "status": 200}]},
+  {"at_ms": 8390, "kind": "response", "title": "response parsed", "finish_reason": "length"},
+  {"at_ms": 8410, "kind": "cost", "title": "cost computed",
+   "cost_usd": 0.000412, "cost_source": "estimated"},
+  {"at_ms": 8420, "kind": "log", "title": "logged", "log_id": 4821, "channel": "ui"}
+ ],
+ "attachments": [],
+ "ignored_params": ["tools"],
+ "error": null
+}

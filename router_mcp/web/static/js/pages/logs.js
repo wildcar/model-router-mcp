@@ -8,12 +8,14 @@ import { api, ApiError, query } from '../core/api.js';
 import { el, row, clear, toast } from '../core/dom.js';
 import { costCell, localTime, money, timeZoneLabel, tokens, duration } from '../core/format.js';
 import { readParams, writeParams } from '../core/state.js';
+import { inspector } from '../components/inspector.js';
 
 const $ = (id) => document.getElementById(id);
 const PAGE_SIZE = 50;
 
 let cursor = null;
 let shown = 0;
+let labels = null;
 
 function filters() {
   return {
@@ -65,7 +67,7 @@ function errorRow(r, columns) {
 }
 
 function logRow(r) {
-  return row([
+  const tr = row([
     { text: r.id, className: 'num' },
     { text: localTime(r.created_at), title: r.created_at },
     r.external_user_id,
@@ -85,9 +87,14 @@ function logRow(r) {
         images: r.images,
         characters: r.characters,
       }), className: 'num' },
-    { node: costCell(r.cost_usd, r.cost_source) },
+    { node: costCell(r.cost_usd, r.cost_source, labels) },
     { text: (r.request_text || '').slice(0, 60), className: 'trunc', title: r.request_text || '' },
   ]);
+  tr.addEventListener('click', () => {
+    writeParams({ ...readParams(), log: r.id });
+    openEntry(r.id);
+  });
+  return tr;
 }
 
 async function loadLogs({ append = false } = {}) {
@@ -108,37 +115,43 @@ async function loadLogs({ append = false } = {}) {
   writeParams({ ...params, log: readParams().log });
 }
 
-// A deep link (`?log=4821`) opens straight onto the entry it names, so an error
-// can be handed to a colleague as a URL.
-async function openDeepLink() {
-  const id = readParams().log;
-  if (!id) return;
+// Opening a row uses the very same inspector the «Прогон» screen shows after a
+// send — same component, same envelope, so the log is not a lesser view of a
+// run. `?log=4821` in the address makes it a link a colleague can open.
+async function openEntry(id) {
   try {
     const run = await api(`/logs/${encodeURIComponent(id)}`);
     const card = $('detail');
     card.hidden = false;
     clear(card);
-    card.appendChild(el('h2', `Запись #${run.log_id}`));
-    const pairs = [
-      ['Статус', run.status],
-      ['Канал', run.channel || '—'],
-      ['Пара', `${run.model.provider ?? '—'} · ${run.model.model_id ?? '—'}`],
-      ['Время ответа', duration(run.latency_ms)],
-      ['Токены', tokens(run.usage)],
-      ['Стоимость', `${money(run.cost.value)} (${run.cost.source})`],
-      ['Обрыв по лимиту', run.finish_reason || 'нет'],
-      ['id запроса у провайдера', run.provider_request_id || '—'],
-    ];
-    const table = el('table');
-    const tbody = el('tbody');
-    for (const [k, v] of pairs) tbody.appendChild(row([k, { text: v, className: 'mono' }]));
-    table.appendChild(tbody);
-    card.appendChild(table);
-    if (run.error) card.appendChild(el('pre', run.error.message, { className: 'err' }));
-    if (run.text) card.appendChild(el('pre', run.text));
+    const head = el('div', undefined, { className: 'row' });
+    head.appendChild(el('h2', `Запись #${run.log_id}`));
+    head.appendChild(el('span', undefined, { className: 'spacer' }));
+    head.appendChild(el('button', 'Повторить в прогоне', {
+      // Repeating is a button, never a keystroke: it spends money.
+      onClick: () => {
+        const to = `/?modality=${run.modality}`
+          + (run.model.model_id ? `&model_id=${encodeURIComponent(run.model.model_id)}` : '');
+        window.location.href = to;
+      },
+    }));
+    head.appendChild(el('button', 'Закрыть', {
+      onClick: () => {
+        card.hidden = true;
+        writeParams({ ...readParams(), log: undefined });
+      },
+    }));
+    card.appendChild(head);
+    card.appendChild(inspector(el('div'), run, { labels }));
+    card.scrollIntoView({ block: 'nearest' });
   } catch (e) {
     toast(e instanceof ApiError ? e.message : String(e), true);
   }
+}
+
+function openDeepLink() {
+  const id = readParams().log;
+  if (id) openEntry(id);
 }
 
 function reload() {
@@ -163,5 +176,9 @@ $('f-fallback').checked = initial.with_fallback === 'true';
 $('f-retries').checked = initial.with_retries === 'true';
 $('f-unverified').checked = initial.unverified_cost === 'true';
 
-reload();
-openDeepLink();
+// The glossary comes from the server so one concept keeps one name across the
+// table, the inspector and the reports.
+api('/capabilities')
+  .then((caps) => { labels = caps.labels; })
+  .catch(() => {})   // raw codes are ugly, never wrong
+  .finally(() => { reload(); openDeepLink(); });

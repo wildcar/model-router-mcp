@@ -1,0 +1,81 @@
+{
+ "total": 6,
+ "children": [
+  {
+   "value": "anthropic-api",
+   "count": 3,
+   "enabled": false,
+   "configured": false,
+   "children": [
+    {
+     "value": "anthropic",
+     "count": 3,
+     "children": [
+      {
+       "value": "claude-haiku-4-5-20251001",
+       "count": 1,
+       "children": [
+        {
+         "value": "claude-haiku-4-5-20251001",
+         "label": "базовая · $4.800/1M",
+         "tier": "expensive",
+         "price_source_kind": "estimate"
+        }
+       ]
+      },
+      {
+       "value": "claude-opus-4-8",
+       "count": 1,
+       "children": [
+        {
+         "value": "claude-opus-4-8",
+         "label": "базовая · $90.000/1M",
+         "tier": "expensive",
+         "price_source_kind": "estimate"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "value": "deepseek",
+   "count": 2,
+   "enabled": true,
+   "configured": true,
+   "children": [
+    {
+     "value": "deepseek",
+     "count": 2,
+     "children": [
+      {
+       "value": "deepseek-v4-flash",
+       "count": 1,
+       "children": [
+        {
+         "value": "deepseek-v4-flash",
+         "label": "базовая · $0.000/1M",
+         "tier": "cheap",
+         "price_source_kind": "unknown"
+        }
+       ]
+      },
+      {
+       "value": "deepseek-v4-pro",
+       "count": 1,
+       "children": [
+        {
+         "value": "deepseek-v4-pro",
+         "label": "базовая · $0.000/1M",
+         "tier": "cheap",
+         "price_source_kind": "unknown"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Подключения — Model Router{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="row">
+    <button id="sync" type="button">Синхронизировать каталоги</button>
+    <span class="hint">Ручные цены сохраняются, снятые модели помечаются, ничего не удаляется.</span>
+  </div>
+  <table id="providers"><thead><tr>
+    <th scope="col">Поставщик</th><th scope="col">Модальности</th>
+    <th scope="col">Включён</th><th scope="col">Состояние</th>
+    <th scope="col">Переменная</th><th scope="col">Прайс</th>
+  </tr></thead><tbody></tbody></table>
+  <div id="reports"></div>
+</section>
+
+{# The MCP tab — tool inventory, self-probe, per-client call counts — is wave 2.
+   Naming it here beats a tab that opens onto nothing. #}
+<section class="card">
+  <h2>MCP</h2>
+  <p class="hint">Инвентарь инструментов, самопроба эндпоинта и статистика вызовов
+    по клиентам появятся во второй волне. Сейчас канал вызова уже пишется в журнал —
+    <a href="/logs?channel=mcp">посмотреть вызовы по MCP</a>.</p>
+</section>
+{% endblock %}

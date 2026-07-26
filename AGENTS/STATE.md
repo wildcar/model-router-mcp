@@ -119,9 +119,35 @@ it as a managed service on this host.
   9. `ProviderAdapter.SUPPORTED_PARAMS` feeds both the payload and the new
      `ignored_params` on a run; the retry loop records each HTTP try, so the
      two-level timeline has data; a read timeout logs `cost_source='cost_unknown'`.
-- ✅ Tests green: `pytest` (73 passed). One app per test session (`tests/conftest.py`):
+- ✅ Console wave 1 shipped (2026-07-26), all nine items of §21:
+  1. `/api/v1/capabilities` — parameter matrix from `ProviderAdapter.SUPPORTED_PARAMS`
+     (appended to ADR-0001), per-provider model overrides, server-fixed settings by
+     env-var name, and the glossary from the new `web/labels.py`.
+  2. `POST /api/v1/plan` — never reaches the network (`get_models(allow_sync=False)`),
+     always answers 200, and gives a verdict plus a reason for every rejected
+     candidate. The estimate states its assumption and refuses to invent a zero.
+  3. `GET /api/v1/registry/tree` — the picker cascade built server-side.
+  4. `PATCH /api/v1/registry/models/{provider}/{model_id}` — named columns only,
+     `revision` counter as the optimistic lock, price protection keyed on price
+     provenance so a hand-entered price survives the next sync, `revert_price`.
+  5. Five-item navigation (Обзор · Прогон · Модели · Журнал · Подключения) with
+     filters, selection and `?log=` in the address; `/registry` redirects to `/models`.
+  6. «Прогон»: form generated from capabilities, Авто / Выбрать самому, cascade from
+     the server, `model_id` field reporting found/retired/provider-off as typed,
+     fallback as one select, plan on a 300 ms debounce, estimate on the button,
+     session feed, prompt draft, `?log=` deep link.
+  7. JSON viewer (token nodes, never string replacement), and one inspector with four
+     tabs and the two-level timeline, shared by «Прогон» and «Журнал».
+  8. «Модели» with the price card: unit inside the field, previous value under it,
+     confirmation on an order-of-magnitude change. «Подключения» carries the
+     providers and the sync report; the MCP tab names itself as wave 2.
+  9. ADR-0005 supersedes §18 of the concept: plain ES modules, no htmx/Alpine, no
+     build step. Reasoning and reversal conditions are in the ADR.
+- ✅ Tests green: `pytest` (98 passed). One app per test session (`tests/conftest.py`):
   FastMCP's session manager runs once per process. `Settings` still reads the repo
-  `.env`, so the fixture clears every provider key explicitly.
+  `.env`, so the fixture clears every provider key explicitly. `tests/js/` runs the
+  page modules against a stub DOM under node (skipped when node is absent) — it
+  catches mistyped element ids and API-shape drift without a browser.
 - ✅ Process: humanizer-ru skill vendored to `.claude/skills/humanizer-ru/` and made
   mandatory for all agent-produced Russian prose (AGENTS.md → Language Rules).
 
@@ -139,12 +165,13 @@ it as a managed service on this host.
   long CLI request to confirm the 504 is gone.
 - Deploy wave 0 and watch the first restart: `_add_missing_columns` grows
   sixteen columns on the live `request_logs` in one pass.
-- Wave 1 of `docs/UI_CONCEPT_v2.md`: `/api/v1/capabilities` from
-  `SUPPORTED_PARAMS` (plus an ADR-0001 addendum), `POST /api/v1/plan` that never
-  touches the network, five-item navigation with state in the address, the
-  inspector with four tabs and the two-level timeline, the JSON viewer, the
-  fallback as one select, `PATCH` on a registry model with the price-protection
-  criterion moved to price provenance.
+- Deploy wave 1 and look at the console on prod with real data — the page
+  modules are verified against a stub DOM, not a browser.
+- Wave 2 of `docs/UI_CONCEPT_v2.md`: fix the three accounting defects before
+  drawing the «Расход» screen (zero seed rates for image/stt/tts, no per-character
+  price for ElevenLabs, cache/reasoning tokens missing from `Usage` and the cost),
+  then «Модели» with facets, mass edits, provider key probes, the MCP tab with the
+  tool inventory, «Обзор» health summary, «Расход» as a tab, and Playwright.
 - Phase 5 (cont.): subscription/amortization UI; tune seed prices.
 - Phase 6: hardening, optional streaming for long CLI/chat runs.
 

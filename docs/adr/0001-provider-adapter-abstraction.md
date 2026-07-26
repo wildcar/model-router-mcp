@@ -53,3 +53,40 @@ into `RetryClientMixin`. Adapters translate provider failures into the normalize
   into the router and complicates adding mixed-modality providers.
 - **Import sibling service classes directly** — cross-repo imports are brittle;
   we port the proven parsing/retry logic into self-contained adapters instead.
+
+---
+
+## Addendum, 2026-07-26: adapters declare the parameters they read
+
+The interface gains one class attribute:
+
+```python
+class ProviderAdapter:
+    env_var: str | None = None
+    SUPPORTED_PARAMS: dict[Modality, tuple[str, ...]] | None = None
+```
+
+`SUPPORTED_PARAMS` maps a modality to the `request.params` keys the adapter
+actually reads. It has two consumers and that is the point: the adapter builds
+its payload by iterating the same tuple, and `/api/v1/capabilities` serves it to
+the console, which draws exactly those fields. A matrix maintained separately in
+`web/` diverges from the code on the first new adapter, and both failure modes
+are bad — a form offering a field the adapter drops, or hiding one it reads.
+
+Two consequences follow.
+
+- Anything a caller sends outside the declared set comes back on the run as
+  `ignored_params`. Adapters used to discard `tools`, `response_format`, `stop`,
+  `seed` and `stream` without a word, so a caller could pay for a request that
+  quietly ignored half of what they asked for.
+- `None` means "not declared yet", which suppresses the warning rather than
+  guessing. A new adapter is silent until it says what it reads.
+
+`env_var` names the environment variable that configures the adapter. It is
+shown by name only — in the "provider not configured" hint and on the
+«Подключения» screen — never by value.
+
+A pair is not always enough for a key: Anthropic makes `max_tokens` mandatory
+and defaults it where the OpenAI-shaped providers leave it optional. Those
+departures live in `web/capabilities.py` as per-provider model overrides, not in
+the adapters.

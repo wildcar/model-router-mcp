@@ -43,3 +43,96 @@ a { color:var(--accent); }
 #toast { position:fixed; bottom:24px; right:24px; background:#262b34; border:1px solid var(--border); padding:12px 18px; border-radius:8px; opacity:0; transform:translateY(8px); transition:.2s; pointer-events:none; }
 #toast.show { opacity:1; transform:none; }
 #toast.error { border-color:var(--err); color:var(--err); }
+
+/* --- wave 1: run screen, inspector, model card ------------------------- */
+
+/* Two columns on a desktop, one below 1100 (§15): the result goes straight
+   under the form rather than off the side of the screen. */
+.run-layout, .models-layout { display:grid; gap:20px; grid-template-columns:minmax(420px,1fr) 1fr; align-items:start; }
+@media (max-width:1100px) { .run-layout, .models-layout { grid-template-columns:1fr; } }
+main { max-width:1600px; }
+
+fieldset.block { border:1px solid var(--border); border-radius:var(--radius,6px); padding:12px 14px; margin:0 0 14px; }
+fieldset.block legend { color:var(--muted); font-size:12px; padding:0 6px; display:flex; gap:10px; align-items:center; }
+/* The explanation of a term is visible text under its control, not a tooltip. */
+.under { color:var(--muted); font-size:11px; line-height:1.35; }
+.under.warn { color:var(--warn,#fbbf24); }
+.under.ok { color:var(--ok,#4ade80); }
+
+.segmented { display:inline-flex; border:1px solid var(--border); border-radius:var(--radius,6px); overflow:hidden; }
+.seg { background:transparent; border:0; border-radius:0; padding:3px 10px; font-size:12px; }
+.seg.active { background:var(--accent); color:#fff; }
+
+.actions { align-items:center; }
+.actions .spacer { flex:1; }
+button .est { opacity:.85; font-variant-numeric:tabular-nums; }
+
+/* Plan */
+.plan { border:1px dashed var(--border-strong,#3a414c); border-radius:var(--radius,6px); padding:12px 14px; margin-bottom:14px; }
+.plan-head { display:flex; gap:12px; align-items:baseline; }
+.plan-head h3 { margin:0; font-size:14px; }
+.candidates { margin-top:10px; font-size:12px; }
+.candidates tr.muted td { opacity:.6; }
+.plan-verdict { margin:10px 0 0; }
+
+/* Inspector */
+.inspector { display:flex; flex-direction:column; gap:10px; }
+.insp-summary { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+.insp-pair { color:var(--muted); }
+.chip { padding:2px 8px; border-radius:10px; border:1px solid currentColor; font-size:12px; }
+.tabs { display:flex; gap:2px; border-bottom:1px solid var(--border); }
+.tab { background:transparent; border:0; border-bottom:2px solid transparent; border-radius:0; padding:6px 12px; color:var(--muted); }
+.tab.active { color:var(--fg); border-bottom-color:var(--accent); }
+.tab-pane { min-height:80px; }
+.pane-head { display:flex; justify-content:flex-end; }
+button.small { padding:2px 8px; font-size:11px; }
+
+/* Timeline: two levels, attempts and the HTTP retries inside them. */
+.timeline { font-size:12px; }
+.tl-head { display:flex; justify-content:space-between; color:var(--muted); border-bottom:1px solid var(--border); padding-bottom:4px; margin-bottom:6px; }
+.tl-step, .tl-retry { display:grid; grid-template-columns:90px 260px 1fr; gap:10px; padding:2px 0; }
+.tl-retry { padding-left:24px; grid-template-columns:66px 160px 1fr; color:var(--muted); }
+.tl-nested { border-left:1px solid var(--border); margin-left:10px; }
+.tl-at { color:var(--muted); }
+
+/* JSON viewer */
+.json-view { font-family:var(--font-mono,monospace); font-size:12px; line-height:1.5; }
+.json-view details { padding-left:12px; }
+.json-view summary { cursor:pointer; margin-left:-12px; }
+.json-body { border-left:1px solid var(--border); padding-left:10px; }
+.json-key { color:var(--accent); cursor:pointer; }
+.json-string { color:var(--ok,#4ade80); }
+.json-number { color:var(--warn,#fbbf24); }
+.json-boolean, .json-null { color:var(--info,#60a5fa); }
+.json-punct, .json-count { color:var(--muted); }
+.json-block-head { display:flex; justify-content:space-between; align-items:center; }
+.json-block-head h4 { margin:8px 0; font-size:13px; }
+
+/* Key-value tables */
+table.kv { width:100%; font-size:12px; }
+table.kv th { width:38%; text-align:left; color:var(--muted); font-weight:400; vertical-align:top; }
+
+/* Session feed */
+.feed { display:flex; gap:8px; flex-wrap:wrap; }
+.feed-item { display:flex; gap:8px; align-items:center; font-size:12px; }
+.feed-item.ok { border-color:var(--ok,#4ade80); }
+.feed-item.err { border-color:var(--err); }
+
+/* Model card */
+.model-card { position:sticky; top:16px; }
+#models tbody tr { cursor:pointer; }
+#models tbody tr.selected { background:#1f2430; }
+.price-field { margin-bottom:10px; }
+.input-unit { display:flex; align-items:center; gap:0; }
+.input-unit input { border-top-right-radius:0; border-bottom-right-radius:0; flex:1; }
+/* The unit lives inside the field: a price is where an order-of-magnitude slip
+   is both easiest to make and most expensive. */
+.input-unit .unit { border:1px solid var(--border); border-left:0; border-top-right-radius:6px; border-bottom-right-radius:6px; padding:8px 10px; color:var(--muted); background:#11141a; }
+
+/* Overview tiles */
+.tiles { display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); }
+.tile .big { font-size:26px; margin:6px 0; }
+#steps li { margin-bottom:10px; }
+
+.sync-report { border-top:1px solid var(--border); padding-top:8px; margin-top:8px; font-size:12px; }
+.sync-report h4 { margin:0 0 4px; }
