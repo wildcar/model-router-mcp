@@ -87,14 +87,25 @@ sudo nginx -t && sudo systemctl reload nginx
 
 Timeouts matter here: `/mcp` and `/api/cli` get 3600s, the rest of the console
 600s. nginx defaults to 60s when `proxy_read_timeout` is unset, which answers 504
-on a long `codex`/`claude` run while the subprocess keeps working. After editing
-the config on a host that already runs it, copy it over and reload:
+on a long `codex`/`claude` run while the subprocess keeps working.
+
+Do **not** copy this file over a config that is already live: certbot rewrites
+`/etc/nginx/sites-available/model-router` in place, adding the TLS server block,
+the real `server_name` and the 80 to 443 redirect. Copying the repo template over
+it drops all three. On a host that already serves the site, port the changed
+blocks by hand:
 
 ```bash
-sudo cp deploy/nginx-model-router.conf /etc/nginx/sites-available/model-router
-# re-apply your server_name edit, then
+sudo cp -a /etc/nginx/sites-available/model-router \
+           /etc/nginx/sites-available/model-router.bak.$(date +%F-%H%M)
+sudo diff -u /etc/nginx/sites-available/model-router \
+             /opt/model-router-mcp/deploy/nginx-model-router.conf
+sudo nano /etc/nginx/sites-available/model-router     # apply the proxy_* changes
 sudo nginx -t && sudo systemctl reload nginx
 ```
+
+`nginx -t` and the reload cover every site on the host, so read the test output
+before reloading. Rollback is `cp` of the `.bak` file plus another reload.
 
 ## Updating (routine)
 
