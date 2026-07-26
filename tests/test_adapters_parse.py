@@ -128,3 +128,21 @@ def test_the_legacy_modality_string_is_understood():
     """Older entries describe themselves as `text+image->text` in one string."""
     model = OpenRouterAdapter._parse_catalog_model(_entry(modality="text+image->text"))
     assert model.tasks == (Task.TEXT_TO_TEXT, Task.IMAGE_TO_TEXT)
+
+
+def test_the_deepseek_catalog_row_declares_both_axes():
+    """A row that declares neither axis can never be selected, and the failure is
+    silent — it just stops appearing as a candidate. This one broke the whole
+    DeepSeek catalog sync once."""
+    model = DeepSeekAdapter._parse_catalog_model({"id": "deepseek-v4-pro", "owned_by": "deepseek"})
+    assert model.tasks == (Task.TEXT_TO_TEXT,)
+    assert model.modalities == (Modality.CHAT,)
+
+
+def test_a_row_declaring_neither_axis_is_refused():
+    from router_mcp.registry.models import RegistryModel
+
+    with pytest.raises(ValueError, match="neither tasks nor modalities"):
+        RegistryModel(
+            service_provider_id="p", model_provider="v", model_id="m", display_name="m"
+        )

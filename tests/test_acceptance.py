@@ -109,14 +109,14 @@ def _seed(db_path: str) -> None:
         conn.execute(
             """
             INSERT INTO request_logs (
-                id, external_user_id, modality, service_provider_id, model_provider,
+                id, external_user_id, modality, task, service_provider_id, model_provider,
                 model_id, requested_model_id, fallback_reason, status, channel,
                 prompt_tokens, completion_tokens, total_tokens, cache_read_tokens,
                 cost_usd, cost_source, latency_ms, attempts, provider_request_id,
                 finish_reason, response_text, plan_json, created_at
-            ) VALUES (4821,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (4821,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
-            ("web-tester", "chat", "deepseek", "deepseek", "deepseek-chat",
+            ("web-tester", "chat", "text-to-text", "deepseek", "deepseek", "deepseek-chat",
              "deepseek-v4-pro", "deepseek-v4-pro failed: RateLimited: HTTP 429",
              "ok", "ui", 1042, 318, 1360, 890, 0.000412, "estimated", 8420, 3,
              "req-77f0", "length", "Ответ модели", steps,
@@ -314,7 +314,7 @@ def test_the_form_shows_only_parameters_the_adapter_reads(page, live_server):
     chat_params = page.locator("#params").inner_text()
     assert "Температура" in chat_params
 
-    page.select_option("#modality", "cli")
+    page.select_option("#task", "cli")
     page.wait_for_function(
         "() => document.querySelector('#params').innerText.includes('Рабочий каталог')"
     )

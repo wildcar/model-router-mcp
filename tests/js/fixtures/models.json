@@ -1,228 +1,253 @@
 {
- "items": [
-  {
-   "service_provider": "anthropic-api",
-   "model_provider": "anthropic",
-   "model_id": "claude-haiku-4-5-20251001",
-   "display_name": "Claude Haiku 4.5",
-   "modalities": [
-    "chat"
-   ],
-   "capabilities": [],
-   "tier": "expensive",
-   "prompt_price": 8e-07,
-   "completion_price": 4e-06,
-   "image_price": 0.0,
-   "audio_price_per_second": 0.0,
-   "character_price": 0.0,
-   "cache_read_price": 0.0,
-   "cache_write_price": 0.0,
-   "context_length": 0,
-   "source": "seed",
-   "pricing_mode": "per_request",
-   "is_active": true,
-   "last_seen_at": null,
-   "deprecated_at": null,
-   "replaced_by": null,
-   "price_source": "https://claude.com/pricing#api",
-   "price_source_kind": "estimate",
-   "price_checked_at": null,
-   "price_is_verified": false,
-   "price_is_unknown": false,
-   "updated_at": "2026-07-26T12:41:56+00:00",
-   "revision": 0
-  },
-  {
-   "service_provider": "anthropic-api",
-   "model_provider": "anthropic",
-   "model_id": "claude-opus-4-8",
-   "display_name": "Claude Opus 4.8",
-   "modalities": [
-    "chat"
-   ],
-   "capabilities": [],
-   "tier": "expensive",
-   "prompt_price": 1.5e-05,
-   "completion_price": 7.5e-05,
-   "image_price": 0.0,
-   "audio_price_per_second": 0.0,
-   "character_price": 0.0,
-   "cache_read_price": 0.0,
-   "cache_write_price": 0.0,
-   "context_length": 0,
-   "source": "seed",
-   "pricing_mode": "per_request",
-   "is_active": true,
-   "last_seen_at": null,
-   "deprecated_at": null,
-   "replaced_by": null,
-   "price_source": "https://claude.com/pricing#api",
-   "price_source_kind": "estimate",
-   "price_checked_at": null,
-   "price_is_verified": false,
-   "price_is_unknown": false,
-   "updated_at": "2026-07-26T12:41:56+00:00",
-   "revision": 0
-  },
-  {
-   "service_provider": "anthropic-api",
-   "model_provider": "anthropic",
-   "model_id": "claude-sonnet-4-6",
-   "display_name": "Claude Sonnet 4.6",
-   "modalities": [
-    "chat"
-   ],
-   "capabilities": [],
-   "tier": "expensive",
-   "prompt_price": 3e-06,
-   "completion_price": 1.5e-05,
-   "image_price": 0.0,
-   "audio_price_per_second": 0.0,
-   "character_price": 0.0,
-   "cache_read_price": 0.0,
-   "cache_write_price": 0.0,
-   "context_length": 0,
-   "source": "seed",
-   "pricing_mode": "per_request",
-   "is_active": true,
-   "last_seen_at": null,
-   "deprecated_at": null,
-   "replaced_by": null,
-   "price_source": "https://claude.com/pricing#api",
-   "price_source_kind": "estimate",
-   "price_checked_at": null,
-   "price_is_verified": false,
-   "price_is_unknown": false,
-   "updated_at": "2026-07-26T12:41:56+00:00",
-   "revision": 0
-  },
-  {
-   "service_provider": "claude-cli",
-   "model_provider": "anthropic",
-   "model_id": "claude",
-   "display_name": "Claude CLI",
-   "modalities": [
-    "cli"
-   ],
-   "capabilities": [],
-   "tier": "expensive",
-   "prompt_price": 0.0,
-   "completion_price": 0.0,
-   "image_price": 0.0,
-   "audio_price_per_second": 0.0,
-   "character_price": 0.0,
-   "cache_read_price": 0.0,
-   "cache_write_price": 0.0,
-   "context_length": 0,
-   "source": "seed",
-   "pricing_mode": "per_request",
-   "is_active": true,
-   "last_seen_at": null,
-   "deprecated_at": null,
-   "replaced_by": null,
-   "price_source": null,
-   "price_source_kind": "estimate",
-   "price_checked_at": null,
-   "price_is_verified": false,
-   "price_is_unknown": true,
-   "updated_at": "2026-07-26T12:41:56+00:00",
-   "revision": 0
-  },
-  {
-   "service_provider": "codex-cli",
-   "model_provider": "openai",
-   "model_id": "codex",
-   "display_name": "Codex CLI",
-   "modalities": [
-    "cli"
-   ],
-   "capabilities": [],
-   "tier": "expensive",
-   "prompt_price": 0.0,
-   "completion_price": 0.0,
-   "image_price": 0.0,
-   "audio_price_per_second": 0.0,
-   "character_price": 0.0,
-   "cache_read_price": 0.0,
-   "cache_write_price": 0.0,
-   "context_length": 0,
-   "source": "seed",
-   "pricing_mode": "per_request",
-   "is_active": true,
-   "last_seen_at": null,
-   "deprecated_at": null,
-   "replaced_by": null,
-   "price_source": null,
-   "price_source_kind": "estimate",
-   "price_checked_at": null,
-   "price_is_verified": false,
-   "price_is_unknown": true,
-   "updated_at": "2026-07-26T12:41:56+00:00",
-   "revision": 0
-  },
-  {
-   "service_provider": "codex-oauth",
-   "model_provider": "openai",
-   "model_id": "gpt-image-2",
-   "display_name": "Codex image generation",
-   "modalities": [
-    "image"
-   ],
-   "capabilities": [],
-   "tier": "expensive",
-   "prompt_price": 0.0,
-   "completion_price": 0.0,
-   "image_price": 0.0,
-   "audio_price_per_second": 0.0,
-   "character_price": 0.0,
-   "cache_read_price": 0.0,
-   "cache_write_price": 0.0,
-   "context_length": 0,
-   "source": "seed",
-   "pricing_mode": "per_request",
-   "is_active": true,
-   "last_seen_at": null,
-   "deprecated_at": null,
-   "replaced_by": null,
-   "price_source": null,
-   "price_source_kind": "estimate",
-   "price_checked_at": null,
-   "price_is_verified": false,
-   "price_is_unknown": true,
-   "updated_at": "2026-07-26T12:41:56+00:00",
-   "revision": 0
+  "items": [
+    {
+      "service_provider": "anthropic-api",
+      "model_provider": "anthropic",
+      "model_id": "claude-haiku-4-5-20251001",
+      "display_name": "Claude Haiku 4.5",
+      "modalities": [
+        "chat"
+      ],
+      "capabilities": [],
+      "tier": "expensive",
+      "prompt_price": 8e-07,
+      "completion_price": 4e-06,
+      "image_price": 0.0,
+      "audio_price_per_second": 0.0,
+      "character_price": 0.0,
+      "cache_read_price": 0.0,
+      "cache_write_price": 0.0,
+      "context_length": 0,
+      "source": "seed",
+      "pricing_mode": "per_request",
+      "is_active": true,
+      "last_seen_at": null,
+      "deprecated_at": null,
+      "replaced_by": null,
+      "price_source": "https://claude.com/pricing#api",
+      "price_source_kind": "estimate",
+      "price_checked_at": null,
+      "price_is_verified": false,
+      "price_is_unknown": false,
+      "updated_at": "2026-07-26T12:41:56+00:00",
+      "revision": 0,
+      "tasks": [
+        "text-to-text"
+      ]
+    },
+    {
+      "service_provider": "anthropic-api",
+      "model_provider": "anthropic",
+      "model_id": "claude-opus-4-8",
+      "display_name": "Claude Opus 4.8",
+      "modalities": [
+        "chat"
+      ],
+      "capabilities": [],
+      "tier": "expensive",
+      "prompt_price": 1.5e-05,
+      "completion_price": 7.5e-05,
+      "image_price": 0.0,
+      "audio_price_per_second": 0.0,
+      "character_price": 0.0,
+      "cache_read_price": 0.0,
+      "cache_write_price": 0.0,
+      "context_length": 0,
+      "source": "seed",
+      "pricing_mode": "per_request",
+      "is_active": true,
+      "last_seen_at": null,
+      "deprecated_at": null,
+      "replaced_by": null,
+      "price_source": "https://claude.com/pricing#api",
+      "price_source_kind": "estimate",
+      "price_checked_at": null,
+      "price_is_verified": false,
+      "price_is_unknown": false,
+      "updated_at": "2026-07-26T12:41:56+00:00",
+      "revision": 0,
+      "tasks": [
+        "text-to-text"
+      ]
+    },
+    {
+      "service_provider": "anthropic-api",
+      "model_provider": "anthropic",
+      "model_id": "claude-sonnet-4-6",
+      "display_name": "Claude Sonnet 4.6",
+      "modalities": [
+        "chat"
+      ],
+      "capabilities": [],
+      "tier": "expensive",
+      "prompt_price": 3e-06,
+      "completion_price": 1.5e-05,
+      "image_price": 0.0,
+      "audio_price_per_second": 0.0,
+      "character_price": 0.0,
+      "cache_read_price": 0.0,
+      "cache_write_price": 0.0,
+      "context_length": 0,
+      "source": "seed",
+      "pricing_mode": "per_request",
+      "is_active": true,
+      "last_seen_at": null,
+      "deprecated_at": null,
+      "replaced_by": null,
+      "price_source": "https://claude.com/pricing#api",
+      "price_source_kind": "estimate",
+      "price_checked_at": null,
+      "price_is_verified": false,
+      "price_is_unknown": false,
+      "updated_at": "2026-07-26T12:41:56+00:00",
+      "revision": 0,
+      "tasks": [
+        "text-to-text"
+      ]
+    },
+    {
+      "service_provider": "claude-cli",
+      "model_provider": "anthropic",
+      "model_id": "claude",
+      "display_name": "Claude CLI",
+      "modalities": [
+        "cli"
+      ],
+      "capabilities": [],
+      "tier": "expensive",
+      "prompt_price": 0.0,
+      "completion_price": 0.0,
+      "image_price": 0.0,
+      "audio_price_per_second": 0.0,
+      "character_price": 0.0,
+      "cache_read_price": 0.0,
+      "cache_write_price": 0.0,
+      "context_length": 0,
+      "source": "seed",
+      "pricing_mode": "per_request",
+      "is_active": true,
+      "last_seen_at": null,
+      "deprecated_at": null,
+      "replaced_by": null,
+      "price_source": null,
+      "price_source_kind": "estimate",
+      "price_checked_at": null,
+      "price_is_verified": false,
+      "price_is_unknown": true,
+      "updated_at": "2026-07-26T12:41:56+00:00",
+      "revision": 0,
+      "tasks": [
+        "cli"
+      ]
+    },
+    {
+      "service_provider": "codex-cli",
+      "model_provider": "openai",
+      "model_id": "codex",
+      "display_name": "Codex CLI",
+      "modalities": [
+        "cli"
+      ],
+      "capabilities": [],
+      "tier": "expensive",
+      "prompt_price": 0.0,
+      "completion_price": 0.0,
+      "image_price": 0.0,
+      "audio_price_per_second": 0.0,
+      "character_price": 0.0,
+      "cache_read_price": 0.0,
+      "cache_write_price": 0.0,
+      "context_length": 0,
+      "source": "seed",
+      "pricing_mode": "per_request",
+      "is_active": true,
+      "last_seen_at": null,
+      "deprecated_at": null,
+      "replaced_by": null,
+      "price_source": null,
+      "price_source_kind": "estimate",
+      "price_checked_at": null,
+      "price_is_verified": false,
+      "price_is_unknown": true,
+      "updated_at": "2026-07-26T12:41:56+00:00",
+      "revision": 0,
+      "tasks": [
+        "cli"
+      ]
+    },
+    {
+      "service_provider": "codex-oauth",
+      "model_provider": "openai",
+      "model_id": "gpt-image-2",
+      "display_name": "Codex image generation",
+      "modalities": [
+        "image"
+      ],
+      "capabilities": [],
+      "tier": "expensive",
+      "prompt_price": 0.0,
+      "completion_price": 0.0,
+      "image_price": 0.0,
+      "audio_price_per_second": 0.0,
+      "character_price": 0.0,
+      "cache_read_price": 0.0,
+      "cache_write_price": 0.0,
+      "context_length": 0,
+      "source": "seed",
+      "pricing_mode": "per_request",
+      "is_active": true,
+      "last_seen_at": null,
+      "deprecated_at": null,
+      "replaced_by": null,
+      "price_source": null,
+      "price_source_kind": "estimate",
+      "price_checked_at": null,
+      "price_is_verified": false,
+      "price_is_unknown": true,
+      "updated_at": "2026-07-26T12:41:56+00:00",
+      "revision": 0,
+      "tasks": [
+        "text-to-image"
+      ]
+    }
+  ],
+  "total": 6,
+  "next_cursor": null,
+  "facets": {
+    "modality": {
+      "chat": 3,
+      "cli": 2,
+      "image": 1,
+      "stt": 1,
+      "tts": 1
+    },
+    "provider": {
+      "anthropic-api": 3,
+      "claude-cli": 1,
+      "codex-cli": 1,
+      "codex-oauth": 1,
+      "deepgram": 1,
+      "elevenlabs": 1
+    },
+    "source": {
+      "seed": 8
+    },
+    "price_source_kind": {
+      "estimate": 8
+    },
+    "tier": {
+      "expensive": 7,
+      "cheap": 1
+    },
+    "state": {
+      "active": 8
+    },
+    "task": {
+      "text-to-text": 3,
+      "cli": 2,
+      "text-to-image": 1,
+      "speech-to-text": 1,
+      "text-to-speech": 1
+    }
   }
- ],
- "total": 6,
- "next_cursor": null,
- "facets": {
-  "modality": {
-   "chat": 3,
-   "cli": 2,
-   "image": 1,
-   "stt": 1,
-   "tts": 1
-  },
-  "provider": {
-   "anthropic-api": 3,
-   "claude-cli": 1,
-   "codex-cli": 1,
-   "codex-oauth": 1,
-   "deepgram": 1,
-   "elevenlabs": 1
-  },
-  "source": {
-   "seed": 8
-  },
-  "price_source_kind": {
-   "estimate": 8
-  },
-  "tier": {
-   "expensive": 7,
-   "cheap": 1
-  },
-  "state": {
-   "active": 8
-  }
- }
 }

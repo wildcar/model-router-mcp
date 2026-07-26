@@ -23,6 +23,7 @@ function filters() {
   return {
     user: $('f-user').value.trim(),
     status: $('f-status').value,
+    task: $('f-task').value,
     modality: $('f-modality').value,
     channel: $('f-channel').value,
     with_fallback: $('f-fallback').checked,
@@ -82,7 +83,9 @@ function logRow(r) {
     { text: localTime(r.created_at), title: r.created_at },
     r.external_user_id,
     { node: modelCell(r) },
-    r.modality,
+    // The task, because the group is ambiguous between two of them: a row that
+    // says «Картинка» does not say whether one was drawn or edited.
+    labels?.tasks?.[r.task]?.label || r.task || r.modality,
     r.channel || '—',
     statusCell(r.status),
     { text: duration(r.latency_ms), className: 'num' },
@@ -155,7 +158,7 @@ async function openEntry(id) {
     head.appendChild(el('button', 'Повторить в прогоне', {
       // Repeating is a button, never a keystroke: it spends money.
       onClick: () => {
-        const to = `/?modality=${run.modality}`
+        const to = `/?task=${run.task || run.modality}`
           + (run.model.model_id ? `&model_id=${encodeURIComponent(run.model.model_id)}` : '');
         window.location.href = to;
       },
@@ -163,7 +166,7 @@ async function openEntry(id) {
     // The audio is still in the blob store, so a transcription can be repeated
     // from here — on another model, without the operator hunting for the file
     // and hoping it is the same one.
-    if (run.modality === 'stt' && run.request_ref) {
+    if (run.task === 'speech-to-text' && run.request_ref) {
       head.appendChild(el('button', 'Повторить распознавание', {
         onClick: () => repeatTranscription(run).catch((e) => toast(e.message, true)),
       }));
@@ -185,10 +188,10 @@ async function openEntry(id) {
 async function repeatTranscription(run) {
   if (!confirm('Отправить тот же файл ещё раз? Это стоит денег.')) return;
   const state = await start({
-    modality: 'stt',
+    task: 'speech-to-text',
     external_user_id: run.client_id || 'web-tester',
     model_id: run.model.model_id,
-    attachment_ref: run.request_ref,
+    attachments: [{ ref: run.request_ref, kind: 'audio' }],
     client_request_id: idempotencyKey(),
   });
   toast('Отправлено, ждём результат…');
@@ -205,11 +208,24 @@ function openDeepLink() {
   if (id) openEntry(id);
 }
 
+// A filter select, keeping «все» first and whatever the URL had preselected.
+function fillFilter(id, rows) {
+  const select = $(id);
+  if (!select || !rows) return;
+  const chosen = select.value;
+  for (const [value, row] of Object.entries(rows)) {
+    const option = el('option', row.label || value);
+    option.value = value;
+    select.appendChild(option);
+  }
+  select.value = chosen;
+}
+
 function reload() {
   loadLogs().catch((e) => toast(`Ошибка: ${e.message}`, true));
 }
 
-for (const id of ['f-user', 'f-status', 'f-modality', 'f-channel',
+for (const id of ['f-user', 'f-status', 'f-task', 'f-modality', 'f-channel',
                   'f-fallback', 'f-retries', 'f-unverified']) {
   $(id).addEventListener('change', () => loadLogs());
 }
@@ -221,6 +237,7 @@ $('tz').textContent = timeZoneLabel();
 const initial = readParams();
 if (initial.user) $('f-user').value = initial.user;
 if (initial.status) $('f-status').value = initial.status;
+if (initial.task) $('f-task').value = initial.task;
 if (initial.modality) $('f-modality').value = initial.modality;
 if (initial.channel) $('f-channel').value = initial.channel;
 $('f-fallback').checked = initial.with_fallback === 'true';
@@ -245,7 +262,13 @@ initSpend();
 // The glossary comes from the server so one concept keeps one name across the
 // table, the inspector and the reports.
 api('/capabilities')
-  .then((caps) => { labels = caps.labels; })
+  .then((caps) => {
+    labels = caps.labels;
+    // Both filter lists come from the server: spelled out in markup they went
+    // stale the moment a task or a group was added.
+    fillFilter('f-task', caps.labels.tasks);
+    fillFilter('f-modality', caps.labels.modalities);
+  })
   .catch(() => {})   // raw codes are ugly, never wrong
   .finally(() => {
     reload();

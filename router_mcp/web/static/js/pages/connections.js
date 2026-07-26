@@ -74,7 +74,7 @@ async function load() {
   for (const provider of caps.providers) {
     const tr = row([
       { text: provider.id, className: 'mono' },
-      provider.modalities.join(', ') || '—',
+      (provider.tasks || provider.modalities).join(', ') || '—',
       { text: modelsBy[provider.id] ?? 0, className: 'num' },
     ]);
 

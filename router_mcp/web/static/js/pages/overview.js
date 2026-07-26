@@ -128,7 +128,7 @@ async function boot() {
       localTime(entry.created_at),
       entry.external_user_id,
       caps.labels.channels[entry.channel]?.label || entry.channel,
-      entry.modality,
+      entry.task || entry.modality,
       { text: entry.error_message || '—', className: 'trunc', title: entry.error_message || '' },
       el('a', `#${entry.id}`, { href: `/logs?log=${entry.id}` }),
     ]));

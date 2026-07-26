@@ -203,7 +203,11 @@ await runPage('connections', 'connections', async (doc, _calls, settleNow) => {
 });
 
 await runPage('run', 'run', async (doc, calls, settleNow) => {
-  check('прогон: модальности загружены', doc.getElementById('modality').children.length > 1);
+  // Tasks arrive grouped by billing group, so the children are <optgroup>s.
+  const taskSelect = doc.getElementById('task');
+  check('прогон: задачи загружены', taskSelect.children.length > 1);
+  check('прогон: задача без модели отмечена как недоступная',
+    taskSelect.textContent.includes('нет модели'));
   check('прогон: параметры построены по матрице',
     doc.getElementById('params').children.length > 0);
   check('прогон: у параметра есть видимое пояснение',

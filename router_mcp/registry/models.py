@@ -29,8 +29,11 @@ class RegistryModel:
     display_name: str
     # The billing groups this row can be charged in. Derived from `tasks` when
     # only tasks were given; kept as the stored form of `registry_models.modality`.
-    modalities: tuple[Modality, ...]
-    # What this model can actually be asked to do. This is the routing key.
+    # Keeps its position (and gains a default) because callers construct this row
+    # positionally, and moving it would silently reassign their arguments.
+    modalities: tuple[Modality, ...] = ()
+    # What this model can actually be asked to do. This is the routing key, and
+    # the axis a caller should prefer.
     tasks: tuple[Task, ...] = ()
     capabilities: tuple[str, ...] = ()
     tier: str = "cheap"  # "free" | "cheap" | "expensive"
@@ -103,6 +106,14 @@ class RegistryModel:
         elif self.modalities and not self.tasks:
             self.tasks = tuple(
                 DEFAULT_TASK[group] for group in self.modalities if group in DEFAULT_TASK
+            )
+        elif not self.modalities and not self.tasks:
+            # A row that declares neither can never be selected for anything, and
+            # the silence is worse than the error: it just never appears as a
+            # candidate. Both axes are optional individually, not together.
+            raise ValueError(
+                f"Model {self.service_provider_id}/{self.model_id} declares "
+                "neither tasks nor modalities"
             )
 
     @property

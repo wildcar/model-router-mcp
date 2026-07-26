@@ -19,9 +19,10 @@ let rows = [];
 let selected = null;
 
 // Filters live in the address, so a filtered registry is a link.
-const FACET_FIELDS = ['modality', 'provider', 'source', 'price_source_kind', 'tier', 'state'];
+const FACET_FIELDS = ['task', 'modality', 'provider', 'source', 'price_source_kind', 'tier', 'state'];
 const FACET_TITLES = {
-  modality: 'Модальность',
+  task: 'Задача',
+  modality: 'Группа тарификации',
   provider: 'Поставщик',
   source: 'Строка',
   price_source_kind: 'Цена откуда',
@@ -139,7 +140,7 @@ function render() {
     for (const cell of [
       model.service_provider,
       { text: model.model_id, className: 'mono' },
-      model.modalities.join(','),
+      (model.tasks || model.modalities).join(','),
       model.tier,
       { text: pricePerMillion(model.prompt_price), className: 'num' },
       { text: pricePerMillion(model.completion_price), className: 'num' },
@@ -228,7 +229,8 @@ function select(model) {
   const body = el('tbody');
   for (const [key, value] of [
     ['Вендор', model.model_provider],
-    ['Модальности', model.modalities.join(', ')],
+    ['Задачи', (model.tasks || []).join(', ')],
+    ['Группы тарификации', model.modalities.join(', ')],
     ['Контекст', model.context_length || '—'],
     ['Ценовой уровень', model.tier],
     ['Строка', caps.labels.sources[model.source]?.label || model.source],
@@ -261,7 +263,7 @@ function select(model) {
     { className: 'hint', title: origin?.help || '' }));
   card.appendChild(el('p',
     'Введённая вручную цена переживёт синхронизацию: защита завязана на происхождение цены, '
-    + 'а строка продолжит получать обновления имени, контекста и модальностей.',
+    + 'а строка продолжит получать обновления имени, контекста и задач.',
     { className: 'hint' }));
 
   const actions = el('div', undefined, { className: 'row' });
@@ -275,7 +277,8 @@ function select(model) {
     }));
   }
   actions.appendChild(el('a', 'Тест →', {
-    href: `/?modality=chat&model_id=${encodeURIComponent(model.model_id)}`,
+    href: `/?task=${(model.tasks || [])[0] || 'text-to-text'}`
+      + `&model_id=${encodeURIComponent(model.model_id)}`,
   }));
   card.appendChild(actions);
   render();
@@ -337,7 +340,7 @@ function addModelForm() {
     ['add-sp', 'Поставщик', 'openrouter'],
     ['add-id', 'model_id', 'provider/model'],
     ['add-name', 'Название', ''],
-    ['add-mods', 'Модальности', 'chat'],
+    ['add-tasks', 'Задачи', 'text-to-text'],
     ['add-prompt', 'Промпт, $/1M', '0'],
     ['add-completion', 'Ответ, $/1M', '0'],
     ['add-source', 'Ссылка на прайс', ''],
@@ -347,7 +350,7 @@ function addModelForm() {
     wrap.appendChild(document.createTextNode(label));
     const input = el('input', undefined, { id });
     input.placeholder = placeholder;
-    if (id === 'add-mods') input.value = 'chat';
+    if (id === 'add-tasks') input.value = 'text-to-text';
     wrap.appendChild(input);
     card.appendChild(wrap);
   }
@@ -359,7 +362,7 @@ function addModelForm() {
           service_provider_id: $('add-sp').value.trim(),
           model_id: $('add-id').value.trim(),
           display_name: $('add-name').value.trim(),
-          modalities: $('add-mods').value.split(',').map((s) => s.trim()).filter(Boolean),
+          tasks: $('add-tasks').value.split(',').map((s) => s.trim()).filter(Boolean),
           prompt_price: (Number($('add-prompt').value) || 0) / 1e6,
           completion_price: (Number($('add-completion').value) || 0) / 1e6,
           price_source: $('add-source').value.trim() || null,

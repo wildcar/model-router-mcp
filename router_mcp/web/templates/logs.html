@@ -63,15 +63,13 @@
         <option value="interrupted">оборван</option>
       </select>
     </label>
-    <label>Модальность
-      <select id="f-modality">
-        <option value="">все</option>
-        <option value="chat">chat</option>
-        <option value="image">image</option>
-        <option value="stt">stt</option>
-        <option value="tts">tts</option>
-        <option value="cli">cli</option>
-      </select>
+    {# Both lists are filled from /api/v1/capabilities. Spelled out in markup they
+       went stale the moment a task or a billing group was added. #}
+    <label>Задача
+      <select id="f-task"><option value="">все</option></select>
+    </label>
+    <label>Группа тарификации
+      <select id="f-modality"><option value="">все</option></select>
     </label>
     <label>Канал
       <select id="f-channel">
@@ -89,7 +87,7 @@
     <label><input id="f-unverified" type="checkbox"> цена не подтверждена</label>
   </div>
   <table id="logs"><thead><tr>
-    <th class="num">id</th><th>Время</th><th>Метка</th><th>Модель</th><th>Мод.</th>
+    <th class="num">id</th><th>Время</th><th>Метка</th><th>Модель</th><th>Задача</th>
     <th>Канал</th><th>Статус</th><th class="num">Время ответа</th>
     <th class="num">Токены</th><th class="num">$</th><th>Запрос</th>
   </tr></thead><tbody></tbody></table>

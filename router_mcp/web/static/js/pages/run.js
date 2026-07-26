@@ -2,7 +2,8 @@
 //
 // Three rules from §5 and §10 shape everything here. The form is built from
 // /api/v1/capabilities, so a field is on screen exactly when the adapter behind
-// the chosen (modality, provider) pair reads it. The plan is free and recomputed
+// the chosen (task, provider) pair reads it, and the input controls follow the
+// task's own signature — which is what makes text and a picture usable together. The plan is free and recomputed
 // as the discrete fields change, so "куда уйдёт запрос" is answered before the
 // send button. And the send button carries the estimate, because a price after
 // the fact is a receipt, not a decision.
@@ -26,15 +27,25 @@ let lastPlan = null;
 const feed = [];            // last runs of this session
 
 // --- capabilities-driven form ------------------------------------------
-function providersFor(modality) {
-  const byModality = caps.params[modality] || {};
-  return caps.providers.filter((p) => p.id in byModality);
+function currentTask() {
+  return $('task').value;
+}
+
+// The signature of the chosen task: which media it needs, which it may take,
+// what it produces. The form reads this instead of comparing the task to a
+// literal, so a new task needs no branch here.
+function signature() {
+  return caps.tasks?.[currentTask()] || { requires: [], optional: [], produces: [] };
+}
+
+function providersFor(task) {
+  const byTask = caps.params_by_task[task] || {};
+  return caps.providers.filter((p) => p.id in byTask);
 }
 
 function paramSpecs() {
-  const modality = $('modality').value;
   const provider = currentProvider();
-  const byProvider = caps.params[modality] || {};
+  const byProvider = caps.params_by_task[currentTask()] || {};
   if (provider) return byProvider[provider]?.params || [];
 
   // With no provider pinned the router will choose one, so the form shows the
@@ -59,7 +70,7 @@ function renderParams() {
   clear(host);
   $('params-empty').hidden = specs.length > 0;
   const overrides =
-    caps.params[$('modality').value]?.[currentProvider()]?.model_overrides || {};
+    caps.params_by_task[currentTask()]?.[currentProvider()]?.model_overrides || {};
   for (const spec of specs) {
     const override = overrides[spec.name] || {};
     const label = el('label', undefined, { className: spec.type === 'select' ? 'grow' : '' });
@@ -222,7 +233,7 @@ function fallbackValue() {
 
 function requestBody() {
   return {
-    modality: $('modality').value,
+    task: currentTask(),
     external_user_id: $('user').value || 'web-tester',
     text: $('prompt').value,
     model_id: currentModelId() || null,
@@ -355,38 +366,57 @@ const watches = new Map();   // run_id -> watcher, so «Прервать» has s
 let clockTimer = null;
 
 function runBody(body, { modelId = null, batchId = null } = {}) {
-  return {
-    modality: body.modality,
+  const out = {
+    task: body.task,
     external_user_id: body.external_user_id,
     text: body.text,
     prompt: body.text,
     model_id: modelId ?? body.model_id,
     tier: body.tier,
     provider: body.provider,
-    engine: (body.provider || 'codex-cli').replace('-cli', ''),
     params: body.params,
     fallback: body.fallback,
     client_request_id: idempotencyKey(),
     batch_id: batchId,
-    attachment_ref: body.attachment_ref ?? null,
+    attachments: body.attachments ?? [],
   };
+  // `engine` picks between the two local binaries and means nothing anywhere
+  // else. It used to be sent with every request of every kind.
+  if (body.task === 'cli') {
+    out.engine = (body.provider || 'codex-cli').replace('-cli', '');
+  }
+  return out;
 }
 
-async function attachmentRef(body) {
-  if (body.modality !== 'stt') return null;
-  const file = $('audio').files[0];
-  if (!file) { toast('Выберите аудиофайл', true); return undefined; }
+// Which `Attachment.kind` a file is, from what the browser says it is. The server
+// re-derives the medium from the mime anyway; this is what the API field wants.
+function kindOf(file) {
+  const mime = file.type || '';
+  if (mime.startsWith('image/')) return 'image';
+  if (mime.startsWith('audio/')) return 'audio';
+  return 'file';
+}
+
+async function attachments(body) {
+  const sig = signature();
+  const needed = sig.requires.filter((m) => m !== 'text');
+  const files = Array.from($('attachments').files || []);
+  if (!files.length) {
+    if (!needed.length) return [];
+    toast(`Для этой задачи нужен файл: ${needed.join(', ')}`, true);
+    return undefined;
+  }
   // Uploaded once, referenced afterwards: the same file is not re-sent for a
   // repeat, and a JSON run body has no way to carry bytes.
-  const stored = await upload(file);
-  return stored.ref;
+  const stored = await Promise.all(files.map((file) => upload(file)));
+  return stored.map((item, i) => ({ ref: item.ref, kind: kindOf(files[i]) }));
 }
 
 async function send() {
   const body = requestBody();
-  const ref = await attachmentRef(body);
-  if (ref === undefined) return;      // the file was required and missing
-  body.attachment_ref = ref;
+  const refs = await attachments(body);
+  if (refs === undefined) return;     // a file was required and missing
+  body.attachments = refs;
 
   if (mode === 'multi') return sendMany(body);
   return sendOne(body);
@@ -623,26 +653,81 @@ function remember(run) {
   }));
 }
 
+// Tasks grouped by their billing group, because ten flat options read as a list
+// of jargon while «Картинка: текст в картинку / картинка в картинку» reads as a
+// choice. A task nothing here provides stays visible and disabled: hiding it
+// would leave no way to tell "impossible" from "not configured yet".
+function fillTaskSelect() {
+  const select = $('task');
+  clear(select);
+  const groups = new Map();
+  for (const [value, row] of Object.entries(caps.tasks || {})) {
+    if (!groups.has(row.billing_group)) groups.set(row.billing_group, []);
+    groups.get(row.billing_group).push([value, row]);
+  }
+  for (const [group, rows] of groups) {
+    const box = el('optgroup');
+    box.label = caps.labels.modalities?.[group]?.label || group;
+    for (const [value, row] of rows) {
+      const option = el('option', row.available ? row.label : `${row.label} (нет модели)`);
+      option.value = value;
+      option.disabled = !row.available;
+      box.appendChild(option);
+    }
+    select.appendChild(box);
+  }
+}
+
+function availableTasks() {
+  return Object.entries(caps.tasks || {})
+    .filter(([, row]) => row.available)
+    .map(([value]) => value);
+}
+
 // --- wiring -------------------------------------------------------------
-function onModalityChange() {
-  const modality = $('modality').value;
-  $('file-field').hidden = modality !== 'stt';
-  $('text-field').hidden = modality === 'stt';
-  const providers = providersFor(modality);
+// Media -> the accept filter and the Russian word for it. One table, because
+// the alternative is a chain of comparisons against task names.
+const MEDIA = {
+  image: { accept: 'image/*', one: 'Изображение', many: 'Изображения' },
+  audio: { accept: 'audio/*', one: 'Аудиофайл', many: 'Аудиофайлы' },
+  video: { accept: 'video/*', one: 'Видео', many: 'Видео' },
+  file: { accept: '', one: 'Файл', many: 'Файлы' },
+};
+
+function onTaskChange() {
+  const task = currentTask();
+  const sig = signature();
+  const media = [...sig.requires, ...sig.optional].filter((m) => m !== 'text');
+  const required = sig.requires.filter((m) => m !== 'text');
+
+  // Text and a file are no longer mutually exclusive: editing a picture needs
+  // both, and so does asking a question about one.
+  $('text-field').hidden = !sig.requires.includes('text') && !sig.optional.includes('text');
+  $('file-field').hidden = media.length === 0;
+  const primary = MEDIA[media[0]] || MEDIA.file;
+  $('attachments').accept = media.map((m) => (MEDIA[m] || MEDIA.file).accept)
+    .filter(Boolean).join(',');
+  $('file-label').textContent = primary.many;
+  $('file-help').textContent = required.length
+    ? 'Без файла запрос не уйдёт'
+    : 'Можно не прикреплять';
+  $('task-help').textContent = caps.labels.tasks?.[task]?.help || 'Что именно нужно сделать';
+
+  const providers = providersFor(task);
   fillSelect($('auto-provider'),
     providers.map((p) => ({ value: p.id, label: p.configured ? p.id : `${p.id} (не настроен)` })),
     '— любой —');
   renderParams();
   loadTree().then(onFormChange);
-  saveLocal('run:modality', modality);
+  saveLocal('run:task', task);
 }
 
 function onFormChange() {
   renderParams();
-  saveLocal(`run:draft:${$('modality').value}`, $('prompt').value);
+  saveLocal(`run:draft:${currentTask()}`, $('prompt').value);
   writeParams({
     ...readParams(),
-    modality: $('modality').value,
+    task: currentTask(),
     model_id: currentModelId() || undefined,
     provider: currentProvider() || undefined,
   });
@@ -650,9 +735,9 @@ function onFormChange() {
 }
 
 async function loadTree() {
-  tree = await api(`/registry/tree${query({ modality: $('modality').value })}`);
+  tree = await api(`/registry/tree${query({ task: currentTask() })}`);
   $('registry-freshness').textContent =
-    `${tree.total} ${tree.total === 1 ? 'модель' : 'моделей'} в реестре для этой модальности`;
+    `${tree.total} ${tree.total === 1 ? 'модель' : 'моделей'} в реестре для этой задачи`;
   rebuildCascade(0);
 }
 
@@ -671,21 +756,25 @@ async function boot() {
   caps = await api('/capabilities');
   const params = readParams();
 
-  fillSelect($('modality'),
-    Object.keys(caps.params).map((value) => ({
-      value, label: caps.labels.modalities[value]?.label || value,
-    })), '— выберите —');
-  $('modality').value = params.modality || loadLocal('run:modality') || 'chat';
-  if (!$('modality').value) $('modality').value = Object.keys(caps.params)[0];
+  fillTaskSelect();
+  // A task the address bar or a saved draft names may no longer exist, and a
+  // task nobody provides is offered but disabled — so fall back to whatever is
+  // actually available rather than to a literal.
+  const wanted = params.task || params.modality || loadLocal('run:task') || 'text-to-text';
+  $('task').value = availableTasks().includes(wanted) ? wanted : (availableTasks()[0] || '');
 
   fillSelect($('fallback'),
     caps.labels.fallback_choices.map((c) => ({ value: c.value, label: c.label })), 'показать ошибку');
   $('fallback').value = params.fallback || 'off';
 
   renderServerSettings();
-  $('prompt').value = loadLocal(`run:draft:${$('modality').value}`, '') || '';
+  // A draft saved under the old key survives one deploy, so nobody loses text
+  // they had typed when the page reloaded into the new vocabulary.
+  $('prompt').value = loadLocal(`run:draft:${currentTask()}`, '')
+    || loadLocal(`run:draft:${caps.tasks?.[currentTask()]?.billing_group}`, '')
+    || '';
 
-  onModalityChange();
+  onTaskChange();
   if (params.model_id) {
     mode = 'pick';
     setMode('pick');
@@ -710,7 +799,7 @@ function setMode(next) {
   onFormChange();
 }
 
-// Every active model of the current modality, flattened: the cascade is for
+// Every active model of the current task, flattened: the cascade is for
 // picking one carefully, this is for stacking several up quickly.
 function fillMultiPick() {
   const options = [];
@@ -726,7 +815,7 @@ function fillMultiPick() {
   fillSelect($('multi-pick'), options, '— выберите —');
 }
 
-$('modality').addEventListener('change', onModalityChange);
+$('task').addEventListener('change', onTaskChange);
 $('mode-auto').addEventListener('click', () => setMode('auto'));
 $('mode-pick').addEventListener('click', () => setMode('pick'));
 $('mode-multi').addEventListener('click', () => setMode('multi'));
@@ -749,7 +838,7 @@ $('model-id').addEventListener('input', () => { checkModelId(); onFormChange(); 
 $('fallback').addEventListener('change', onFormChange);
 $('fallback-steps').addEventListener('change', onFormChange);
 $('prompt').addEventListener('input',
-  () => saveLocal(`run:draft:${$('modality').value}`, $('prompt').value));
+  () => saveLocal(`run:draft:${currentTask()}`, $('prompt').value));
 $('show-plan').addEventListener('click',
   () => refreshPlan().then(() => renderPlan(lastPlan)).catch((e) => toast(e.message, true)));
 $('send').addEventListener('click', send);

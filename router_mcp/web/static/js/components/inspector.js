@@ -167,7 +167,8 @@ function requestTab(run, labels) {
   const policy = req.fallback;
   pane.appendChild(el('h4', 'Как спросили'));
   pane.appendChild(kvTable([
-    ['Модальность', labels?.modalities?.[run.modality]?.label || run.modality],
+    ['Задача', labels?.tasks?.[run.task]?.label || run.task || '—'],
+    ['Группа тарификации', labels?.modalities?.[run.modality]?.label || run.modality],
     ['Запрошенная модель', req.model_id],
     ['Уровень', req.tier],
     ['Поставщик (подсказка)', req.provider_hint],

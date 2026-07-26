@@ -10,9 +10,9 @@
     <h2>Запрос</h2>
 
     <div class="row">
-      <label>Модальность
-        <select id="modality"></select>
-        <span class="under">Какого рода запрос</span>
+      <label>Задача
+        <select id="task"></select>
+        <span class="under" id="task-help">Что именно нужно сделать</span>
       </label>
       <label>Метка пользователя
         <input id="user" type="text" value="web-tester">
@@ -118,8 +118,9 @@
         <textarea id="prompt" rows="6" placeholder="Введите текст…"></textarea>
         <span class="under">Черновик сохраняется в браузере автоматически</span>
       </label>
-      <label class="grow" id="file-field" hidden>Аудиофайл для распознавания
-        <input id="audio" type="file" accept="audio/*">
+      <label class="grow" id="file-field" hidden><span id="file-label">Файл</span>
+        <input id="attachments" type="file" multiple>
+        <span class="under" id="file-help"></span>
       </label>
     </fieldset>
 

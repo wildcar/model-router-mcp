@@ -1,1 +1,39 @@
-{"items":[{"id":1,"created_at":"2026-07-26T12:05:14+00:00","external_user_id":"web-tester","modality":"chat","service_provider_id":null,"model_provider":null,"model_id":"nope","requested_model_id":null,"fallback_reason":null,"status":"error","error_message":"UnknownModel: Unknown model_id: 'nope'","channel":"ui","tool":null,"client_id":null,"prompt_tokens":null,"completion_tokens":null,"total_tokens":null,"cache_read_tokens":null,"reasoning_tokens":null,"audio_seconds":null,"images":null,"characters":null,"cost_usd":0.0,"cost_source":"computed","pricing_mode":"per_request","latency_ms":1,"attempts":null,"finish_reason":null,"request_text":"hi"}],"total":1,"next_cursor":null,"facets":{}}
+{
+  "items": [
+    {
+      "id": 1,
+      "created_at": "2026-07-26T12:05:14+00:00",
+      "external_user_id": "web-tester",
+      "modality": "chat",
+      "service_provider_id": null,
+      "model_provider": null,
+      "model_id": "nope",
+      "requested_model_id": null,
+      "fallback_reason": null,
+      "status": "error",
+      "error_message": "UnknownModel: Unknown model_id: 'nope'",
+      "channel": "ui",
+      "tool": null,
+      "client_id": null,
+      "prompt_tokens": null,
+      "completion_tokens": null,
+      "total_tokens": null,
+      "cache_read_tokens": null,
+      "reasoning_tokens": null,
+      "audio_seconds": null,
+      "images": null,
+      "characters": null,
+      "cost_usd": 0.0,
+      "cost_source": "computed",
+      "pricing_mode": "per_request",
+      "latency_ms": 1,
+      "attempts": null,
+      "finish_reason": null,
+      "request_text": "hi",
+      "task": "text-to-text"
+    }
+  ],
+  "total": 1,
+  "next_cursor": null,
+  "facets": {}
+}
