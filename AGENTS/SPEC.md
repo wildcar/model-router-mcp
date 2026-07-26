@@ -75,6 +75,9 @@ on it; adapters never touch storage/mcp directly.
 24. ✅ Accounting tells a missing rate from a zero: `unpriced`, per-character TTS, cache/reasoning tokens at their own rates, notional subscription money kept apart. [console wave 2]
 25. ✅ Spend with groupings and a price-source split; the total is labelled a lower bound whenever it cannot be complete.
 26. ✅ Closed health summary, live provider key probes, MCP tool inventory with call statistics.
+27. ✅ Runs have identity and a lifecycle: submitted, polled, cancellable, idempotent by `client_request_id`, grouped by `batch_id`; the log row exists from the start and a restart closes it as `interrupted`. [console wave 3]
+28. ✅ CLI output is read line by line and reported as it arrives; cancelling a run kills the process.
+29. ✅ Retention: configurable lifetimes for log rows and response files, a preview, a purge and an orphan sweep. Unset means keep forever, which is the previous behaviour.
 
 ## Catalog freshness, price provenance, fallback
 
@@ -335,6 +338,69 @@ the log knows and the build no longer exposes are reported separately. There is
 no sessions screen: ADR-0003 makes the server stateless, so it would be empty by
 construction.
 
+## Runs and retention (27–29)
+
+Wave 3 of `docs/UI_CONCEPT_v2.md`.
+
+### A run
+
+`POST /api/v1/runs` accepts a request of any modality and answers 202 with a
+`run_id`; the console polls `GET /api/v1/runs/{id}` once a second and
+`DELETE`s it to cancel. No streaming: polling survives a closed tab, needs
+nothing from nginx and cannot collide with the streamable-HTTP session manager
+in the same process (concept §10.5, ADR-0003).
+
+The registry is in-process and is a view of what *this* process is doing. The
+durable record is `request_logs`, and the two halves of a row are now written at
+two different times:
+
+| Moment | Row |
+|---|---|
+| run accepted | inserted with `status='running'`, `cost_source='cost_unknown'` |
+| run finished | same row updated with the outcome, usage, cost and timeline |
+| terminal failure | same row updated to `error` |
+| attempt failure a fallback recovered from | a row of its own, as before |
+| operator cancelled | same row updated to `cancelled`, cost stays unknown |
+| service restarted mid-run | `interrupt_live_logs()` on startup → `interrupted` |
+
+Two consequences worth stating. The log is ordered by when a request *started*,
+so a recovered attempt failure sorts after the run that recovered from it. And a
+cancelled or interrupted run never records a cost of zero: the provider may have
+executed and billed the work, and zero is a claim.
+
+`client_request_id` is the idempotency key — looked up in the registry first and
+then in the log, so it still holds after a restart or an eviction. `batch_id`
+groups the N runs one operator action fanned out into; it is a log filter too.
+Concurrency is capped by `MAX_CONCURRENT_RUNS` (3): one SQLite connection behind
+one write lock serves the whole service.
+
+### Progress
+
+Adapters report through a ContextVar sink (`domain/progress.py`), the same
+mechanism as the HTTP retry trace and for the same reason: `generate()` is one
+signature shared by eight adapters, and threading a progress argument through
+all of them would change every adapter to serve one. Emitting with no sink
+installed is a no-op, so an MCP tool call is unaffected.
+
+The CLI adapters read stdout line by line (`run_subprocess(on_line=…)`), which
+is what makes a long run legible while it runs. claude uses
+`--output-format stream-json --verbose`; the single-object format is still
+parsed, so an older CLI or a `CLAUDE_COMMAND` carrying `--output-format json`
+keeps working. Cancelling kills the subprocess.
+
+The timeline is stored in `plan_json` for successful runs as well as failed
+ones, capped at 500 steps with the truncation stated in the list itself.
+
+### Retention
+
+`LOG_RETENTION_DAYS` and `BLOB_RETENTION_DAYS` are separate because they cost
+different things: the rows are small and are the only record of spend, the files
+are almost all of the bytes. Both default to 0 — keep forever, the behaviour
+before the policy existed. `GET /api/v1/retention` previews,
+`POST /api/v1/retention/purge` applies, and a nightly sweep does the same when
+either lifetime is set. Files go before the rows that name them: the reverse
+order would leave bytes nothing points at.
+
 ## Project structure
 
 ```
@@ -345,7 +411,8 @@ router_mcp/
   bootstrap.py         build_core(): wires DB, adapters, registry, router
   runtime.py           process-wide AppCore handle for MCP tools
   logging_config.py
-  domain/              modality, messages, errors (pure types)
+  domain/              modality, messages, errors, progress (pure types and
+                       the ContextVar sink work in flight reports through)
   adapters/            base (ABC + RetryClientMixin), _subprocess (CLI helper),
                        openrouter, deepseek, claude_api, codex_image, deepgram,
                        elevenlabs, codex_cli, claude_cli
@@ -358,9 +425,11 @@ router_mcp/
   web/                 api (JSON, mounted at /api/v1 and /api), views (Run and
                        error envelopes), capabilities (matrix from adapters),
                        labels (the glossary), health (summary + key probes),
-                       mcp_summary (tool inventory), pages (Jinja2 frames), templates/,
+                       mcp_summary (tool inventory), runs (the in-process run
+                       registry), retention (lifetimes, preview, purge),
+                       pages (Jinja2 frames), templates/,
                        static/{app.css, css/tokens.css,
-                       js/core/{api,dom,format,state,keys}.js,
+                       js/core/{api,dom,format,state,keys,runs}.js,
                        js/components/{json-view,inspector,timeline}.js,
                        js/pages/{run,models,logs,spend,overview,connections}.js}
 tests/                 conftest (one app per session), test_smoke (chain),

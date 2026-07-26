@@ -169,7 +169,41 @@ it as a managed service on this host.
      (`tests/test_acceptance.py`, `pip install -e ".[e2e]"`), driving a uvicorn
      subprocess. They found the «Прогон» form rendering no parameters at all
      when no provider is configured.
-- ✅ Tests green: `pytest` (145 passed). Three harnesses: pytest for the service,
+- ✅ Console wave 3 shipped (2026-07-26), all seven items of §21:
+  1. Run registry (`web/runs.py`) in process: `POST/GET/DELETE /api/v1/runs`,
+     202 plus polling once a second, `client_request_id` idempotency (checked in
+     memory and then against the log, so a key survives a restart), `batch_id`,
+     and a concurrency cap of three (`MAX_CONCURRENT_RUNS`) — the answer to open
+     question 5, chosen because one SQLite write lock serves everything.
+  2. The log row is opened when a run starts and closed when it ends. A run in
+     flight is visible to a second tab; a terminal failure closes the run's own
+     row instead of adding a second one; an intermediate attempt failure that a
+     fallback recovered from is still its own row, as before. Consequence worth
+     knowing: the log is ordered by when a request *started*, so a recovered
+     attempt failure sorts after the run that recovered from it.
+  3. `interrupt_live_logs()` on startup turns leftover `running` rows into
+     `interrupted` with `cost_unknown` — the provider may have billed the work.
+     Cancellation does the same as an outcome, never a confident zero.
+  4. CLI stdout is read line by line (`run_subprocess(on_line=…)`, 8 MiB line
+     buffer) and each event becomes a timeline step through a ContextVar sink
+     (`domain/progress.py`) — the same trick as the HTTP retry trace, because
+     `generate()` is shared by eight adapters. claude switched to
+     `--output-format stream-json --verbose`, with the single-object format
+     still parsed; its cache tokens are now normalized like the API adapter's.
+     Cancelling kills the subprocess.
+  5. `plan_json` is stored for successful runs too (capped at 500 steps, the
+     truncation stated in the timeline), so the inspector replays the same steps
+     a week later.
+  6. «Прогон» polls instead of waiting: elapsed clock, live timeline,
+     «Прервать». Third selection mode «Несколько» — chips, N runs under one
+     batch, a row per run, confirmation above three runs stating the money.
+     Attachments go by reference (`POST /api/v1/blobs`), which is also what
+     makes «Повторить распознавание» work from a log entry.
+  7. Retention exists (`web/retention.py`): `LOG_RETENTION_DAYS` and
+     `BLOB_RETENTION_DAYS`, both 0 = keep forever, a preview endpoint, a purge
+     endpoint, orphan-file collection and a nightly sweep that does nothing
+     until configured. The control sits on «Обзор» next to the size it explains.
+- ✅ Tests green: `pytest` (170 passed). Three harnesses: pytest for the service,
   `tests/js/` for the page modules under node against a stub DOM, and Playwright
   for the acceptance list. The last two skip when node or the browser is absent —
   the production host needs neither.
@@ -199,11 +233,16 @@ it as a managed service on this host.
 - Still unpriced on prod: the image, stt and tts seed rows, and Anthropic's
   catalog rows. The «Обзор» work list names them. Anthropic cache rates are
   worth entering for the same reason as DeepSeek's.
-- Wave 3 of `docs/UI_CONCEPT_v2.md`: in-process run registry with progress and
-  cancellation, line-by-line CLI output, `running`/`interrupted` recovery on
-  restart, the multi-model mode of «Прогон», `plan_json` replay in the log,
-  attachments by reference, and a retention policy for the log and the files
-  (nothing is ever deleted today).
+- Deploy wave 3 and check three things on prod: the `batch_id` column arrives by
+  migration on the first restart; a `run_cli` through **claude** still parses
+  (it switched to `--output-format stream-json`, verified locally against codex
+  and against the format claude 2.1.187 prints, but prod's grant is a different
+  one); and any rows left `running` by the restart show up as `interrupted`.
+- Decide the retention policy itself. The code is there and disabled: with
+  `LOG_RETENTION_DAYS`/`BLOB_RETENTION_DAYS` unset nothing is ever deleted,
+  exactly as before. The log is the only record of spend, so the number is a
+  decision, not a default — the files are the bulk of the bytes and can go
+  earlier than the rows that name them.
 - Phase 5 (cont.): subscription/amortization UI; tune seed prices.
 - Phase 6: hardening, optional streaming for long CLI/chat runs.
 
