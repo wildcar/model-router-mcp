@@ -66,6 +66,87 @@ PARAM_SPECS: dict[str, dict[str, Any]] = {
         "Имеет смысл только у рассуждающих моделей; остальные его игнорируют",
         default=None,
     ),
+    "system_prompt": _param(
+        "system_prompt", "text", "Системный промпт",
+        "Роль и правила, которые модель держит поверх запроса",
+        default=None,
+    ),
+    "negative_prompt": _param(
+        "negative_prompt", "text", "Чего не рисовать",
+        "Список того, чего в картинке быть не должно",
+        default=None,
+    ),
+    "aspect_ratio": _param(
+        "aspect_ratio", "text", "Соотношение сторон",
+        "Например 16:9. Что именно принимает модель, написано в её карточке",
+        default=None,
+    ),
+    "width": _param(
+        "width", "integer", "Ширина, пикселей", "Многие модели требуют кратности 8",
+        min=64, max=4096, step=8, default=None,
+    ),
+    "height": _param(
+        "height", "integer", "Высота, пикселей", "Многие модели требуют кратности 8",
+        min=64, max=4096, step=8, default=None,
+    ),
+    "num_outputs": _param(
+        "num_outputs", "integer", "Сколько вариантов",
+        "Каждый вариант оплачивается отдельно",
+        min=1, max=8, step=1, default=None,
+    ),
+    "num_inference_steps": _param(
+        "num_inference_steps", "integer", "Шагов расчёта",
+        "Больше шагов — дольше и дороже, качество растёт не бесконечно",
+        min=1, max=200, step=1, default=None,
+    ),
+    "guidance_scale": _param(
+        "guidance_scale", "number", "Строгость к описанию",
+        "Выше — ближе к тексту и однообразнее",
+        min=0.0, max=30.0, step=0.5, default=None,
+    ),
+    "strength": _param(
+        "strength", "number", "Насколько менять исходник",
+        "0 — почти не трогать, 1 — переписать заново",
+        min=0.0, max=1.0, step=0.05, default=None,
+    ),
+    "mask": _param(
+        "mask", "text", "Маска", "Ссылка на чёрно-белую картинку: белое меняется",
+        default=None,
+    ),
+    "seed": _param(
+        "seed", "integer", "Зерно",
+        "Одно и то же зерно даёт тот же результат. Пусто — каждый раз новое",
+        min=0, step=1, default=None,
+    ),
+    "output_format": _param(
+        "output_format", "text", "Формат файла", "Например png, jpg, mp3", default=None,
+    ),
+    "output_quality": _param(
+        "output_quality", "integer", "Качество сжатия",
+        "Для jpg и webp: выше число — больше файл",
+        min=1, max=100, step=1, default=None,
+    ),
+    "num_frames": _param(
+        "num_frames", "integer", "Кадров", "Длина клипа в кадрах",
+        min=1, max=1000, step=1, default=None,
+    ),
+    "fps": _param(
+        "fps", "integer", "Кадров в секунду", "Обычно 8, 16 или 24",
+        min=1, max=60, step=1, default=None,
+    ),
+    "duration": _param(
+        "duration", "integer", "Длительность, секунд", "Сколько звука сгенерировать",
+        min=1, max=600, step=1, default=None,
+    ),
+    "speed": _param(
+        "speed", "number", "Скорость речи", "1.0 — как есть, меньше — медленнее",
+        min=0.25, max=4.0, step=0.05, default=None,
+    ),
+    "translate": _param(
+        "translate", "text", "Переводить на английский",
+        "Расшифровка сразу переводится, вместо расшифровки на языке записи",
+        default=None,
+    ),
     "size": _param(
         "size", "select", "Размер картинки",
         "Ширина на высоту в пикселях. Пусто — размер из настроек сервера",
@@ -243,10 +324,17 @@ def build(
             "optional": sorted(m.value for m in sig.optional),
             "produces": sorted(m.value for m in sig.produces),
             "is_media_transform": sig.is_media_transform,
-            # Whether anything configured here can actually serve it. The console
-            # greys out a task nobody provides rather than hiding it, so the
-            # operator can see that the capability exists and is unconfigured.
+            # Two different answers, and conflating them is what the whole
+            # taxonomy is against. `available`: some adapter here can drive this
+            # task at all. `configured`: one of those adapters has its credentials.
+            # The console disables the first and merely warns about the second, so
+            # "мы так не умеем" never reads like "ключ не введён".
             "available": task.value in by_task,
+            "configured": any(
+                adapters[p].is_configured()
+                for p in by_task.get(task.value, {})
+                if p in adapters
+            ),
         }
         for task, sig in TASKS.items()
     }

@@ -21,6 +21,8 @@ from router_mcp.adapters.deepseek import PRICING_PAGE as deepseek_pricing_page
 from router_mcp.adapters.deepseek import DeepSeekAdapter
 from router_mcp.adapters.elevenlabs import ElevenLabsAdapter
 from router_mcp.adapters.openrouter import OpenRouterAdapter
+from router_mcp.adapters.replicate import PRICING_PAGE as replicate_pricing_page
+from router_mcp.adapters.replicate import ReplicateAdapter
 from router_mcp.blobs.store import BlobStore
 from router_mcp.config import Settings
 from router_mcp.domain.modality import Modality
@@ -29,6 +31,7 @@ from router_mcp.registry.models import RegistryModel
 from router_mcp.registry.service import RegistryService
 from router_mcp.routing.router import ModelRouter
 from router_mcp.storage.database import Database
+from router_mcp.web import public_blobs
 from router_mcp.web.runs import RunRegistry
 
 logger = logging.getLogger(__name__)
@@ -218,6 +221,33 @@ def _build_adapters(settings: Settings) -> list[ProviderSpec]:
                     "ElevenLabs text-to-speech", Task.TEXT_TO_SPEECH, tier="expensive",
                 )
             ],
+        ),
+        ProviderSpec(
+            id="replicate",
+            display_name="Replicate",
+            adapter_key="replicate",
+            base_url=settings.replicate_base_url,
+            pricing_url=replicate_pricing_page,
+            adapter=ReplicateAdapter(
+                api_token=settings.replicate_api_token,
+                base_url=settings.replicate_base_url,
+                models=settings.replicate_models,
+                wait_seconds=settings.replicate_wait_seconds,
+                poll_deadline_seconds=settings.replicate_poll_deadline_seconds,
+                poll_min_interval=settings.replicate_poll_min_interval_seconds,
+                poll_max_interval=settings.replicate_poll_max_interval_seconds,
+                model_ttl_seconds=settings.replicate_model_ttl_seconds,
+                max_output_mb=settings.replicate_max_output_mb,
+                max_output_files=settings.replicate_max_output_files,
+                stream_logs=settings.replicate_stream_logs,
+                # A file this service holds, addressed so Replicate can fetch it.
+                # None unless a public host and a signing key are both configured.
+                public_blob_url=lambda ref: public_blobs.make_url(settings, ref),
+                timeout_seconds=settings.http_timeout_seconds,
+                retries=settings.http_retries,
+            ),
+            # No seeds: the catalog is REPLICATE_MODELS, and a hardcoded slug
+            # outlives its author — which is exactly what happened with DeepSeek.
         ),
         ProviderSpec(
             id="deepseek",

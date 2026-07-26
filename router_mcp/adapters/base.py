@@ -227,8 +227,15 @@ class RetryClientMixin:
     _client: httpx.AsyncClient
     _retries: int
 
-    async def _request_with_retry(self, method: str, url: str, **kwargs: Any) -> httpx.Response:
-        attempts = self._retries + 1
+    async def _request_with_retry(
+        self, method: str, url: str, *, retries: int | None = None, **kwargs: Any
+    ) -> httpx.Response:
+        """`retries=0` opts out of the 5xx retry for a non-idempotent call.
+
+        Retrying a POST that *creates* something bills for a second one nobody
+        will collect. `retries` is not an httpx keyword, so `**kwargs` stays clean.
+        """
+        attempts = (self._retries if retries is None else retries) + 1
         started = time.monotonic()
         for attempt in range(1, attempts + 1):
             at_ms = int((time.monotonic() - started) * 1000)

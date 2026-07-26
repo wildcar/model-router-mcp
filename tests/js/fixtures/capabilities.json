@@ -50,16 +50,19 @@
     },
     {
       "id": "codex-oauth",
-      "display_name": "Codex (OAuth image)",
-      "adapter": "codex_image",
+      "display_name": "Codex (OAuth)",
+      "adapter": "codex_oauth",
       "enabled": true,
       "configured": true,
       "env_var": "CODEX_AUTH_PATH",
       "pricing_url": "https://platform.openai.com/docs/pricing",
       "tasks": [
-        "text-to-image"
+        "image-to-text",
+        "text-to-image",
+        "text-to-text"
       ],
       "modalities": [
+        "chat",
         "image"
       ]
     },
@@ -125,6 +128,34 @@
         "chat",
         "image"
       ]
+    },
+    {
+      "id": "replicate",
+      "display_name": "Replicate",
+      "adapter": "replicate",
+      "enabled": false,
+      "configured": false,
+      "env_var": "REPLICATE_API_TOKEN",
+      "pricing_url": "https://replicate.com/pricing",
+      "tasks": [
+        "image-to-image",
+        "image-to-text",
+        "image-to-video",
+        "speech-to-text",
+        "text-to-audio",
+        "text-to-image",
+        "text-to-speech",
+        "text-to-text",
+        "text-to-video"
+      ],
+      "modalities": [
+        "audio",
+        "chat",
+        "image",
+        "stt",
+        "tts",
+        "video"
+      ]
     }
   ],
   "tasks": {
@@ -141,7 +172,8 @@
         "text"
       ],
       "is_media_transform": true,
-      "available": true
+      "available": true,
+      "configured": true
     },
     "image-to-text": {
       "label": "Картинка в текст",
@@ -158,7 +190,8 @@
         "text"
       ],
       "is_media_transform": true,
-      "available": true
+      "available": true,
+      "configured": true
     },
     "text-to-image": {
       "label": "Текст в картинку",
@@ -173,7 +206,8 @@
         "image"
       ],
       "is_media_transform": true,
-      "available": true
+      "available": true,
+      "configured": true
     },
     "image-to-image": {
       "label": "Картинка в картинку",
@@ -189,7 +223,8 @@
         "image"
       ],
       "is_media_transform": true,
-      "available": false
+      "available": true,
+      "configured": false
     },
     "speech-to-text": {
       "label": "Речь в текст",
@@ -206,7 +241,8 @@
         "text"
       ],
       "is_media_transform": true,
-      "available": true
+      "available": true,
+      "configured": true
     },
     "text-to-speech": {
       "label": "Текст в речь",
@@ -221,7 +257,8 @@
         "audio"
       ],
       "is_media_transform": true,
-      "available": true
+      "available": true,
+      "configured": true
     },
     "text-to-audio": {
       "label": "Текст в музыку и звук",
@@ -236,7 +273,8 @@
         "audio"
       ],
       "is_media_transform": true,
-      "available": false
+      "available": true,
+      "configured": false
     },
     "text-to-video": {
       "label": "Текст в видео",
@@ -251,7 +289,8 @@
         "video"
       ],
       "is_media_transform": true,
-      "available": false
+      "available": true,
+      "configured": false
     },
     "image-to-video": {
       "label": "Картинка в видео",
@@ -268,7 +307,8 @@
         "video"
       ],
       "is_media_transform": true,
-      "available": false
+      "available": true,
+      "configured": false
     },
     "cli": {
       "label": "CLI",
@@ -283,7 +323,8 @@
         "text"
       ],
       "is_media_transform": false,
-      "available": true
+      "available": true,
+      "configured": true
     }
   },
   "params_by_task": {
@@ -325,6 +366,81 @@
             "type": "text",
             "label": "Рассуждение",
             "help": "Имеет смысл только у рассуждающих моделей; остальные его игнорируют",
+            "default": null
+          }
+        ],
+        "model_overrides": {}
+      },
+      "codex-oauth": {
+        "params": [
+          {
+            "name": "instructions",
+            "type": "text",
+            "label": "Системная инструкция",
+            "help": "Что модели держать в голове поверх запроса. Пусто — без инструкции",
+            "default": null
+          },
+          {
+            "name": "reasoning_effort",
+            "type": "select",
+            "label": "Глубина рассуждения",
+            "help": "Сколько модели думать перед ответом. Дольше — дороже",
+            "options": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "default": null
+          }
+        ],
+        "model_overrides": {}
+      },
+      "replicate": {
+        "params": [
+          {
+            "name": "system_prompt",
+            "type": "text",
+            "label": "Системный промпт",
+            "help": "Роль и правила, которые модель держит поверх запроса",
+            "default": null
+          },
+          {
+            "name": "temperature",
+            "type": "number",
+            "label": "Температура",
+            "help": "Разброс ответов: 0 — почти повторяемо, выше 1 — свободнее",
+            "min": 0.0,
+            "max": 2.0,
+            "step": 0.1,
+            "default": null
+          },
+          {
+            "name": "max_tokens",
+            "type": "integer",
+            "label": "Предел ответа, токенов",
+            "help": "Жёсткая граница. Упёршись в неё, модель обрывает ответ на полуслове",
+            "min": 1,
+            "max": 200000,
+            "step": 1,
+            "default": null
+          },
+          {
+            "name": "top_p",
+            "type": "number",
+            "label": "top_p",
+            "help": "Доля вероятной массы, из которой выбираются слова. Меняют вместо температуры, не вместе с ней",
+            "min": 0.0,
+            "max": 1.0,
+            "step": 0.05,
+            "default": null
+          },
+          {
+            "name": "seed",
+            "type": "integer",
+            "label": "Зерно",
+            "help": "Одно и то же зерно даёт тот же результат. Пусто — каждый раз новое",
+            "min": 0,
+            "step": 1,
             "default": null
           }
         ],
@@ -450,6 +566,72 @@
         ],
         "model_overrides": {}
       },
+      "codex-oauth": {
+        "params": [
+          {
+            "name": "instructions",
+            "type": "text",
+            "label": "Системная инструкция",
+            "help": "Что модели держать в голове поверх запроса. Пусто — без инструкции",
+            "default": null
+          },
+          {
+            "name": "reasoning_effort",
+            "type": "select",
+            "label": "Глубина рассуждения",
+            "help": "Сколько модели думать перед ответом. Дольше — дороже",
+            "options": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "default": null
+          }
+        ],
+        "model_overrides": {}
+      },
+      "replicate": {
+        "params": [
+          {
+            "name": "system_prompt",
+            "type": "text",
+            "label": "Системный промпт",
+            "help": "Роль и правила, которые модель держит поверх запроса",
+            "default": null
+          },
+          {
+            "name": "temperature",
+            "type": "number",
+            "label": "Температура",
+            "help": "Разброс ответов: 0 — почти повторяемо, выше 1 — свободнее",
+            "min": 0.0,
+            "max": 2.0,
+            "step": 0.1,
+            "default": null
+          },
+          {
+            "name": "max_tokens",
+            "type": "integer",
+            "label": "Предел ответа, токенов",
+            "help": "Жёсткая граница. Упёршись в неё, модель обрывает ответ на полуслове",
+            "min": 1,
+            "max": 200000,
+            "step": 1,
+            "default": null
+          },
+          {
+            "name": "top_p",
+            "type": "number",
+            "label": "top_p",
+            "help": "Доля вероятной массы, из которой выбираются слова. Меняют вместо температуры, не вместе с ней",
+            "min": 0.0,
+            "max": 1.0,
+            "step": 0.05,
+            "default": null
+          }
+        ],
+        "model_overrides": {}
+      },
       "anthropic-api": {
         "params": [
           {
@@ -536,13 +718,266 @@
         "model_overrides": {}
       },
       "codex-oauth": {
-        "params": [],
+        "params": [
+          {
+            "name": "size",
+            "type": "select",
+            "label": "Размер картинки",
+            "help": "Ширина на высоту в пикселях. Пусто — размер из настроек сервера",
+            "options": [
+              "1024x1024",
+              "1024x1536",
+              "1536x1024"
+            ],
+            "default": null
+          },
+          {
+            "name": "quality",
+            "type": "select",
+            "label": "Качество картинки",
+            "help": "Выше качество — дольше и дороже",
+            "options": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "default": null
+          }
+        ],
+        "model_overrides": {}
+      },
+      "replicate": {
+        "params": [
+          {
+            "name": "negative_prompt",
+            "type": "text",
+            "label": "Чего не рисовать",
+            "help": "Список того, чего в картинке быть не должно",
+            "default": null
+          },
+          {
+            "name": "aspect_ratio",
+            "type": "text",
+            "label": "Соотношение сторон",
+            "help": "Например 16:9. Что именно принимает модель, написано в её карточке",
+            "default": null
+          },
+          {
+            "name": "width",
+            "type": "integer",
+            "label": "Ширина, пикселей",
+            "help": "Многие модели требуют кратности 8",
+            "min": 64,
+            "max": 4096,
+            "step": 8,
+            "default": null
+          },
+          {
+            "name": "height",
+            "type": "integer",
+            "label": "Высота, пикселей",
+            "help": "Многие модели требуют кратности 8",
+            "min": 64,
+            "max": 4096,
+            "step": 8,
+            "default": null
+          },
+          {
+            "name": "num_outputs",
+            "type": "integer",
+            "label": "Сколько вариантов",
+            "help": "Каждый вариант оплачивается отдельно",
+            "min": 1,
+            "max": 8,
+            "step": 1,
+            "default": null
+          },
+          {
+            "name": "num_inference_steps",
+            "type": "integer",
+            "label": "Шагов расчёта",
+            "help": "Больше шагов — дольше и дороже, качество растёт не бесконечно",
+            "min": 1,
+            "max": 200,
+            "step": 1,
+            "default": null
+          },
+          {
+            "name": "guidance_scale",
+            "type": "number",
+            "label": "Строгость к описанию",
+            "help": "Выше — ближе к тексту и однообразнее",
+            "min": 0.0,
+            "max": 30.0,
+            "step": 0.5,
+            "default": null
+          },
+          {
+            "name": "seed",
+            "type": "integer",
+            "label": "Зерно",
+            "help": "Одно и то же зерно даёт тот же результат. Пусто — каждый раз новое",
+            "min": 0,
+            "step": 1,
+            "default": null
+          },
+          {
+            "name": "output_format",
+            "type": "text",
+            "label": "Формат файла",
+            "help": "Например png, jpg, mp3",
+            "default": null
+          },
+          {
+            "name": "output_quality",
+            "type": "integer",
+            "label": "Качество сжатия",
+            "help": "Для jpg и webp: выше число — больше файл",
+            "min": 1,
+            "max": 100,
+            "step": 1,
+            "default": null
+          }
+        ],
+        "model_overrides": {}
+      }
+    },
+    "image-to-image": {
+      "replicate": {
+        "params": [
+          {
+            "name": "negative_prompt",
+            "type": "text",
+            "label": "Чего не рисовать",
+            "help": "Список того, чего в картинке быть не должно",
+            "default": null
+          },
+          {
+            "name": "aspect_ratio",
+            "type": "text",
+            "label": "Соотношение сторон",
+            "help": "Например 16:9. Что именно принимает модель, написано в её карточке",
+            "default": null
+          },
+          {
+            "name": "width",
+            "type": "integer",
+            "label": "Ширина, пикселей",
+            "help": "Многие модели требуют кратности 8",
+            "min": 64,
+            "max": 4096,
+            "step": 8,
+            "default": null
+          },
+          {
+            "name": "height",
+            "type": "integer",
+            "label": "Высота, пикселей",
+            "help": "Многие модели требуют кратности 8",
+            "min": 64,
+            "max": 4096,
+            "step": 8,
+            "default": null
+          },
+          {
+            "name": "num_outputs",
+            "type": "integer",
+            "label": "Сколько вариантов",
+            "help": "Каждый вариант оплачивается отдельно",
+            "min": 1,
+            "max": 8,
+            "step": 1,
+            "default": null
+          },
+          {
+            "name": "num_inference_steps",
+            "type": "integer",
+            "label": "Шагов расчёта",
+            "help": "Больше шагов — дольше и дороже, качество растёт не бесконечно",
+            "min": 1,
+            "max": 200,
+            "step": 1,
+            "default": null
+          },
+          {
+            "name": "guidance_scale",
+            "type": "number",
+            "label": "Строгость к описанию",
+            "help": "Выше — ближе к тексту и однообразнее",
+            "min": 0.0,
+            "max": 30.0,
+            "step": 0.5,
+            "default": null
+          },
+          {
+            "name": "seed",
+            "type": "integer",
+            "label": "Зерно",
+            "help": "Одно и то же зерно даёт тот же результат. Пусто — каждый раз новое",
+            "min": 0,
+            "step": 1,
+            "default": null
+          },
+          {
+            "name": "output_format",
+            "type": "text",
+            "label": "Формат файла",
+            "help": "Например png, jpg, mp3",
+            "default": null
+          },
+          {
+            "name": "output_quality",
+            "type": "integer",
+            "label": "Качество сжатия",
+            "help": "Для jpg и webp: выше число — больше файл",
+            "min": 1,
+            "max": 100,
+            "step": 1,
+            "default": null
+          },
+          {
+            "name": "strength",
+            "type": "number",
+            "label": "Насколько менять исходник",
+            "help": "0 — почти не трогать, 1 — переписать заново",
+            "min": 0.0,
+            "max": 1.0,
+            "step": 0.05,
+            "default": null
+          },
+          {
+            "name": "mask",
+            "type": "text",
+            "label": "Маска",
+            "help": "Ссылка на чёрно-белую картинку: белое меняется",
+            "default": null
+          }
+        ],
         "model_overrides": {}
       }
     },
     "speech-to-text": {
       "deepgram": {
         "params": [],
+        "model_overrides": {}
+      },
+      "replicate": {
+        "params": [
+          {
+            "name": "language",
+            "type": "text",
+            "label": "Язык",
+            "help": "Код языка синтеза, например ru",
+            "default": "ru"
+          },
+          {
+            "name": "translate",
+            "type": "text",
+            "label": "Переводить на английский",
+            "help": "Расшифровка сразу переводится, вместо расшифровки на языке записи",
+            "default": null
+          }
+        ],
         "model_overrides": {}
       }
     },
@@ -562,6 +997,170 @@
             "label": "Язык",
             "help": "Код языка синтеза, например ru",
             "default": "ru"
+          }
+        ],
+        "model_overrides": {}
+      },
+      "replicate": {
+        "params": [
+          {
+            "name": "voice",
+            "type": "text",
+            "label": "Голос",
+            "help": "Имя или идентификатор голоса у поставщика. Пусто — голос по умолчанию",
+            "default": null
+          },
+          {
+            "name": "speed",
+            "type": "number",
+            "label": "Скорость речи",
+            "help": "1.0 — как есть, меньше — медленнее",
+            "min": 0.25,
+            "max": 4.0,
+            "step": 0.05,
+            "default": null
+          },
+          {
+            "name": "seed",
+            "type": "integer",
+            "label": "Зерно",
+            "help": "Одно и то же зерно даёт тот же результат. Пусто — каждый раз новое",
+            "min": 0,
+            "step": 1,
+            "default": null
+          }
+        ],
+        "model_overrides": {}
+      }
+    },
+    "text-to-audio": {
+      "replicate": {
+        "params": [
+          {
+            "name": "duration",
+            "type": "integer",
+            "label": "Длительность, секунд",
+            "help": "Сколько звука сгенерировать",
+            "min": 1,
+            "max": 600,
+            "step": 1,
+            "default": null
+          },
+          {
+            "name": "seed",
+            "type": "integer",
+            "label": "Зерно",
+            "help": "Одно и то же зерно даёт тот же результат. Пусто — каждый раз новое",
+            "min": 0,
+            "step": 1,
+            "default": null
+          },
+          {
+            "name": "output_format",
+            "type": "text",
+            "label": "Формат файла",
+            "help": "Например png, jpg, mp3",
+            "default": null
+          }
+        ],
+        "model_overrides": {}
+      }
+    },
+    "text-to-video": {
+      "replicate": {
+        "params": [
+          {
+            "name": "negative_prompt",
+            "type": "text",
+            "label": "Чего не рисовать",
+            "help": "Список того, чего в картинке быть не должно",
+            "default": null
+          },
+          {
+            "name": "aspect_ratio",
+            "type": "text",
+            "label": "Соотношение сторон",
+            "help": "Например 16:9. Что именно принимает модель, написано в её карточке",
+            "default": null
+          },
+          {
+            "name": "num_frames",
+            "type": "integer",
+            "label": "Кадров",
+            "help": "Длина клипа в кадрах",
+            "min": 1,
+            "max": 1000,
+            "step": 1,
+            "default": null
+          },
+          {
+            "name": "fps",
+            "type": "integer",
+            "label": "Кадров в секунду",
+            "help": "Обычно 8, 16 или 24",
+            "min": 1,
+            "max": 60,
+            "step": 1,
+            "default": null
+          },
+          {
+            "name": "seed",
+            "type": "integer",
+            "label": "Зерно",
+            "help": "Одно и то же зерно даёт тот же результат. Пусто — каждый раз новое",
+            "min": 0,
+            "step": 1,
+            "default": null
+          }
+        ],
+        "model_overrides": {}
+      }
+    },
+    "image-to-video": {
+      "replicate": {
+        "params": [
+          {
+            "name": "negative_prompt",
+            "type": "text",
+            "label": "Чего не рисовать",
+            "help": "Список того, чего в картинке быть не должно",
+            "default": null
+          },
+          {
+            "name": "aspect_ratio",
+            "type": "text",
+            "label": "Соотношение сторон",
+            "help": "Например 16:9. Что именно принимает модель, написано в её карточке",
+            "default": null
+          },
+          {
+            "name": "num_frames",
+            "type": "integer",
+            "label": "Кадров",
+            "help": "Длина клипа в кадрах",
+            "min": 1,
+            "max": 1000,
+            "step": 1,
+            "default": null
+          },
+          {
+            "name": "fps",
+            "type": "integer",
+            "label": "Кадров в секунду",
+            "help": "Обычно 8, 16 или 24",
+            "min": 1,
+            "max": 60,
+            "step": 1,
+            "default": null
+          },
+          {
+            "name": "seed",
+            "type": "integer",
+            "label": "Зерно",
+            "help": "Одно и то же зерно даёт тот же результат. Пусто — каждый раз новое",
+            "min": 0,
+            "step": 1,
+            "default": null
           }
         ],
         "model_overrides": {}
@@ -662,6 +1261,81 @@
             "type": "text",
             "label": "Рассуждение",
             "help": "Имеет смысл только у рассуждающих моделей; остальные его игнорируют",
+            "default": null
+          }
+        ],
+        "model_overrides": {}
+      },
+      "codex-oauth": {
+        "params": [
+          {
+            "name": "instructions",
+            "type": "text",
+            "label": "Системная инструкция",
+            "help": "Что модели держать в голове поверх запроса. Пусто — без инструкции",
+            "default": null
+          },
+          {
+            "name": "reasoning_effort",
+            "type": "select",
+            "label": "Глубина рассуждения",
+            "help": "Сколько модели думать перед ответом. Дольше — дороже",
+            "options": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "default": null
+          }
+        ],
+        "model_overrides": {}
+      },
+      "replicate": {
+        "params": [
+          {
+            "name": "system_prompt",
+            "type": "text",
+            "label": "Системный промпт",
+            "help": "Роль и правила, которые модель держит поверх запроса",
+            "default": null
+          },
+          {
+            "name": "temperature",
+            "type": "number",
+            "label": "Температура",
+            "help": "Разброс ответов: 0 — почти повторяемо, выше 1 — свободнее",
+            "min": 0.0,
+            "max": 2.0,
+            "step": 0.1,
+            "default": null
+          },
+          {
+            "name": "max_tokens",
+            "type": "integer",
+            "label": "Предел ответа, токенов",
+            "help": "Жёсткая граница. Упёршись в неё, модель обрывает ответ на полуслове",
+            "min": 1,
+            "max": 200000,
+            "step": 1,
+            "default": null
+          },
+          {
+            "name": "top_p",
+            "type": "number",
+            "label": "top_p",
+            "help": "Доля вероятной массы, из которой выбираются слова. Меняют вместо температуры, не вместе с ней",
+            "min": 0.0,
+            "max": 1.0,
+            "step": 0.05,
+            "default": null
+          },
+          {
+            "name": "seed",
+            "type": "integer",
+            "label": "Зерно",
+            "help": "Одно и то же зерно даёт тот же результат. Пусто — каждый раз новое",
+            "min": 0,
+            "step": 1,
             "default": null
           }
         ],
@@ -788,13 +1462,152 @@
         "model_overrides": {}
       },
       "codex-oauth": {
-        "params": [],
+        "params": [
+          {
+            "name": "size",
+            "type": "select",
+            "label": "Размер картинки",
+            "help": "Ширина на высоту в пикселях. Пусто — размер из настроек сервера",
+            "options": [
+              "1024x1024",
+              "1024x1536",
+              "1536x1024"
+            ],
+            "default": null
+          },
+          {
+            "name": "quality",
+            "type": "select",
+            "label": "Качество картинки",
+            "help": "Выше качество — дольше и дороже",
+            "options": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "default": null
+          }
+        ],
+        "model_overrides": {}
+      },
+      "replicate": {
+        "params": [
+          {
+            "name": "negative_prompt",
+            "type": "text",
+            "label": "Чего не рисовать",
+            "help": "Список того, чего в картинке быть не должно",
+            "default": null
+          },
+          {
+            "name": "aspect_ratio",
+            "type": "text",
+            "label": "Соотношение сторон",
+            "help": "Например 16:9. Что именно принимает модель, написано в её карточке",
+            "default": null
+          },
+          {
+            "name": "width",
+            "type": "integer",
+            "label": "Ширина, пикселей",
+            "help": "Многие модели требуют кратности 8",
+            "min": 64,
+            "max": 4096,
+            "step": 8,
+            "default": null
+          },
+          {
+            "name": "height",
+            "type": "integer",
+            "label": "Высота, пикселей",
+            "help": "Многие модели требуют кратности 8",
+            "min": 64,
+            "max": 4096,
+            "step": 8,
+            "default": null
+          },
+          {
+            "name": "num_outputs",
+            "type": "integer",
+            "label": "Сколько вариантов",
+            "help": "Каждый вариант оплачивается отдельно",
+            "min": 1,
+            "max": 8,
+            "step": 1,
+            "default": null
+          },
+          {
+            "name": "num_inference_steps",
+            "type": "integer",
+            "label": "Шагов расчёта",
+            "help": "Больше шагов — дольше и дороже, качество растёт не бесконечно",
+            "min": 1,
+            "max": 200,
+            "step": 1,
+            "default": null
+          },
+          {
+            "name": "guidance_scale",
+            "type": "number",
+            "label": "Строгость к описанию",
+            "help": "Выше — ближе к тексту и однообразнее",
+            "min": 0.0,
+            "max": 30.0,
+            "step": 0.5,
+            "default": null
+          },
+          {
+            "name": "seed",
+            "type": "integer",
+            "label": "Зерно",
+            "help": "Одно и то же зерно даёт тот же результат. Пусто — каждый раз новое",
+            "min": 0,
+            "step": 1,
+            "default": null
+          },
+          {
+            "name": "output_format",
+            "type": "text",
+            "label": "Формат файла",
+            "help": "Например png, jpg, mp3",
+            "default": null
+          },
+          {
+            "name": "output_quality",
+            "type": "integer",
+            "label": "Качество сжатия",
+            "help": "Для jpg и webp: выше число — больше файл",
+            "min": 1,
+            "max": 100,
+            "step": 1,
+            "default": null
+          }
+        ],
         "model_overrides": {}
       }
     },
     "stt": {
       "deepgram": {
         "params": [],
+        "model_overrides": {}
+      },
+      "replicate": {
+        "params": [
+          {
+            "name": "language",
+            "type": "text",
+            "label": "Язык",
+            "help": "Код языка синтеза, например ru",
+            "default": "ru"
+          },
+          {
+            "name": "translate",
+            "type": "text",
+            "label": "Переводить на английский",
+            "help": "Расшифровка сразу переводится, вместо расшифровки на языке записи",
+            "default": null
+          }
+        ],
         "model_overrides": {}
       }
     },
@@ -814,6 +1627,37 @@
             "label": "Язык",
             "help": "Код языка синтеза, например ru",
             "default": "ru"
+          }
+        ],
+        "model_overrides": {}
+      },
+      "replicate": {
+        "params": [
+          {
+            "name": "voice",
+            "type": "text",
+            "label": "Голос",
+            "help": "Имя или идентификатор голоса у поставщика. Пусто — голос по умолчанию",
+            "default": null
+          },
+          {
+            "name": "speed",
+            "type": "number",
+            "label": "Скорость речи",
+            "help": "1.0 — как есть, меньше — медленнее",
+            "min": 0.25,
+            "max": 4.0,
+            "step": 0.05,
+            "default": null
+          },
+          {
+            "name": "seed",
+            "type": "integer",
+            "label": "Зерно",
+            "help": "Одно и то же зерно даёт тот же результат. Пусто — каждый раз новое",
+            "min": 0,
+            "step": 1,
+            "default": null
           }
         ],
         "model_overrides": {}
@@ -868,6 +1712,89 @@
             "type": "text",
             "label": "Модель CLI",
             "help": "Передаётся движку как есть; пусто — модель по умолчанию у движка",
+            "default": null
+          }
+        ],
+        "model_overrides": {}
+      }
+    },
+    "audio": {
+      "replicate": {
+        "params": [
+          {
+            "name": "duration",
+            "type": "integer",
+            "label": "Длительность, секунд",
+            "help": "Сколько звука сгенерировать",
+            "min": 1,
+            "max": 600,
+            "step": 1,
+            "default": null
+          },
+          {
+            "name": "seed",
+            "type": "integer",
+            "label": "Зерно",
+            "help": "Одно и то же зерно даёт тот же результат. Пусто — каждый раз новое",
+            "min": 0,
+            "step": 1,
+            "default": null
+          },
+          {
+            "name": "output_format",
+            "type": "text",
+            "label": "Формат файла",
+            "help": "Например png, jpg, mp3",
+            "default": null
+          }
+        ],
+        "model_overrides": {}
+      }
+    },
+    "video": {
+      "replicate": {
+        "params": [
+          {
+            "name": "negative_prompt",
+            "type": "text",
+            "label": "Чего не рисовать",
+            "help": "Список того, чего в картинке быть не должно",
+            "default": null
+          },
+          {
+            "name": "aspect_ratio",
+            "type": "text",
+            "label": "Соотношение сторон",
+            "help": "Например 16:9. Что именно принимает модель, написано в её карточке",
+            "default": null
+          },
+          {
+            "name": "num_frames",
+            "type": "integer",
+            "label": "Кадров",
+            "help": "Длина клипа в кадрах",
+            "min": 1,
+            "max": 1000,
+            "step": 1,
+            "default": null
+          },
+          {
+            "name": "fps",
+            "type": "integer",
+            "label": "Кадров в секунду",
+            "help": "Обычно 8, 16 или 24",
+            "min": 1,
+            "max": 60,
+            "step": 1,
+            "default": null
+          },
+          {
+            "name": "seed",
+            "type": "integer",
+            "label": "Зерно",
+            "help": "Одно и то же зерно даёт тот же результат. Пусто — каждый раз новое",
+            "min": 0,
+            "step": 1,
             "default": null
           }
         ],

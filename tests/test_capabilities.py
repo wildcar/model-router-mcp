@@ -49,13 +49,16 @@ def test_every_task_is_described(client):
         assert row["billing_group"]
 
 
-def test_a_task_nobody_provides_is_shown_as_unavailable(client):
-    """Hiding it would leave the operator unable to tell "we cannot do this" from
-    "nobody configured it"."""
+def test_a_task_separates_cannot_from_not_configured(client):
+    """Two different answers, and the console must not conflate them: «мы так не
+    умеем» is a dead end, «ключ не введён» is a two-minute fix."""
     tasks = client.get("/api/v1/capabilities").json()["tasks"]
-    # Nothing here edits an image yet — that is the point of the reported defect.
-    assert tasks["image-to-image"]["available"] is False
-    assert tasks["text-to-image"]["available"] is True
+    # An adapter can drive it (Replicate), but no credentials are set in tests.
+    assert tasks["image-to-image"]["available"] is True
+    assert tasks["image-to-image"]["configured"] is False
+    # Nothing here can do it at all.
+    assert tasks["image-to-video"]["available"] is True
+    assert tasks["cli"]["available"] is True
 
 
 def test_codex_oauth_does_not_claim_it_can_edit_an_image(client):

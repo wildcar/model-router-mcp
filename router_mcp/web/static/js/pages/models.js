@@ -199,6 +199,23 @@ function showUndo(text) {
   showUndo._t = setTimeout(() => { $('undo-bar').hidden = true; }, 8000);
 }
 
+// A rate that is already per unit, not per million: $/second of compute or of
+// audio. Sharing `priceField` would divide it by a million on the way in.
+function plainRateField(id, label, unit, value) {
+  const wrap = el('label', undefined, { className: 'price-field' });
+  wrap.appendChild(document.createTextNode(label));
+  const group = el('span', undefined, { className: 'input-unit' });
+  const input = el('input', undefined, { id });
+  input.type = 'number';
+  input.step = 'any';
+  input.value = value ? String(value) : '';
+  group.appendChild(input);
+  group.appendChild(el('span', unit, { className: 'unit' }));
+  wrap.appendChild(group);
+  wrap.appendChild(el('span', `было ${value || 0}`, { className: 'under' }));
+  return wrap;
+}
+
 function priceField(id, label, perMillion) {
   const wrap = el('label', undefined, { className: 'price-field' });
   wrap.appendChild(document.createTextNode(label));
@@ -258,6 +275,22 @@ function select(model) {
       { className: 'hint warn' }));
   }
 
+  // Only where it means something: a model billed per token has no compute rate
+  // and a field of zeroes on every row teaches the operator to ignore the card.
+  const billedByCompute = (model.modalities || []).some((m) => m === 'audio' || m === 'video')
+    || model.service_provider === 'replicate'
+    || model.compute_price_per_second > 0;
+  if (billedByCompute) {
+    card.appendChild(plainRateField(
+      'edit-compute', 'Секунда расчёта', '$/с', model.compute_price_per_second));
+    if (!model.compute_price_per_second) {
+      card.appendChild(el('p',
+        'Ставка за секунду расчёта не задана: прогон запишется как «нет методики», '
+        + 'а не как бесплатный. Цену смотрите на странице модели у поставщика.',
+        { className: 'hint warn' }));
+    }
+  }
+
   const origin = caps.labels.price_source_kinds[model.price_source_kind];
   card.appendChild(el('p', `Откуда: ${origin?.label || model.price_source_kind}`,
     { className: 'hint', title: origin?.help || '' }));
@@ -299,6 +332,10 @@ async function save(model) {
   const prompt = Number($('edit-prompt').value);
   const completion = Number($('edit-completion').value);
   const cacheRead = Number($('edit-cache-read').value);
+  // Absent unless the field was rendered, and an empty field means "unchanged".
+  const computeField = $('edit-compute');
+  const compute = computeField && computeField.value !== ''
+    ? Number(computeField.value) : null;
   if (!confirmJump('Промпт', model.prompt_price * 1e6, prompt)) return;
   if (!confirmJump('Ответ', model.completion_price * 1e6, completion)) return;
   const updated = await api(
@@ -307,6 +344,7 @@ async function save(model) {
       prompt_price: prompt,
       completion_price: completion,
       cache_read_price: cacheRead,
+      ...(compute === null ? {} : { compute_price_per_second: compute }),
       revision: model.revision } });
   toast('Цена сохранена');
   replace(updated);

@@ -314,6 +314,12 @@ def test_the_form_shows_only_parameters_the_adapter_reads(page, live_server):
     base, _ = live_server
     page.goto(base)
     page.wait_for_selector("#params label")
+    # The screen opens on whatever can actually run here, so the task is chosen
+    # explicitly rather than assumed.
+    page.select_option("#task", "text-to-text")
+    page.wait_for_function(
+        "() => document.querySelector('#params').innerText.includes('Температура')"
+    )
     chat_params = page.locator("#params").inner_text()
     assert "Температура" in chat_params
 
@@ -398,11 +404,12 @@ def test_the_multi_model_mode_runs_one_row_per_model(page, live_server):
             data={
                 "service_provider_id": "deepseek",
                 "model_id": model_id,
-                "modalities": ["chat"],
+                "tasks": ["text-to-text"],
             },
         )
     page.goto(base)
     page.wait_for_selector("#params")
+    page.select_option("#task", "text-to-text")
     page.get_by_role("tab", name="Несколько").click()
     for model_id in ("compare/a", "compare/b"):
         page.select_option("#multi-pick", model_id)

@@ -33,7 +33,7 @@ from router_mcp.domain.task import (
 from router_mcp.mcp_server.serialize import model_to_dict
 from router_mcp.registry.models import RegistryModel
 from router_mcp.runtime import get_core
-from router_mcp.web import capabilities, health, mcp_summary, retention
+from router_mcp.web import capabilities, health, mcp_summary, public_blobs, retention
 from router_mcp.web.views import page, run_from_dispatch, run_from_log
 
 api_router = APIRouter()
@@ -928,6 +928,9 @@ class ModelPatch(BaseModel):
     image_price: float | None = None
     audio_price_per_second: float | None = None
     character_price: float | None = None    # USD per character (TTS)
+    # USD per second of the provider's own compute — not per second of audio.
+    # This is the only rate most Replicate models have.
+    compute_price_per_second: float | None = None
     display_name: str | None = None
     tier: str | None = None
     price_source: str | None = None
@@ -970,6 +973,7 @@ async def api_patch_model(
             ("image_price", body.image_price),
             ("audio_price_per_second", body.audio_price_per_second),
             ("character_price", body.character_price),
+            ("compute_price_per_second", body.compute_price_per_second),
             ("display_name", body.display_name),
             ("tier", body.tier),
             ("price_source", body.price_source),
@@ -982,7 +986,8 @@ async def api_patch_model(
             k in fields
             for k in ("prompt_price", "completion_price", "image_price",
                       "audio_price_per_second", "character_price",
-                      "cache_read_price", "cache_write_price")
+                      "cache_read_price", "cache_write_price",
+                      "compute_price_per_second")
         )
         if touched_price:
             # A hand-entered price survives synchronisation, and the criterion is
@@ -1057,6 +1062,25 @@ async def api_delete_model(service_provider_id: str, model_id: str) -> dict[str,
 # an `.html` payload into a response, and serving it inline would run it on the
 # same origin as the console, behind the operator's Basic-auth session.
 INLINE_MIME_PREFIXES = ("image/", "audio/")
+
+
+@blob_router.get("/public/blobs/{ref}")
+async def serve_public_blob(
+    ref: str, request: Request, exp: str | None = None, sig: str | None = None
+) -> Response:
+    """One blob, by a signed link that expires.
+
+    The only route outside the console's auth gate, and it exists for exactly one
+    reason: a provider that takes file inputs by URL (Replicate) has to be able to
+    fetch ours, and the inline form is capped at 256 KB. Not an open blob store —
+    the signature names one ref and one deadline, and without a signing key
+    configured nothing is served at all.
+    """
+    core = get_core()
+    problem = public_blobs.verify(core.settings, ref, exp, sig)
+    if problem is not None:
+        raise NotFound(problem)
+    return await serve_blob(ref, request)
 
 
 @blob_router.get("/blobs/{ref}")

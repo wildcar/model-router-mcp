@@ -30,6 +30,7 @@ service and administering the registry.
 MCP client ─┐                         ┌─ adapters/* (one per provider):
             ├─→ FastAPI app ──────────┤    openrouter (chat+image), deepseek &
 Web browser ┘   ├─ /mcp  (FastMCP …)  │    claude_api (chat), codex_oauth (text/vision/image),
+                │                     │    replicate (many tasks, async),
                 │                     │    deepgram (stt), elevenlabs (tts),
                 │                     └    codex_cli & claude_cli (cli)
                 ├─ /api/v1/* (JSON API; also mounted at /api for old pages)
@@ -80,6 +81,9 @@ on it; adapters never touch storage/mcp directly.
 28. ✅ CLI output is read line by line and reported as it arrives; cancelling a run kills the process.
 29. ✅ Retention: configurable lifetimes for log rows and response files, a preview, a purge and an orphan sweep. Unset means keep forever, which is the previous behaviour.
 30. ✅ Tasks and media are two declared axes; `Modality` is the billing/endpoint group. A model declares the set of tasks it supports, so "produces images but cannot edit one" is expressible. [ADR-0006]
+31. ✅ Asynchronous providers: a prediction is created, polled, cancellable upstream, and its result is fetched into the blob store before the provider's link expires. Billing per second of provider compute is its own unit and its own rate. [ADR-0007]
+32. ✅ Replicate as a provider: the catalog is an env-configured allowlist, inputs are mapped through each model's own OpenAPI schema, prices arrive `unknown` and are typed in by hand.
+33. ✅ A stored file can be handed to a provider by a signed, expiring link on a separate host; without a signing key nothing is served on that path.
 
 ## Tasks, media and billing groups (30)
 
@@ -120,6 +124,34 @@ joined), `ProviderAdapter.supported_tasks`, `SUPPORTED_PARAMS` keyed by task.
 where `chat` means `text-to-text`, `image` means `text-to-image` (the old
 `generate_image` had no way to send an input image), `stt`/`tts`/`cli` map to
 their obvious task. `request_logs` stores both `task` and `modality`.
+
+## Asynchronous providers and compute billing (31–33)
+
+Contract for 31–33. Reasoning: `docs/adr/0007-asynchronous-provider-predictions.md`.
+
+A prediction is created with `Prefer: wait` and `Cancel-After`, and the create
+call is **never retried** except on 429 — a retried create bills twice. Polling
+backs off from 1 s to 10 s; timeline steps follow a coarser ladder so a long run
+cannot exhaust the 500-step cap. Cancelling a run cancels it upstream, because
+the provider charges by the second until told to stop.
+
+Results are downloaded into the blob store by a client carrying no credentials
+(the files are on another host). Bounded by `REPLICATE_MAX_OUTPUT_MB` and by
+count; anything larger stays a link and the run still succeeds.
+
+**Per second of provider compute** is a billing unit of its own:
+`Usage.compute_seconds` metered from the provider's own figure, priced by
+`RegistryModel.compute_price_per_second`, in the `audio` and `video` billing
+groups. Never `audio_price_per_second`, which counts seconds of a file.
+
+Replicate rows arrive `price_source_kind='unknown'` and `tier='expensive'`, so
+they stay out of automatic selection until a rate is entered by hand, and a run
+that consumes compute with no rate is `unpriced`.
+
+`GET /public/blobs/{ref}?exp&sig` is the only route outside the auth gate: an
+HMAC over the ref and the deadline, on a separate host
+(`PUBLIC_BLOB_BASE_URL`), so a provider that takes file inputs by URL can fetch
+one file for a few minutes. No `PUBLIC_BLOB_SIGNING_KEY`, no service at all.
 
 ## Catalog freshness, price provenance, fallback
 
@@ -472,7 +504,7 @@ router_mcp/
   domain/              modality, messages, errors, progress (pure types and
                        the ContextVar sink work in flight reports through)
   adapters/            base (ABC + RetryClientMixin), _subprocess (CLI helper),
-                       openrouter, deepseek, claude_api, codex_oauth, deepgram,
+                       openrouter, replicate, deepseek, claude_api, codex_oauth, deepgram,
                        elevenlabs, codex_cli, claude_cli
   registry/            models (RegistryModel), service (per-provider catalog sync)
   routing/router.py    ModelRouter.resolve + dispatch

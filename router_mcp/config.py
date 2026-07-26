@@ -90,6 +90,43 @@ class Settings(BaseSettings):
     # list, not a mirror. Empty means the adapter reports no catalog at all —
     # never an empty one, which the sync would read as "deprecate everything".
     replicate_models: str = Field(default="", alias="REPLICATE_MODELS")
+    # Hold the create call open this long for a synchronous answer; the API caps
+    # it at 60. A fast image then never enters the poll loop at all.
+    replicate_wait_seconds: int = Field(default=60, alias="REPLICATE_WAIT_SECONDS")
+    # Give up and cancel after this. Also sent as `Cancel-After`, so a prediction
+    # this process abandons stops billing instead of running to completion.
+    replicate_poll_deadline_seconds: int = Field(
+        default=900, alias="REPLICATE_POLL_DEADLINE_SECONDS"
+    )
+    replicate_poll_min_interval_seconds: float = Field(
+        default=1.0, alias="REPLICATE_POLL_MIN_INTERVAL_SECONDS"
+    )
+    replicate_poll_max_interval_seconds: float = Field(
+        default=10.0, alias="REPLICATE_POLL_MAX_INTERVAL_SECONDS"
+    )
+    # How long a model's version hash and input schema are cached in process.
+    replicate_model_ttl_seconds: int = Field(default=3600, alias="REPLICATE_MODEL_TTL_SECONDS")
+    # Results are fetched into the blob store because Replicate's own links
+    # expire in about an hour. Bigger ones stay links and say so.
+    replicate_max_output_mb: float = Field(default=32.0, alias="REPLICATE_MAX_OUTPUT_MB")
+    replicate_max_output_files: int = Field(default=8, alias="REPLICATE_MAX_OUTPUT_FILES")
+    # Put the model's own progress output on the run timeline.
+    replicate_stream_logs: bool = Field(default=True, alias="REPLICATE_STREAM_LOGS")
+
+    # --- Handing our own files to a provider ------------------------------
+    # A provider that takes file inputs by URL needs to reach ours. Empty means
+    # no such host exists and only small files (inline data URIs) can be sent.
+    # Set it to a domain that resolves to this service, e.g. https://blob.example.org
+    public_blob_base_url: str | None = Field(default=None, alias="PUBLIC_BLOB_BASE_URL")
+    # Links are signed and expire: blobs hold user requests and answers, and
+    # "every blob is public" is a different and much worse thing than "this file,
+    # for the next few minutes".
+    public_blob_url_ttl_seconds: int = Field(
+        default=900, alias="PUBLIC_BLOB_URL_TTL_SECONDS"
+    )
+    # The HMAC key. Without it no public link is ever issued, which is the safe
+    # default: an unsigned public path would serve any ref to anyone who guesses.
+    public_blob_signing_key: str | None = Field(default=None, alias="PUBLIC_BLOB_SIGNING_KEY")
 
     # --- Codex (OAuth image generation) ---------------------------------
     codex_auth_path: str | None = Field(default=None, alias="CODEX_AUTH_PATH")

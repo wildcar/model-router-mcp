@@ -3,9 +3,9 @@
 // Three rules from §5 and §10 shape everything here. The form is built from
 // /api/v1/capabilities, so a field is on screen exactly when the adapter behind
 // the chosen (task, provider) pair reads it, and the input controls follow the
-// task's own signature — which is what makes text and a picture usable together. The plan is free and recomputed
-// as the discrete fields change, so "куда уйдёт запрос" is answered before the
-// send button. And the send button carries the estimate, because a price after
+// task's own signature — which is what makes text and a picture usable together.
+// The plan is free and recomputed as the discrete fields change, so "куда уйдёт
+// запрос" is answered before the send button. And the send button carries the estimate, because a price after
 // the fact is a receipt, not a decision.
 
 import { api, ApiError, query } from '../core/api.js';
@@ -668,8 +668,11 @@ function remember(run) {
 
 // Tasks grouped by their billing group, because ten flat options read as a list
 // of jargon while «Картинка: текст в картинку / картинка в картинку» reads as a
-// choice. A task nothing here provides stays visible and disabled: hiding it
-// would leave no way to tell "impossible" from "not configured yet".
+// choice.
+//
+// Two different unavailabilities, kept apart: no adapter can do it at all
+// (disabled), or one can but has no credentials (selectable, labelled). Hiding
+// either would leave no way to tell a dead end from a two-minute fix.
 function fillTaskSelect() {
   const select = $('task');
   clear(select);
@@ -682,7 +685,10 @@ function fillTaskSelect() {
     const box = el('optgroup');
     box.label = caps.labels.modalities?.[group]?.label || group;
     for (const [value, row] of rows) {
-      const option = el('option', row.available ? row.label : `${row.label} (нет модели)`);
+      let suffix = '';
+      if (!row.available) suffix = ' (нет модели)';
+      else if (!row.configured) suffix = ' (поставщик не настроен)';
+      const option = el('option', `${row.label}${suffix}`);
       option.value = value;
       option.disabled = !row.available;
       box.appendChild(option);
@@ -691,10 +697,12 @@ function fillTaskSelect() {
   }
 }
 
+// For the default selection: prefer a task that would actually run, fall back to
+// one that at least exists. A first-run installation has none of the former.
 function availableTasks() {
-  return Object.entries(caps.tasks || {})
-    .filter(([, row]) => row.available)
-    .map(([value]) => value);
+  const rows = Object.entries(caps.tasks || {});
+  const configured = rows.filter(([, r]) => r.available && r.configured).map(([v]) => v);
+  return configured.length ? configured : rows.filter(([, r]) => r.available).map(([v]) => v);
 }
 
 // --- wiring -------------------------------------------------------------
