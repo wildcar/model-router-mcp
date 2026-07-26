@@ -71,6 +71,9 @@ def test_mcp_summary_lists_every_tool_with_its_schema(client):
     body = client.get("/api/v1/mcp/summary").json()
     names = {tool["name"] for tool in body["tools"]}
     assert {"chat", "list_models", "run_cli", "get_usage"} <= names
+    # Editing an image is its own tool, because it is its own capability: a model
+    # that draws from a description usually cannot change a picture it is handed.
+    assert {"generate_image", "edit_image"} <= names
     for tool in body["tools"]:
         # The schema is what makes the tab worth opening: it sits next to the
         # matching /api handle and any divergence shows up immediately.

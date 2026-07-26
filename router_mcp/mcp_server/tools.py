@@ -83,6 +83,8 @@ async def chat(
     external_user_id: str,
     text: str | None = None,
     messages: list[dict[str, Any]] | None = None,
+    images_b64: list[str] | None = None,
+    image_mime: str = "image/png",
     model_id: str | None = None,
     tier: str | None = None,
     provider: str | None = None,
@@ -95,13 +97,24 @@ async def chat(
     history). `model_id` pins a specific model; otherwise the router picks one by
     `tier`/`provider` hints.
 
+    Pass `images_b64` to ask about pictures. The task then becomes `image-to-text`
+    and only models that declare it are eligible — a model that can *draw* is not
+    thereby able to *look*, so the two are routed separately.
+
     `fallback` covers the case where the pinned model was retired or is down:
     `{"policy": "same"|"cheaper"|"pricier", "max_steps": 1, "scope":
     "provider"|"vendor"|"any"}` (or just the policy name). The reply then carries
     `requested_model_id` and `fallback_reason` alongside the model actually used.
     """
+    attachments = [
+        Attachment(kind="image", mime=image_mime, data=base64.b64decode(raw))
+        for raw in images_b64 or []
+    ]
     request = RouterRequest(
-        task=Task.TEXT_TO_TEXT,
+        # The task follows from what arrived rather than from the tool name: one
+        # tool, two tasks, and the caller does not have to know the vocabulary.
+        task=Task.IMAGE_TO_TEXT if attachments else Task.TEXT_TO_TEXT,
+        attachments=attachments,
         external_user_id=external_user_id,
         model_id=model_id,
         tier=tier,
@@ -143,6 +156,53 @@ async def generate_image(
         fallback=FallbackPolicy.parse(fallback),
         channel="mcp",
         tool="generate_image",
+    )
+    result = await dispatch_tool(request)
+    out = dispatch_summary(result)
+    out.update(attachments_b64(result.response.attachments, core.blobs))
+    return out
+
+
+@mcp.tool()
+async def edit_image(
+    external_user_id: str,
+    prompt: str,
+    image_b64: str,
+    mime: str = "image/png",
+    mask_b64: str | None = None,
+    model_id: str | None = None,
+    provider: str | None = None,
+    params: dict[str, Any] | None = None,
+    fallback: dict[str, Any] | str | None = None,
+) -> dict[str, Any]:
+    """Change an existing image according to a text instruction (`image-to-image`).
+
+    A separate tool from `generate_image` because it is a separate capability:
+    most models that draw from a description cannot edit a picture they are given,
+    and asking one to do so used to route silently to a generator, which returned
+    a brand-new image instead of the edit. If nothing configured here supports it,
+    the call fails saying so.
+
+    `mask_b64` marks the region to change, where the model accepts one.
+    `fallback` works as in `chat`.
+    """
+    core = get_core()
+    attachments = [Attachment(kind="image", mime=mime, data=base64.b64decode(image_b64))]
+    if mask_b64:
+        attachments.append(
+            Attachment(kind="image", mime=mime, data=base64.b64decode(mask_b64))
+        )
+    request = RouterRequest(
+        task=Task.IMAGE_TO_IMAGE,
+        external_user_id=external_user_id,
+        model_id=model_id,
+        provider_hint=provider,
+        text=prompt,
+        attachments=attachments,
+        params=params or {},
+        fallback=FallbackPolicy.parse(fallback),
+        channel="mcp",
+        tool="edit_image",
     )
     result = await dispatch_tool(request)
     out = dispatch_summary(result)
