@@ -218,6 +218,62 @@ it as a managed service on this host.
   keeps its request (#8221), a message history round-trips (#8222, #8223), and
   #8218 from before the change opens with its text and nulls. Those three rows
   under `request-tab-check` are verification, not traffic.
+- ✅ Задача как ключ маршрутизации (ADR-0006, 2026-07-26). Одна `Modality`
+  тянула шесть ролей сразу, и по ней нельзя было выразить «умеет нарисовать, но
+  не умеет поправить» — с этого начался разговор про codex-oauth. Теперь две оси:
+  `Media` (чем является полезная нагрузка) и `Task` (что просят сделать, словарём
+  HuggingFace `pipeline_tag`, им же названы коллекции у Replicate). У каждой
+  задачи статичная подпись в терминах сред, поэтому проверка запроса, сборка
+  формы и работа с вложениями читают одну таблицу вместо ветки на задачу.
+  `Modality` осталась вторым, грубым уровнем — группой тарификации, она же имя
+  ручки; добавились `audio` и `video`. Бухгалтерия про задачи не знает вообще,
+  поэтому исторические строки журнала считаются ровно как раньше. Восемь волн,
+  каждая с зелёным прогоном:
+  A. `domain/task.py`, `Modality` как группа тарификации, русские подписи.
+  B. Колонки `registry_models.tasks` и `request_logs.task` миграцией с обратным
+     заполнением; `modality` не переписывается. Проверено на копии живой базы:
+     колонки денег выходят байт в байт. Плюс `compute_price_per_second`.
+  C. Все девять адаптеров объявляют `supported_tasks`, `SUPPORTED_PARAMS`
+     ключуется задачей, `supported_modalities` стало производным свойством.
+     `RouterRequest.task` с `modality` как свойством над ним — из пятнадцати мест
+     в router.py настоящих правок осталось шесть.
+  D. Маршрутизация и лестница подстановок фильтруются задачей; `ladder_price`
+     упорядочивает по ставке группы; `BILLING_UNITS` вместо словаря из четырёх
+     ставок в `_estimate`.
+  E. `/capabilities` до schema_version 2 (`tasks`, `params_by_task`, старый
+     `params` живёт один выпуск), `task` на `/runs` и `/plan`, список
+     `attachments`, инструмент `edit_image`, картинки на входе `chat`.
+  F. Консоль: селектор задач с группировкой, поля из подписи задачи, текст и
+     файл больше не взаимоисключающие, фильтры журнала из `/capabilities`.
+  G. codex-oauth целиком: текст и vision через тот же `/responses`, две
+     засеянные модели вместо одной, `size` и `quality` в параметрах.
+     `image-to-image` он не умеет и получает внятный отказ.
+  H. Новый провайдер Replicate (ADR-0007).
+- ✅ Провайдер Replicate (2026-07-26). Первый асинхронный: создание предсказания
+  не повторяется (кроме 429), опрос с отступом и отдельной, более редкой
+  лестницей шагов в таймлайн, отмена отменяет и наверху. Результаты скачиваются
+  в blob-store вторым клиентом без токена, потому что ссылки провайдера живут
+  около часа. Секунда расчёта у провайдера — своя единица тарификации, своя
+  колонка ставки и своя ветка в бухгалтерии. Каталог это allowlist
+  `REPLICATE_MODELS`, у каждой модели читается её OpenAPI-схема: по ней
+  раскладываются поля и проверяются значения. Цены приезжают `unknown`.
+  Проверено живьём на dev: каталог из трёх моделей, схемы прочитаны, версии
+  получены; flux-schnell отработал через `Prefer: wait`, 0.54 секунды расчёта,
+  webp на 36 КБ осел в blob-store, строка журнала записана как `unpriced`.
+- ✅ Входные файлы уходят провайдеру подписанной ссылкой с коротким сроком
+  жизни (`web/public_blobs.py`, отдельный серверный блок в nginx). Без
+  `PUBLIC_BLOB_SIGNING_KEY` путь не отвечает вообще: пропущенная настройка
+  закрывает дверь, а не открывает.
+- ✅ Четыре дефекта, найденных по дороге и закрытых там же: OpenRouter помечал
+  каждую vision-модель каталога как рисующую (и она попадала в кандидаты
+  `generate_image` с нулевой `image_price`); лестница подстановок для четырёх
+  групп из пяти была отсортирована по `model_id`; строка с подтверждённой
+  ставкой для одной группы выдавала уверенный ноль для другой; тесты ходили в
+  живой ChatGPT, потому что `CODEX_AUTH_PATH` не вычищался — это путь, а не ключ.
+- ✅ Тесты зелёные: `pytest` (298 прошло, было 173). Новые файлы:
+  `test_taxonomy`, `test_migrations`, `test_task_routing`, `test_task_api`,
+  `test_adapters_replicate` (33 проверки на MockTransport), `test_public_blobs`.
+  Node-харнесс и пятнадцать сценариев Playwright тоже зелёные.
 - ✅ Tests green: `pytest` (173 passed). Three harnesses: pytest for the service,
   `tests/js/` for the page modules under node against a stub DOM, and Playwright
   for the acceptance list. The last two skip when node or the browser is absent —
@@ -226,6 +282,18 @@ it as a managed service on this host.
 
 ## Next
 
+- Развернуть на прод волнами по `deploy/DEPLOY.md`. Колонки `tasks`, `task`,
+  `compute_price_per_second` и `compute_seconds` приедут миграцией на первом
+  перезапуске; после него имеет смысл вызвать `POST /api/registry/refresh`,
+  чтобы строки OpenRouter получили правильные задачи от каталога (миграция
+  переносит в них ту же ошибку, что лежит в `modality`, а синхронизация её
+  исправляет).
+- Вбить ставки за секунду расчёта для трёх моделей Replicate: API их не
+  публикует, цены на страницах моделей. До этого прогоны честно пишутся как
+  «нет методики», а не как бесплатные.
+- DNS и сертификат на `blob.wildcar.org`, затем `PUBLIC_BLOB_BASE_URL` и
+  `PUBLIC_BLOB_SIGNING_KEY` в прод `.env`. До этого `image-to-image` из консоли
+  работает только на файлах до 256 КБ.
 - Deploy the registry-freshness pack to prod, run `POST /api/registry/refresh`
   there, and fill real prices for the live DeepSeek models in `/registry`
   (they arrive from the catalog with `price_source_kind='unknown'`).
