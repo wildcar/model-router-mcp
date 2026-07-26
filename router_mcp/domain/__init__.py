@@ -23,9 +23,29 @@ from router_mcp.domain.errors import (
 )
 from router_mcp.domain.messages import Attachment, RouterRequest, RouterResponse, Usage
 from router_mcp.domain.modality import Modality
+from router_mcp.domain.task import (
+    TASKS,
+    BillingGroup,
+    Media,
+    Task,
+    TaskSignature,
+    media_of,
+    resolve_task,
+    tasks_for,
+    validate_task_inputs,
+)
 
 __all__ = [
     "Modality",
+    "BillingGroup",
+    "Media",
+    "Task",
+    "TaskSignature",
+    "TASKS",
+    "tasks_for",
+    "media_of",
+    "resolve_task",
+    "validate_task_inputs",
     "Attachment",
     "RouterRequest",
     "RouterResponse",
