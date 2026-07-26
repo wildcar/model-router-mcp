@@ -130,9 +130,13 @@ it as a managed service on this host.
 - Deploy the registry-freshness pack to prod, run `POST /api/registry/refresh`
   there, and fill real prices for the live DeepSeek models in `/registry`
   (they arrive from the catalog with `price_source_kind='unknown'`).
-- Copy the updated nginx config to the prod host and reload it (the long-run
-  location now also matches `/api/v1/cli`), then re-run a long `/api/cli`
-  request to confirm the 504 is gone.
+- nginx: the live config already carries the long-run `location` (applied
+  earlier); the only delta left is widening its regex to `^/api/(v1/)?(cli|runs)`
+  so the new console's `/api/v1/cli` lands in the 3600s block instead of the
+  600s one. Edit `/etc/nginx/sites-available/model-router` by hand — certbot
+  owns the TLS block and the redirect in that file, `cp` would drop them — then
+  `nginx -t` (it covers every site on the host) and reload. Afterwards re-run a
+  long CLI request to confirm the 504 is gone.
 - Deploy wave 0 and watch the first restart: `_add_missing_columns` grows
   sixteen columns on the live `request_logs` in one pass.
 - Wave 1 of `docs/UI_CONCEPT_v2.md`: `/api/v1/capabilities` from
