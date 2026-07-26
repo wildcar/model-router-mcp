@@ -1080,7 +1080,14 @@ async def serve_public_blob(
     problem = public_blobs.verify(core.settings, ref, exp, sig)
     if problem is not None:
         raise NotFound(problem)
-    return await serve_blob(ref, request)
+    response = await serve_blob(ref, request)
+    # `serve_blob` marks a blob immutable and publicly cacheable, which is right
+    # behind the console's password and wrong here: the link expires in minutes
+    # and nothing in between should keep a copy of it. Overridden rather than
+    # left to nginx's `add_header`, which appends and would leave two
+    # contradictory Cache-Control headers for an intermediary to choose between.
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
 
 
 @blob_router.get("/blobs/{ref}")

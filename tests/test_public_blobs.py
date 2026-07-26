@@ -83,3 +83,21 @@ def test_the_route_refuses_an_unsigned_link(client):
     """The suite configures no public host, so the door is shut entirely."""
     response = client.get("/public/blobs/whatever.png")
     assert response.status_code == 404
+
+
+def test_a_signed_link_is_never_cached(client, monkeypatch):
+    """The ordinary blob route marks payloads immutable and public, which is safe
+    behind a password and wrong for a link that expires in minutes."""
+    from router_mcp.runtime import get_core
+
+    core = get_core()
+    monkeypatch.setattr(core.settings, "public_blob_base_url", "https://blob.example.org")
+    monkeypatch.setattr(core.settings, "public_blob_signing_key", KEY)
+    ref = core.blobs.save(b"payload", "text/plain")
+    url = public_blobs.make_url(core.settings, ref)
+    path = url.split("https://blob.example.org", 1)[1]
+
+    response = client.get(path)
+    assert response.status_code == 200
+    assert response.content == b"payload"
+    assert response.headers["cache-control"] == "private, no-store"
