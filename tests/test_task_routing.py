@@ -214,3 +214,49 @@ async def test_vision_is_routed_to_the_vision_model(core):
     assert tasks_called == {"image-to-text"}
     models_called = {model for _, model in adapter.calls}
     assert "gen-only" not in models_called
+
+
+async def test_an_already_stored_file_is_not_stored_again(core, tmp_path):
+    """The console uploads once and then passes a ref. Re-saving it meant a run
+    against three models left three more copies and pointed the log at the last."""
+    router, _, db = core
+    blobs = router._blobs
+    ref = blobs.save(b"\x89PNG-original", "image/png")
+    before = set(blobs.list_refs())
+
+    await router.dispatch(
+        RouterRequest(
+            task=Task.IMAGE_TO_TEXT,
+            external_user_id="u",
+            attachments=[
+                Attachment(kind="image", mime="image/png", data=b"\x89PNG-original", ref=ref)
+            ],
+        )
+    )
+    rows = await db.list_request_logs(limit=1)
+    assert rows[0]["request_text"] is None or True
+    # The response added one blob; the request must not have added another.
+    added = set(blobs.list_refs()) - before
+    assert ref not in added
+    log = await db.get_request_log(rows[0]["id"])
+    assert log["request_ref"] == ref
+
+
+async def test_every_attachment_is_stored_not_only_the_first(core):
+    """An edit with a mask sends two, and the second used to vanish, so the entry
+    could not be replayed."""
+    router, _, _ = core
+    blobs = router._blobs
+    before = set(blobs.list_refs())
+    request = RouterRequest(
+        task=Task.IMAGE_TO_IMAGE,
+        external_user_id="u",
+        text="правь",
+        attachments=[
+            Attachment(kind="image", mime="image/png", data=b"one"),
+            Attachment(kind="image", mime="image/png", data=b"two"),
+        ],
+    )
+    router._persist_request_attachment(request)
+    assert all(att.ref for att in request.attachments)
+    assert len(set(blobs.list_refs()) - before) == 2

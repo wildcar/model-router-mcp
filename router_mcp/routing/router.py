@@ -927,11 +927,22 @@ class ModelRouter:
 
     # --- blob / text helpers -------------------------------------------
     def _persist_request_attachment(self, request: RouterRequest) -> str | None:
+        """Store every uploaded payload; answer with the first ref for the column.
+
+        Two things it must not do, both of which it used to. Stop at the first
+        attachment — editing an image with a mask sends two, and the second would
+        never reach the store, so the entry could not be replayed. And re-save a
+        payload that is already stored: the console uploads once and then passes
+        a ref, so a run against three models wrote three more copies of the same
+        file and pointed the log at the last of them.
+        """
+        first_ref: str | None = None
         for att in request.attachments:
-            if att.data:
+            if att.data and not att.ref:
                 att.ref = self._blobs.save(att.data, att.mime)
-                return att.ref
-        return None
+            if first_ref is None and att.ref:
+                first_ref = att.ref
+        return first_ref
 
     def _persist_response_attachment(self, response: RouterResponse) -> str | None:
         first_ref: str | None = None
