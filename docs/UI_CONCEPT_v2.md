@@ -368,13 +368,14 @@ enabled=0 configured=0                     не подключён              
 
 Пересчёт плана автоматический при смене дискретных полей (модальность, поставщик, политика) с задержкой 300 мс. Полная таблица кандидатов по кнопке.
 
-### 10.4 Инспектор, четыре вкладки
+### 10.4 Инспектор, пять вкладок
 
 | Вкладка | Содержимое |
 |---|---|
+| Запрос | Текст промпта с копированием, история сообщений с ролями, вложение файлом или плеером, «как спросили» (запрошенная модель, уровень, подсказка поставщика, политика подмены, канал, инструмент, ключ идемпотентности) и параметры вызова |
 | Ответ | Текст с кнопкой копирования, картинки, плеер, вывод CLI. Кнопка «Скачать файл» вместо идентификатора блоба |
 | Шаги | Таймлайн двух уровней, см. ниже |
-| JSON | Два блока: тело запроса к `/api` и тело ответа. Тело запроса к провайдеру под флагом отладки, с усечением строк длиннее 4 КБ |
+| JSON | Два блока: запрос, каким его получил роутер, и тело ответа `/api`. Тело запроса к провайдеру под флагом отладки, с усечением строк длиннее 4 КБ |
 | Сырьё | `usage_raw` объектом, `raw_meta`, `provider_request_id` с копированием, `finish_reason` с расшифровкой словами, ссылки на файлы |
 
 Вкладки «Лог» нет, вместо неё ссылка «Открыть в журнале #4821».
@@ -721,7 +722,14 @@ claude-sonnet-4-6   ● ошибка     —   —                   —        
 
 Собирается двумя функциями в `web/views.py`: из результата диспетча и из строки журнала. Тест на совпадение ключей обеих функций защищает контракт.
 
-Поля: `run_id`, `log_id`, `status`, `channel`, `tool`, `client_id`, `model {provider, model_id, display_name}`, `requested_model`, `fallback {kind, trigger, reason}`, `usage {prompt, completion, cache_read, cache_write, reasoning, audio_seconds, images, characters, raw}`, `cost {value, source, breakdown[]}`, `latency_ms`, `attempts`, `provider_status`, `provider_request_id`, `finish_reason`, `steps[]`, `attachments[]`, `ignored_params[]`, `error`.
+Поля: `run_id`, `log_id`, `status`, `channel`, `tool`, `client_id`, `model {provider, model_id, display_name}`, `requested_model`, `fallback {kind, trigger, reason}`, `usage {prompt, completion, cache_read, cache_write, reasoning, audio_seconds, images, characters, raw}`, `cost {value, source, breakdown[]}`, `latency_ms`, `attempts`, `provider_status`, `provider_request_id`, `finish_reason`, `steps[]`, `attachments[]`, `ignored_params[]`, `error`, а также
+`request {text, text_truncated, messages[], dropped_messages, params, model_id, tier, provider_hint, fallback, attachments[], client_request_id, batch_id}`.
+
+Запрос лежит в журнале снимком (колонка `request_json`), а не собирается заново:
+реестр, значения по умолчанию и политика подмены меняются, и запрос, выведенный
+из сегодняшних настроек, это уже другой запрос. Длинные тексты режутся на 4 КБ,
+история сообщений на 50 штук, и обрезка названа на экране. Записи старше колонки
+показывают то, что у них есть, - один `request_text`.
 
 ### 17.3 Конверт ошибки
 

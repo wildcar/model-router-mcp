@@ -13,7 +13,12 @@ import pytest
 from router_mcp.adapters.base import ProviderAdapter
 from router_mcp.blobs.store import BlobStore
 from router_mcp.domain.errors import NotConfigured, ProviderUnavailable
-from router_mcp.domain.messages import RouterRequest, RouterResponse, Usage
+from router_mcp.domain.messages import (
+    FallbackPolicy,
+    RouterRequest,
+    RouterResponse,
+    Usage,
+)
 from router_mcp.domain.modality import Modality
 from router_mcp.registry.models import RegistryModel
 from router_mcp.registry.service import RegistryService
@@ -39,7 +44,7 @@ class StubAdapter(ProviderAdapter):
         )
 
 
-async def _dispatch(tmp_path, **request_kwargs):
+async def _dispatch(tmp_path, *, text="ping", **request_kwargs):
     db = Database(str(tmp_path / "t.db"))
     await db.init()
     await db.upsert_service_provider("stub", "Stub", "stub", None, enabled=True)
@@ -51,7 +56,7 @@ async def _dispatch(tmp_path, **request_kwargs):
     registry = RegistryService(db, adapters={})
     router = ModelRouter(db, registry, {"stub": StubAdapter()}, BlobStore(str(tmp_path / "b")))
     request = RouterRequest(
-        Modality.CHAT, "u", model_id="stub/model", text="ping", **request_kwargs
+        Modality.CHAT, "u", model_id="stub/model", text=text, **request_kwargs
     )
     result = await router.dispatch(request)
     return db, request, result
@@ -95,6 +100,55 @@ async def test_envelope_carries_what_the_screen_shows(tmp_path):
         assert run["ignored_params"] == ["seed"]
         # The timeline must at least name the plan, the attempt and the price.
         assert {s["kind"] for s in run["steps"]} >= {"plan", "attempt", "cost", "log"}
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_request_side_survives_the_round_trip(tmp_path):
+    """What was asked has to be readable from the entry, not only what came back."""
+    db, request, result = await _dispatch(
+        tmp_path,
+        params={"temperature": 0.2},
+        messages=[{"role": "user", "content": "ping"}],
+        client_request_id="key-1",
+        fallback=FallbackPolicy(policy="cheaper", scope="vendor", max_steps=2),
+    )
+    try:
+        for run in (
+            run_from_dispatch(result, request),
+            run_from_log(await db.get_request_log(result.log_id)),
+        ):
+            asked = run["request"]
+            assert asked["text"] == "ping"
+            assert asked["params"] == {"temperature": 0.2}
+            assert asked["messages"] == [{"role": "user", "content": "ping"}]
+            # The caller's model, not the one that ran: the pair is on `model`.
+            assert asked["model_id"] == "stub/model"
+            assert asked["fallback"] == {
+                "policy": "cheaper", "scope": "vendor", "max_steps": 2,
+            }
+            assert asked["client_request_id"] == "key-1"
+    finally:
+        await db.close()
+
+
+def test_old_row_shows_the_text_it_has():
+    """Entries written before the snapshot column keep the same key set."""
+    row = {"id": 7, "status": "ok", "request_text": "старый запрос"}
+    asked = run_from_log(row)["request"]
+    assert asked["text"] == "старый запрос"
+    assert asked["params"] == {} and asked["messages"] is None
+    assert set(asked) == set(run_from_log({"id": 8})["request"])
+
+
+@pytest.mark.asyncio
+async def test_long_prompt_is_cut_and_says_so(tmp_path):
+    db, request, result = await _dispatch(tmp_path, text="x" * 5000)
+    try:
+        asked = run_from_log(await db.get_request_log(result.log_id))["request"]
+        assert len(asked["text"]) == 4000
+        assert asked["text_truncated"] is True
     finally:
         await db.close()
 

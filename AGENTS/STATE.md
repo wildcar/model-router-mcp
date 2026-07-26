@@ -203,7 +203,17 @@ it as a managed service on this host.
      `BLOB_RETENTION_DAYS`, both 0 = keep forever, a preview endpoint, a purge
      endpoint, orphan-file collection and a nightly sweep that does nothing
      until configured. The control sits on «Обзор» next to the size it explains.
-- ✅ Tests green: `pytest` (170 passed). Three harnesses: pytest for the service,
+- ✅ The request side of an entry (2026-07-26, from user feedback): the inspector
+  had four tabs about the answer and nothing about the question. The `Run`
+  envelope now carries `request` (text, message history with roles, params, the
+  caller's model/tier/provider hint, the fallback policy, attachments,
+  idempotency key, batch), stored as a snapshot in the new
+  `request_logs.request_json` when the row is opened — so a run that failed
+  before any provider was reached still says what was asked. The inspector gained
+  a «Запрос» tab and a second JSON block; «Ответ» still opens first. Text is cut
+  at 4000 characters, the history at 50 messages, both stated on screen. Rows
+  written before the column show their `request_text` and nothing invented.
+- ✅ Tests green: `pytest` (173 passed). Three harnesses: pytest for the service,
   `tests/js/` for the page modules under node against a stub DOM, and Playwright
   for the acceptance list. The last two skip when node or the browser is absent —
   the production host needs neither.

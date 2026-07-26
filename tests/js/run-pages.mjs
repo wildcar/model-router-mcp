@@ -129,6 +129,26 @@ await runPage('logs', 'logs', async (doc, _calls, settleNow) => {
   check('журнал: текст ошибки виден', body.textContent.includes('UnknownModel'),
     body.textContent.slice(0, 80));
 
+  // Opening an entry has to answer «что спросили», not only «что ответили»:
+  // before the «Запрос» tab the request was nowhere on this screen.
+  body.children[0].dispatch('click');
+  await settleNow();
+  const detail = doc.getElementById('detail');
+  check('журнал: подробности записи открываются', detail.hidden === false);
+  const tabNames = detail.querySelectorAll('.tab').map((t) => t.textContent);
+  check('журнал: закладка Запрос на месте', tabNames.includes('Запрос'), tabNames.join(' · '));
+  detail.querySelectorAll('.tab').find((t) => t.textContent === 'Запрос').dispatch('click');
+  await settleNow();
+  const pane = detail.querySelector('.tab-pane');
+  check('журнал: в запросе виден текст и как спросили',
+    pane.textContent.includes('привет') && pane.textContent.includes('Запрошенная модель'),
+    pane.textContent.slice(0, 120));
+  detail.querySelectorAll('.tab').find((t) => t.textContent === 'JSON').dispatch('click');
+  await settleNow();
+  check('журнал: в JSON есть и запрос, и ответ',
+    detail.querySelector('.tab-pane').textContent.includes('JSON (запрос)')
+      && detail.querySelector('.tab-pane').textContent.includes('JSON (ответ /api)'));
+
   // The spend tab renders from the same page module, and loads asynchronously.
   doc.getElementById('tab-spend').dispatch('click');
   await settleNow();
@@ -239,7 +259,8 @@ await runPage('run', 'run', async (doc, calls, settleNow) => {
   inspector(host, run, { labels: caps.labels });
   const dump = host.textContent;
   console.log('\ninspector:');
-  check('инспектор: четыре вкладки', host.querySelectorAll('button').length >= 4);
+  check('инспектор: пять вкладок', host.querySelectorAll('.tab').length === 5,
+    host.querySelectorAll('.tab').map((t) => t.textContent).join(' · '));
   check('инспектор: подмена названа', dump.includes('запрошена deepseek-v4-pro'));
   check('инспектор: игнорируемый параметр назван', dump.includes('tools'));
   check('инспектор: скрипт в ответе остался текстом', dump.includes('<script>alert(1)</script>'));
@@ -257,6 +278,20 @@ await runPage('run', 'run', async (doc, calls, settleNow) => {
   check('сырьё: причина остановки расшифрована',
     host.textContent.includes('обрыв по лимиту токенов'));
   check('сырьё: id запроса у провайдера показан', host.textContent.includes('req-77f0'));
+
+  // The request side: the history with its roles, the knobs, and the policy in
+  // the same words the «Прогон» select uses.
+  host.querySelectorAll('.tab').find((b) => b.dataset.tab === 'request').dispatch('click');
+  const asked = host.textContent;
+  check('запрос: роли и текст сообщений видны',
+    asked.includes('system') && asked.includes('Отвечай по-русски'), asked.slice(0, 160));
+  check('запрос: параметры перечислены',
+    asked.includes('temperature') && asked.includes('max_tokens'));
+  check('запрос: запрошенная модель отделена от отработавшей',
+    asked.includes('deepseek-v4-pro'));
+  check('запрос: политика подмены человеческими словами',
+    asked.includes('подставить'), asked.slice(0, 400));
+  check('запрос: ключ идемпотентности показан', asked.includes('web-9f31'));
   console.log(notes.splice(0).join('\n'));
 }
 

@@ -61,6 +61,9 @@ _ASSUMED_COMPLETION_TOKENS = 500
 # tool call and can produce thousands; the whole list is read back on every
 # inspector open.
 _MAX_STEPS = 500
+# How many messages of a chat history the request snapshot keeps, for the same
+# reason: a long conversation is sent in full and stored capped.
+_MAX_MESSAGES = 50
 
 
 def _steps_json(steps: list[dict[str, Any]], dropped: int = 0) -> str | None:
@@ -182,6 +185,9 @@ class DispatchResult:
     # The stored request payload (uploaded audio, mostly). Carried out so the
     # console can repeat a transcription without asking for the file again.
     request_ref: str | None = None
+    # The request as it was received, exactly as it went into the log row, so the
+    # envelope built from a live run and the one read back agree.
+    request_snapshot: dict[str, Any] = field(default_factory=dict)
 
 
 class ModelRouter:
@@ -630,6 +636,10 @@ class ModelRouter:
         # Persist large request payloads up-front so they survive failures.
         request_ref = self._persist_request_attachment(request)
         request_text = self._truncate_request_text(request)
+        # Built once and written by every path out of here, including the ones
+        # that fail: an entry that says nothing about the request is exactly the
+        # entry an operator opens after a failure.
+        request_json = self._request_snapshot(request, request_ref)
         steps = steps_out if steps_out is not None else []
         dropped = 0
 
@@ -663,6 +673,7 @@ class ModelRouter:
                 status="running",
                 request_text=request_text,
                 request_ref=request_ref,
+                request_json=request_json,
                 cost_source="cost_unknown",
                 channel=request.channel,
                 tool=request.tool,
@@ -681,7 +692,7 @@ class ModelRouter:
         sink_token = progress.set_sink(_sink)
         try:
             return await self._dispatch_inner(
-                request, log_id, steps, step, t0, request_text, request_ref,
+                request, log_id, steps, step, t0, request_text, request_ref, request_json,
                 lambda: dropped,
             )
         except asyncio.CancelledError:
@@ -699,6 +710,7 @@ class ModelRouter:
                     error_message="Прогон отменён оператором",
                     request_text=request_text,
                     request_ref=request_ref,
+                    request_json=request_json,
                     cost_source="cost_unknown",
                     latency_ms=int((time.monotonic() - t0) * 1000),
                     channel=request.channel,
@@ -723,6 +735,7 @@ class ModelRouter:
         t0: float,
         request_text: str | None,
         request_ref: str | None,
+        request_json: dict[str, Any] | None,
         dropped,
     ) -> DispatchResult:
         try:
@@ -730,7 +743,7 @@ class ModelRouter:
         except RouterError as exc:
             step("plan", "plan failed", error=str(exc))
             await self._log_error(
-                request, None, request_text, request_ref, exc, t0, steps=steps,
+                request, None, request_text, request_ref, request_json, exc, t0, steps=steps,
                 row_id=log_id, dropped=dropped(),
             )
             raise
@@ -780,7 +793,7 @@ class ModelRouter:
                     status="error", retries=http_trace, error=f"{type(exc).__name__}: {exc}"
                 )
                 await self._log_error(
-                    request, model, request_text, request_ref, exc, t0,
+                    request, model, request_text, request_ref, request_json, exc, t0,
                     requested_model_id=requested_model_id, fallback_reason=reason,
                     steps=steps, http_trace=http_trace,
                     # Only the last attempt closes the run's own row. An earlier
@@ -798,7 +811,7 @@ class ModelRouter:
                     status="error", retries=http_trace, error=f"{type(exc).__name__}: {exc}"
                 )
                 await self._log_error(
-                    request, model, request_text, request_ref, exc, t0,
+                    request, model, request_text, request_ref, request_json, exc, t0,
                     requested_model_id=requested_model_id, fallback_reason=reason,
                     steps=steps, http_trace=http_trace,
                     row_id=log_id, dropped=dropped(),
@@ -811,7 +824,7 @@ class ModelRouter:
                 )
                 normalized = RouterError(str(exc))
                 await self._log_error(
-                    request, model, request_text, request_ref, normalized, t0,
+                    request, model, request_text, request_ref, request_json, normalized, t0,
                     requested_model_id=requested_model_id, fallback_reason=reason,
                     steps=steps, http_trace=http_trace,
                     row_id=log_id, dropped=dropped(),
@@ -849,6 +862,7 @@ class ModelRouter:
             status="ok",
             request_text=request_text,
             request_ref=request_ref,
+            request_json=request_json,
             response_text=(response.text or "")[:_TEXT_TRUNCATE] or None,
             response_ref=response_ref,
             prompt_tokens=response.usage.prompt_tokens,
@@ -900,6 +914,7 @@ class ModelRouter:
             ignored_params=ignored_params(used_adapter, request.modality, request.params),
             finished_at=finished_at,
             request_ref=request_ref,
+            request_snapshot=request_json or {},
         )
 
     # --- blob / text helpers -------------------------------------------
@@ -920,6 +935,76 @@ class ModelRouter:
         return first_ref
 
     @staticmethod
+    def _request_snapshot(
+        request: RouterRequest, request_ref: str | None
+    ) -> dict[str, Any]:
+        """The request as it arrived, in the shape the console's «Запрос» tab shows.
+
+        Stored with the row instead of being reconstructed later: the registry,
+        the defaults and the fallback policy all move, so a request re-derived
+        against today's configuration is not the request that ran.
+
+        Long payloads are cut here and the cut is stated. A chat history is
+        unbounded, and this column is read back on every inspector open.
+        """
+        text = request.text
+        messages: list[dict[str, Any]] | None = None
+        dropped_messages = 0
+        if request.messages:
+            messages = []
+            for message in request.messages[:_MAX_MESSAGES]:
+                item = dict(message)
+                content = item.get("content")
+                if isinstance(content, str) and len(content) > _TEXT_TRUNCATE:
+                    item["content"] = content[:_TEXT_TRUNCATE]
+                    item["content_truncated"] = True
+                messages.append(item)
+            dropped_messages = len(request.messages) - len(messages)
+
+        fallback = request.fallback
+        return {
+            "modality": request.modality.value,
+            "external_user_id": request.external_user_id,
+            # What the caller asked for, before routing had its say. The model
+            # that actually ran is on the row itself.
+            "model_id": request.model_id,
+            "tier": request.tier,
+            "provider_hint": request.provider_hint,
+            "text": (text[:_TEXT_TRUNCATE] if text is not None else None),
+            "text_truncated": bool(text and len(text) > _TEXT_TRUNCATE),
+            "messages": messages,
+            "dropped_messages": dropped_messages,
+            "params": dict(request.params or {}),
+            "fallback": (
+                {
+                    "policy": fallback.policy,
+                    "scope": fallback.scope,
+                    "max_steps": fallback.max_steps,
+                }
+                if fallback is not None
+                else None
+            ),
+            # The bytes live in the blob store; the row keeps what they were.
+            "attachments": [
+                {
+                    "kind": att.kind,
+                    "mime": att.mime,
+                    "bytes": len(att.data) if att.data else None,
+                    # A data: URL is megabytes of base64 — name it, don't store it.
+                    "url": (att.url[:200] if att.url else None),
+                    "ref": att.ref,
+                }
+                for att in request.attachments
+            ],
+            "request_ref": request_ref,
+            "channel": request.channel,
+            "tool": request.tool,
+            "client_id": request.client_id,
+            "client_request_id": request.client_request_id,
+            "batch_id": request.batch_id,
+        }
+
+    @staticmethod
     def _truncate_request_text(request: RouterRequest) -> str | None:
         if request.text is not None:
             return request.text[:_TEXT_TRUNCATE]
@@ -933,6 +1018,7 @@ class ModelRouter:
         model: RegistryModel | None,
         request_text: str | None,
         request_ref: str | None,
+        request_json: dict[str, Any] | None,
         exc: Exception,
         t0: float,
         *,
@@ -957,6 +1043,7 @@ class ModelRouter:
             error_message=f"{type(exc).__name__}: {exc}"[:1000],
             request_text=request_text,
             request_ref=request_ref,
+            request_json=request_json,
             cost_source=cost_source,
             latency_ms=int((time.monotonic() - t0) * 1000),
             requested_model_id=requested_model_id,

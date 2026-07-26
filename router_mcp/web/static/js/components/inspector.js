@@ -6,8 +6,10 @@
 // together by a test: without it this component would need a branch per source,
 // and the branches would drift.
 //
-// Four tabs (§10.4). There is no "Лог" tab — a link goes there instead, because
-// a tab that duplicates another screen ages into a worse copy of it.
+// Five tabs (§10.4): Запрос · Ответ · Шаги · JSON · Сырьё. There is no "Лог" tab
+// — a link goes there instead, because a tab that duplicates another screen ages
+// into a worse copy of it. «Ответ» opens first: after a send that is what the
+// operator came for, and the request is the thing they already know.
 
 import { el, clear, toast } from '../core/dom.js';
 import { costCell, duration, localTime, tokens } from '../core/format.js';
@@ -96,6 +98,103 @@ function summary(run, labels) {
   return wrap;
 }
 
+// The policy in the same words the «Прогон» select offers, so the entry and the
+// form name one thing one way. The codes stay visible for a policy the glossary
+// does not know.
+function fallbackWords(policy, labels) {
+  const choice = (labels?.fallback_choices || []).find(
+    (c) => c.policy === policy.policy && c.scope === policy.scope);
+  const words = choice ? choice.label : `${policy.policy}, область ${policy.scope}`;
+  return policy.policy === 'off' ? words : `${words} · шагов ${policy.max_steps}`;
+}
+
+// The question, in the same shape as the answer. Without it the entry says what
+// came back and nothing about what was asked, and «почему ответ такой» is a guess.
+function requestTab(run, labels) {
+  const req = run.request || {};
+  const pane = el('div');
+
+  if (req.text) {
+    const head = el('div', undefined, { className: 'pane-head' });
+    head.appendChild(copyButton(req.text, 'Запрос'));
+    if (req.text_truncated) {
+      head.appendChild(el('span', 'текст сохранён не полностью', { className: 'muted' }));
+    }
+    pane.appendChild(head);
+    pane.appendChild(el('pre', req.text));
+  }
+
+  // A chat history is not a prompt: the roles are what explains the answer.
+  if (req.messages && req.messages.length) {
+    pane.appendChild(el('h4', `Сообщения ${req.messages.length}`));
+    for (const message of req.messages) {
+      const block = el('div', undefined, { className: 'insp-message' });
+      block.appendChild(el('span', message.role || '—', { className: 'chip' }));
+      const content = typeof message.content === 'string'
+        ? message.content
+        : JSON.stringify(message.content, null, 2);
+      block.appendChild(el('pre', content ?? ''));
+      if (message.content_truncated) {
+        block.appendChild(el('div', 'сохранено не полностью', { className: 'muted' }));
+      }
+      pane.appendChild(block);
+    }
+    if (req.dropped_messages) {
+      pane.appendChild(el('div', `ещё ${req.dropped_messages} сообщени(й) не сохранено`, {
+        className: 'muted',
+      }));
+    }
+  }
+
+  // What was sent along with the file, and the file itself: a transcription
+  // opened a week later is unreadable without the audio.
+  for (const att of req.attachments || []) {
+    const size = att.bytes ? `, ${Math.round(att.bytes / 1024)} КБ` : '';
+    const link = el('a', `Скачать вложение (${att.mime || att.kind || 'файл'}${size})`, {
+      href: att.download_url,
+    });
+    if ((att.mime || '').startsWith('audio/')) {
+      const player = el('audio');
+      player.controls = true;
+      player.src = att.download_url;
+      pane.appendChild(player);
+    }
+    if (att.download_url) pane.appendChild(el('div', undefined, { children: [link] }));
+  }
+
+  // What the caller asked for, as opposed to what ran — the pair that ran is in
+  // the summary line above, and the difference is the interesting part.
+  const policy = req.fallback;
+  pane.appendChild(el('h4', 'Как спросили'));
+  pane.appendChild(kvTable([
+    ['Модальность', labels?.modalities?.[run.modality]?.label || run.modality],
+    ['Запрошенная модель', req.model_id],
+    ['Уровень', req.tier],
+    ['Поставщик (подсказка)', req.provider_hint],
+    ['Подмена модели', policy ? fallbackWords(policy, labels) : 'выключена'],
+    ['Канал', labels?.channels?.[run.channel]?.label || run.channel],
+    ['Инструмент', run.tool],
+    ['Клиент', run.client_id],
+    ['Ключ идемпотентности', req.client_request_id,
+      { copy: Boolean(req.client_request_id) }],
+    ['Пакет', req.batch_id],
+  ]));
+
+  const params = req.params || {};
+  pane.appendChild(el('h4', 'Параметры'));
+  if (Object.keys(params).length) {
+    // The ones the adapter does not read are already named in the summary.
+    pane.appendChild(kvTable(Object.entries(params).map(
+      ([key, value]) => [key, typeof value === 'object' && value !== null
+        ? JSON.stringify(value)
+        : String(value)],
+    )));
+  } else {
+    pane.appendChild(el('p', 'по умолчанию', { className: 'muted' }));
+  }
+  return pane;
+}
+
 function answerTab(run) {
   const pane = el('div');
   const audio = (run.attachments || []).filter((a) => (a.mime || '').startsWith('audio/'));
@@ -155,10 +254,11 @@ function rawTab(run, labels) {
 
 function jsonTab(run) {
   const pane = el('div');
-  // The body sent to the provider is deliberately absent: it is shown only
-  // under a debug flag, and request headers are never serialised at all —
-  // the keys live there (§16.4).
-  pane.appendChild(jsonBlock('Ответ /api', run));
+  // The request as the router received it — not the body it sent upstream. That
+  // one is shown only under a debug flag, and request headers are never
+  // serialised at all, because the keys live there (§16.4).
+  pane.appendChild(jsonBlock('JSON (запрос)', run.request || {}));
+  pane.appendChild(jsonBlock('JSON (ответ /api)', run));
   return pane;
 }
 
@@ -173,6 +273,7 @@ export function inspector(container, run, { labels = null, activeTab = 'answer' 
   container.appendChild(summary(run, labels));
 
   const tabs = [
+    ['request', 'Запрос', () => requestTab(run, labels)],
     ['answer', 'Ответ', () => answerTab(run)],
     ['steps', `Шаги ${(run.steps || []).length || ''}`.trim(),
       () => timeline(run.steps, run.latency_ms)],

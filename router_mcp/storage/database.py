@@ -63,6 +63,12 @@ class RequestLogRecord:
     error_message: str | None = None
     request_text: str | None = None
     request_ref: str | None = None
+    # The request as the router received it — model/tier hints, params, the
+    # fallback policy, the message list. `request_text` alone answers "что
+    # спросили" and nothing about how it was asked, which is half of what an
+    # operator opens an entry for. Never carries credentials: this is the
+    # router's own request, not the body sent upstream (§16.4).
+    request_json: dict[str, Any] | None = None
     response_text: str | None = None
     response_ref: str | None = None
     prompt_tokens: int | None = None
@@ -276,6 +282,7 @@ class Database:
                     error_message TEXT,
                     request_text TEXT,
                     request_ref TEXT,
+                    request_json TEXT,
                     response_text TEXT,
                     response_ref TEXT,
                     prompt_tokens INTEGER,
@@ -389,6 +396,9 @@ class Database:
             "return_code": "INTEGER",
             "plan_json": "TEXT",
             "finished_at": "DATETIME",
+            # The request side of the inspector: rows written before this column
+            # existed keep showing `request_text` alone.
+            "request_json": "TEXT",
         },
     }
 
@@ -728,6 +738,7 @@ class Database:
     # a new field from being silently dropped on the way to disk.
     _LOG_ENCODED_FIELDS = {
         "usage_raw": lambda v: json.dumps(v, ensure_ascii=False) if v else None,
+        "request_json": lambda v: json.dumps(v, ensure_ascii=False) if v else None,
     }
 
     def _log_values(self, rec: RequestLogRecord) -> dict[str, Any]:

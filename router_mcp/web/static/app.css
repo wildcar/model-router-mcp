@@ -84,8 +84,11 @@ button .est { opacity:.85; font-variant-numeric:tabular-nums; }
 .tab { background:transparent; border:0; border-bottom:2px solid transparent; border-radius:0; padding:6px 12px; color:var(--muted); }
 .tab.active { color:var(--fg); border-bottom-color:var(--accent); }
 .tab-pane { min-height:80px; }
-.pane-head { display:flex; justify-content:flex-end; }
+.pane-head { display:flex; justify-content:flex-end; gap:10px; align-items:center; }
 button.small { padding:2px 8px; font-size:11px; }
+/* One message of a request history: the role reads as a label, the content as text. */
+.insp-message { display:flex; gap:8px; align-items:flex-start; margin:4px 0; }
+.insp-message pre { margin:0; flex:1; }
 
 /* Timeline: two levels, attempts and the HTTP retries inside them. */
 .timeline { font-size:12px; }

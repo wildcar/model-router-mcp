@@ -167,7 +167,18 @@ by `web/views.run_from_dispatch` and `web/views.run_from_log`;
 cache_read, cache_write, reasoning, audio_seconds, images, characters, raw}`,
 `cost {value, source, breakdown[]}`, `latency_ms`, `attempts`,
 `provider_status`, `provider_request_id`, `finish_reason`, `created_at`,
-`finished_at`, `text`, `steps[]`, `attachments[]`, `ignored_params[]`, `error`.
+`finished_at`, `text`, `request {…}`, `request_ref`, `steps[]`, `attachments[]`,
+`ignored_params[]`, `error`.
+
+`request` is the question next to the answer: `text` (+ `text_truncated`),
+`messages[]` (+ `dropped_messages`), `params`, the caller's `model_id`, `tier`
+and `provider_hint`, the `fallback` policy, `attachments[]` with download links,
+`client_request_id` and `batch_id`. It is stored as a snapshot in
+`request_logs.request_json` when the row is opened, so a run that failed before
+any provider was called still says what was asked, and a replay is not
+re-derived from today's registry and defaults. Text is cut at 4000 characters
+and the history at 50 messages, with the cut stated on screen. Rows written
+before the column show the `request_text` they have and nothing invented.
 
 A model is addressed by the pair (service provider + model id), never by the id
 alone. `fallback.kind` distinguishes a substitution planned before the call
@@ -282,7 +293,10 @@ it is typed). Fallback is one select in plain words, with `max_steps` under
 the send button carries the estimate.
 
 One inspector component serves «Прогон» and «Журнал», over the single `Run`
-envelope, with four tabs — Ответ, Шаги, JSON, Сырьё. Its timeline has two
+envelope, with five tabs — Запрос, Ответ, Шаги, JSON, Сырьё. «Ответ» opens
+first; «Запрос» carries the prompt, the message history with roles, the
+attachment and the routing ask, and the JSON tab has a block per side. Its
+timeline has two
 levels: provider attempts, and the HTTP retries inside each one with the wait
 the provider asked for.
 

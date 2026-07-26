@@ -23,7 +23,7 @@ from router_mcp.routing.router import DispatchResult
 # Bumped whenever the envelope changes shape. The browser sends it back on every
 # request so a page loaded before a restart cannot keep talking to a newer API
 # while silently mis-reading the answers.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # 2: the envelope carries `request`
 
 
 def _usage(
@@ -84,6 +84,7 @@ def _run(
     created_at: str | None,
     finished_at: str | None,
     text: str | None,
+    request: dict[str, Any],
     request_ref: str | None,
     steps: list[dict[str, Any]],
     attachments: list[dict[str, Any]],
@@ -113,6 +114,10 @@ def _run(
         "created_at": created_at,
         "finished_at": finished_at,
         "text": text,
+        # The question, next to the answer. The log kept the prompt text and
+        # nothing about how it was asked — no params, no policy, no message list
+        # — so «почему ответ такой» had to be guessed from the response alone.
+        "request": request,
         # What the request itself carried, when it carried a file. Repeating a
         # transcription from the log needs the audio, and asking the operator to
         # find the file again is asking them to prove it was the same one.
@@ -132,6 +137,63 @@ def _model(provider: str | None, model_id: str | None, display_name: str | None 
         "provider": provider,
         "model_id": model_id,
         "display_name": display_name or model_id,
+    }
+
+
+def _request(
+    snapshot: dict[str, Any] | None,
+    *,
+    text: str | None = None,
+    ref: str | None = None,
+) -> dict[str, Any]:
+    """The request side of the envelope, from the stored snapshot.
+
+    Entries written before the snapshot column existed have only `request_text`;
+    they get it as the text and `None` everywhere else, so an old row shows what
+    it knows instead of an empty tab. The key set never changes — the inspector
+    renders "—" for a missing field and must not branch on the row's age.
+    """
+    snap = snapshot or {}
+    attachments = []
+    for att in snap.get("attachments") or []:
+        att_ref = att.get("ref")
+        attachments.append(
+            {
+                "kind": att.get("kind"),
+                "mime": att.get("mime"),
+                "bytes": att.get("bytes"),
+                "url": att.get("url"),
+                "ref": att_ref,
+                "download_url": f"/blobs/{att_ref}" if att_ref else att.get("url"),
+            }
+        )
+    # The uploaded payload is on the row as well; when the snapshot lists no
+    # attachment (an old entry) the ref alone still gives the operator the file.
+    if not attachments and ref:
+        attachments.append(
+            {
+                "kind": "file",
+                "mime": None,
+                "bytes": None,
+                "url": None,
+                "ref": ref,
+                "download_url": f"/blobs/{ref}",
+            }
+        )
+    return {
+        "text": snap.get("text", text) if snapshot else text,
+        "text_truncated": bool(snap.get("text_truncated")),
+        "messages": snap.get("messages"),
+        "dropped_messages": snap.get("dropped_messages") or 0,
+        "params": snap.get("params") or {},
+        # What the caller asked for; the pair that ran is on `model`.
+        "model_id": snap.get("model_id"),
+        "tier": snap.get("tier"),
+        "provider_hint": snap.get("provider_hint"),
+        "fallback": snap.get("fallback"),
+        "attachments": attachments,
+        "client_request_id": snap.get("client_request_id"),
+        "batch_id": snap.get("batch_id"),
     }
 
 
@@ -199,6 +261,11 @@ def run_from_dispatch(
         created_at=None,
         finished_at=result.finished_at,
         text=response.text,
+        request=_request(
+            result.request_snapshot,
+            text=request.text if request else None,
+            ref=result.request_ref,
+        ),
         request_ref=result.request_ref,
         steps=result.steps,
         attachments=_attachments_from_response(result),
@@ -260,6 +327,11 @@ def run_from_log(row: dict[str, Any]) -> dict[str, Any]:
         created_at=row.get("created_at"),
         finished_at=row.get("finished_at"),
         text=row.get("response_text"),
+        request=_request(
+            _json_or_empty(row.get("request_json")) or None,
+            text=row.get("request_text"),
+            ref=row.get("request_ref"),
+        ),
         request_ref=row.get("request_ref"),
         steps=_json_or_empty(row.get("plan_json"), default=[]),
         attachments=attachments,

@@ -1,5 +1,5 @@
 {
- "schema_version": 1,
+ "schema_version": 2,
  "run_id": null,
  "log_id": 4821,
  "status": "ok",
@@ -29,6 +29,22 @@
  "created_at": "2026-07-26T09:22:07+00:00",
  "finished_at": "2026-07-26T09:22:15+00:00",
  "text": "Привет. Ниже разбор по пунктам… <script>alert(1)</script>",
+ "request": {
+  "text": "Разбери по пунктам, что не так в этом отчёте.",
+  "text_truncated": false,
+  "messages": [{"role": "system", "content": "Отвечай по-русски, коротко."},
+               {"role": "user", "content": "Разбери по пунктам, что не так в этом отчёте."}],
+  "dropped_messages": 0,
+  "params": {"temperature": 0.2, "max_tokens": 400},
+  "model_id": "deepseek-v4-pro",
+  "tier": null,
+  "provider_hint": "deepseek",
+  "fallback": {"policy": "pricier", "scope": "provider", "max_steps": 1},
+  "attachments": [],
+  "client_request_id": "web-9f31",
+  "batch_id": null
+ },
+ "request_ref": null,
  "steps": [
   {"at_ms": 0, "kind": "plan", "title": "plan built",
    "planned": [{"provider": "deepseek", "model_id": "deepseek-v4-pro"},
