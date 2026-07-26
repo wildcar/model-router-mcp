@@ -39,6 +39,16 @@ class Usage:
     magnitude cheaper, so a single prompt-token number makes the cost wrong by
     multiples rather than percents. Adapters fill what their provider reports;
     `None` means "not reported", which is not the same as zero.
+
+    **The contract every adapter normalizes to**: `prompt_tokens` is the whole
+    prompt *including* anything served from or written to cache, and
+    `cache_read_tokens` / `cache_write_tokens` are the parts of that total which
+    were. Providers disagree here — DeepSeek and the OpenAI-shaped APIs count
+    cache inside their prompt total, Anthropic reports it alongside — so the
+    adapter, which knows its provider, does the adding. Accounting then has one
+    rule instead of a branch per provider:
+
+        billed at the prompt rate = prompt_tokens - cache_read - cache_write
     """
 
     prompt_tokens: int | None = None
@@ -135,3 +145,7 @@ class RouterResponse:
     # Optional provider-reported cost (e.g. claude CLI total_cost_usd); when set
     # it overrides registry-based cost computation.
     cost_override_usd: float | None = None
+    # True when that reported cost is what the work *would* have cost, but the
+    # run went against a subscription and no money moved. Notional money must
+    # never be added to real money in a total (§7.3).
+    cost_is_notional: bool = False

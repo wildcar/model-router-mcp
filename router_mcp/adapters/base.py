@@ -89,6 +89,41 @@ MODEL_GONE_RE = re.compile(
 )
 
 
+def _int_or_none(value: Any) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def openai_shaped_usage(raw: Any) -> dict[str, int | None]:
+    """Cache and reasoning counts out of an OpenAI-shaped usage block.
+
+    OpenAI, OpenRouter and DeepSeek all put the same facts in different places —
+    `prompt_tokens_details.cached_tokens` for the first two,
+    `prompt_cache_hit_tokens` for the third. Reading whichever arrived beats a
+    branch per provider at each call site.
+
+    Note that in all three the cached count is *inside* `prompt_tokens`, which
+    is the contract `Usage` normalizes to (see domain/messages.py).
+    """
+    if not isinstance(raw, dict):
+        return {"cache_read": None, "cache_write": None, "reasoning": None}
+    prompt_details = raw.get("prompt_tokens_details")
+    completion_details = raw.get("completion_tokens_details")
+    cache_read = raw.get("prompt_cache_hit_tokens")
+    if cache_read is None and isinstance(prompt_details, dict):
+        cache_read = prompt_details.get("cached_tokens")
+    reasoning = None
+    if isinstance(completion_details, dict):
+        reasoning = completion_details.get("reasoning_tokens")
+    return {
+        "cache_read": _int_or_none(cache_read),
+        "cache_write": _int_or_none(raw.get("prompt_cache_write_tokens")),
+        "reasoning": _int_or_none(reasoning),
+    }
+
+
 def truncated_error(
     provider: str,
     *,

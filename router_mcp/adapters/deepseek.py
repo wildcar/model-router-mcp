@@ -13,7 +13,12 @@ from typing import Any
 
 import httpx
 
-from router_mcp.adapters.base import ProviderAdapter, RetryClientMixin, truncated_error
+from router_mcp.adapters.base import (
+    ProviderAdapter,
+    RetryClientMixin,
+    openai_shaped_usage,
+    truncated_error,
+)
 from router_mcp.domain.errors import ProviderError, ProviderUnavailable
 from router_mcp.domain.messages import RouterRequest, RouterResponse, Usage
 from router_mcp.domain.modality import Modality
@@ -141,10 +146,18 @@ class DeepSeekAdapter(RetryClientMixin, ProviderAdapter):
                     completion_tokens=raw_usage.get("completion_tokens"),
                 )
             raise ProviderError("DeepSeek returned an empty response")
+        # DeepSeek counts cache hits inside `prompt_tokens`
+        # (hit + miss == prompt_tokens), which is the contract Usage expects, so
+        # the total passes through untouched and only the split is added. A hit
+        # is billed about a tenth of a miss, so without the split the cost of a
+        # cached conversation is overstated several times over.
+        details = openai_shaped_usage(raw_usage)
         usage = Usage(
             prompt_tokens=raw_usage.get("prompt_tokens"),
             completion_tokens=raw_usage.get("completion_tokens"),
             total_tokens=raw_usage.get("total_tokens"),
+            cache_read_tokens=details["cache_read"],
+            reasoning_tokens=details["reasoning"],
             raw=raw_usage,
         )
         return text, usage

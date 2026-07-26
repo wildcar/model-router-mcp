@@ -36,11 +36,18 @@ class ClaudeCliAdapter(ProviderAdapter):
         timeout_sec: int,
         allowed_cwd_roots: list[str],
         default_cwd: str | None = None,
+        subscription: bool = True,
     ) -> None:
         self._argv = shlex.split(command) or ["claude"]
         self._timeout = timeout_sec
         self._allowed_roots = allowed_cwd_roots
         self._default_cwd = default_cwd or os.getcwd()
+        # Under a subscription login the CLI still reports `total_cost_usd` —
+        # what the work would have cost on the API. That is useful information
+        # and fake money, and adding it to a real total inflates the bill. The
+        # CLI does not say which mode it is in, so this is configuration
+        # (`CLAUDE_CLI_SUBSCRIPTION`), defaulting to the way this host runs it.
+        self._subscription = subscription
 
     def is_configured(self) -> bool:
         return resolve_executable(self._argv[0]) is not None
@@ -76,6 +83,7 @@ class ClaudeCliAdapter(ProviderAdapter):
             usage=usage,
             text=text.strip(),
             cost_override_usd=float(cost) if isinstance(cost, (int, float)) else None,
+            cost_is_notional=self._subscription,
             raw_meta={
                 "return_code": result.return_code,
                 "engine": "claude",

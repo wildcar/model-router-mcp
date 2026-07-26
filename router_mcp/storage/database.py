@@ -120,6 +120,9 @@ def _model_to_row(m: RegistryModel) -> dict[str, Any]:
         "completion_price": m.completion_price,
         "image_price": m.image_price,
         "audio_price_per_second": m.audio_price_per_second,
+        "character_price": m.character_price,
+        "cache_read_price": m.cache_read_price,
+        "cache_write_price": m.cache_write_price,
         "context_length": m.context_length,
         "source": m.source,
         "is_active": 1 if m.is_active else 0,
@@ -153,6 +156,9 @@ def _row_to_model(row: aiosqlite.Row) -> RegistryModel:
         completion_price=row["completion_price"],
         image_price=row["image_price"],
         audio_price_per_second=row["audio_price_per_second"],
+        character_price=row["character_price"],
+        cache_read_price=row["cache_read_price"],
+        cache_write_price=row["cache_write_price"],
         context_length=row["context_length"],
         source=row["source"],
         is_active=bool(row["is_active"]),
@@ -234,6 +240,9 @@ class Database:
                     completion_price REAL NOT NULL DEFAULT 0,
                     image_price REAL NOT NULL DEFAULT 0,
                     audio_price_per_second REAL NOT NULL DEFAULT 0,
+                    character_price REAL NOT NULL DEFAULT 0,
+                    cache_read_price REAL NOT NULL DEFAULT 0,
+                    cache_write_price REAL NOT NULL DEFAULT 0,
                     context_length INTEGER NOT NULL DEFAULT 0,
                     source TEXT NOT NULL DEFAULT 'manual',
                     is_active BOOLEAN NOT NULL DEFAULT 1,
@@ -343,6 +352,12 @@ class Database:
             "price_source_kind": "TEXT NOT NULL DEFAULT 'estimate'",
             "price_checked_at": "DATETIME",
             "revision": "INTEGER NOT NULL DEFAULT 0",
+            # Wave 2: TTS is billed per character and cached prompt tokens have
+            # their own rate; pricing either by the columns that existed was
+            # wrong by multiples.
+            "character_price": "REAL NOT NULL DEFAULT 0",
+            "cache_read_price": "REAL NOT NULL DEFAULT 0",
+            "cache_write_price": "REAL NOT NULL DEFAULT 0",
         },
         "request_logs": {
             "finish_reason": "TEXT",
@@ -579,7 +594,8 @@ class Database:
     _PATCHABLE_MODEL_COLUMNS = frozenset(
         {
             "display_name", "tier", "prompt_price", "completion_price",
-            "image_price", "audio_price_per_second", "context_length",
+            "image_price", "audio_price_per_second", "character_price",
+            "cache_read_price", "cache_write_price", "context_length",
             "pricing_mode", "subscription_id", "price_source",
             "price_source_kind", "price_checked_at",
         }

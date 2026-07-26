@@ -710,6 +710,7 @@ class ModelRouter:
             response.usage,
             override_usd=response.cost_override_usd,
             subscription=subscription,
+            notional=response.cost_is_notional,
         )
         step("cost", "cost computed", cost_usd=cost.cost_usd, cost_source=cost.cost_source)
 

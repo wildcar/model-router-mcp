@@ -23,10 +23,18 @@ from router_mcp.registry.models import RegistryModel
 
 logger = logging.getLogger(__name__)
 
+
 ANTHROPIC_VERSION = "2023-06-01"
 DEFAULT_MAX_TOKENS = 4096
 # /v1/models returns ids and display names, no prices.
 PRICING_PAGE = "https://claude.com/pricing#api"
+
+
+def _int(value: Any) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 class ClaudeApiAdapter(RetryClientMixin, ProviderAdapter):
@@ -160,13 +168,22 @@ class ClaudeApiAdapter(RetryClientMixin, ProviderAdapter):
                     completion_tokens=raw_usage.get("output_tokens"),
                 )
             raise ProviderError("Anthropic returned an empty response")
-        prompt = raw_usage.get("input_tokens")
-        completion = raw_usage.get("output_tokens")
+        # Anthropic reports cache reads and writes *outside* `input_tokens`,
+        # unlike the OpenAI-shaped providers. Usage's contract is that
+        # `prompt_tokens` is the whole prompt, so they are added back here —
+        # otherwise a cached conversation looks like it sent almost no prompt.
+        cache_read = _int(raw_usage.get("cache_read_input_tokens"))
+        cache_write = _int(raw_usage.get("cache_creation_input_tokens"))
+        input_tokens = _int(raw_usage.get("input_tokens"))
+        prompt = (input_tokens or 0) + (cache_read or 0) + (cache_write or 0) or None
+        completion = _int(raw_usage.get("output_tokens"))
         total = (prompt or 0) + (completion or 0) if (prompt or completion) else None
         usage = Usage(
             prompt_tokens=prompt,
             completion_tokens=completion,
             total_tokens=total,
+            cache_read_tokens=cache_read,
+            cache_write_tokens=cache_write,
             raw=raw_usage,
         )
         return text, usage

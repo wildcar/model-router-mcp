@@ -81,7 +81,13 @@ class ElevenLabsAdapter(RetryClientMixin, ProviderAdapter):
             modality=Modality.TTS,
             provider=self.name,
             model_id=model_id,
-            usage=Usage(raw={"characters": len(text), "voice_id": voice_id}),
+            # Characters, not seconds: ElevenLabs bills the text it was given,
+            # so pricing the run by the length of the audio prices the speaking
+            # rate instead.
+            usage=Usage(
+                characters=len(text),
+                raw={"characters": len(text), "voice_id": voice_id},
+            ),
             attachments=[Attachment(kind="audio", mime="audio/ogg", data=response.content)],
         )
 

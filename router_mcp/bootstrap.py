@@ -258,6 +258,7 @@ def _build_adapters(settings: Settings) -> list[ProviderSpec]:
             adapter=ClaudeCliAdapter(
                 command=settings.claude_command,
                 timeout_sec=settings.cli_run_timeout_sec,
+                subscription=settings.claude_cli_subscription,
                 allowed_cwd_roots=settings.allowed_cwd_roots(),
                 default_cwd=settings.cli_default_cwd,
             ),

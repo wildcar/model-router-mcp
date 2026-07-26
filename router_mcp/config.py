@@ -94,6 +94,10 @@ class Settings(BaseSettings):
     codex_command: str = Field(default="codex exec --model gpt-5.5", alias="CODEX_COMMAND")
     claude_command: str = Field(default="claude", alias="CLAUDE_COMMAND")
     cli_run_timeout_sec: int = Field(default=1800, alias="CLI_RUN_TIMEOUT_SEC")
+    # The claude CLI reports `total_cost_usd` whether it ran against an API key
+    # or a subscription. Under a subscription that sum was never charged, so it
+    # is logged as notional and kept out of real-money totals.
+    claude_cli_subscription: bool = Field(default=True, alias="CLAUDE_CLI_SUBSCRIPTION")
     # Comma-separated list of directory prefixes a CLI request may use as cwd.
     cli_allowed_cwd_roots: str = Field(default="", alias="CLI_ALLOWED_CWD_ROOTS")
     # Default working directory for CLI runs; empty = the router process cwd.

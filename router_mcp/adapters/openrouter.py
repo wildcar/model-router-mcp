@@ -17,7 +17,12 @@ from typing import Any
 
 import httpx
 
-from router_mcp.adapters.base import ProviderAdapter, RetryClientMixin, truncated_error
+from router_mcp.adapters.base import (
+    ProviderAdapter,
+    RetryClientMixin,
+    openai_shaped_usage,
+    truncated_error,
+)
 from router_mcp.domain.errors import ProviderError, ProviderUnavailable
 from router_mcp.domain.messages import Attachment, RouterRequest, RouterResponse, Usage
 from router_mcp.domain.modality import Modality
@@ -66,7 +71,13 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
 
     async def generate(self, request: RouterRequest, model: RegistryModel) -> RouterResponse:
         messages = self._build_messages(request)
-        payload: dict[str, Any] = {"model": model.model_id, "messages": messages}
+        payload: dict[str, Any] = {
+            "model": model.model_id,
+            "messages": messages,
+            # Ask OpenRouter for the sum it charged. It is the only direct check
+            # on a registry price having gone stale.
+            "usage": {"include": True},
+        }
         for key in self.SUPPORTED_PARAMS[Modality.CHAT]:
             if key in request.params:
                 payload[key] = request.params[key]
@@ -114,6 +125,7 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
         if image_urls:
             usage.images = len(image_urls)
 
+        raw_usage = data.get("usage") if isinstance(data, dict) else None
         return RouterResponse(
             modality=request.modality,
             provider=self.name,
@@ -121,7 +133,13 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
             usage=usage,
             text=text or None,
             attachments=attachments,
-            raw_meta={"finish_reason": choice0.get("finish_reason")},
+            raw_meta={
+                "finish_reason": choice0.get("finish_reason"),
+                "provider_request_id": data.get("id") if isinstance(data, dict) else None,
+                # Kept beside the registry-based figure rather than replacing it:
+                # the difference between the two is the staleness signal.
+                "provider_cost_usd": self._reported_cost(raw_usage),
+            },
         )
 
     # --- catalog ---------------------------------------------------------
@@ -233,12 +251,31 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
     def _parse_usage(raw: Any) -> Usage:
         if not isinstance(raw, dict):
             return Usage()
+        details = openai_shaped_usage(raw)
         return Usage(
             prompt_tokens=raw.get("prompt_tokens"),
             completion_tokens=raw.get("completion_tokens"),
             total_tokens=raw.get("total_tokens"),
+            cache_read_tokens=details["cache_read"],
+            reasoning_tokens=details["reasoning"],
             raw=raw,
         )
+
+    @staticmethod
+    def _reported_cost(raw: Any) -> float | None:
+        """The sum OpenRouter itself charged, when it told us.
+
+        Requested via `usage: {include: true}`. It is the best available check on
+        a registry price going stale: the console shows both and highlights the
+        gap (§7.4).
+        """
+        if not isinstance(raw, dict):
+            return None
+        value = raw.get("cost")
+        try:
+            return float(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
 
     @staticmethod
     def _extract_top_level_error(payload: Any) -> tuple[str, int | str | None] | None:

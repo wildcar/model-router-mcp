@@ -28,6 +28,15 @@ class RegistryModel:
     completion_price: float = 0.0  # USD per token
     image_price: float = 0.0  # USD per image
     audio_price_per_second: float = 0.0  # USD per second
+    # TTS is billed per character, not per second of the audio it produces:
+    # pricing a synthesis run by its duration prices the speaking rate.
+    character_price: float = 0.0  # USD per character
+    # Cached prompt tokens are billed at their own rate — roughly a tenth of the
+    # prompt rate at DeepSeek and Anthropic. Zero means "nobody filled this in",
+    # and accounting then falls back to the prompt rate and says the number is
+    # an estimate rather than quietly making the request look cheap.
+    cache_read_price: float = 0.0  # USD per cached prompt token
+    cache_write_price: float = 0.0  # USD per token written to cache
     context_length: int = 0
     source: str = "manual"  # "catalog" | "seed" | "manual"
     is_active: bool = True
@@ -55,33 +64,60 @@ class RegistryModel:
     revision: int = 0
     extra: dict = field(default_factory=dict)
 
+    # Provenances under which a zero price means "confirmed free" rather than
+    # "not filled in". A catalog that publishes prices, or an administrator, can
+    # say a model costs nothing; a guess cannot.
+    _CONFIRMED_PROVENANCE = ("api", "page", "manual")
+
     @property
     def price_is_verified(self) -> bool:
-        return self.price_source_kind in ("api", "page", "manual")
+        return self.price_source_kind in self._CONFIRMED_PROVENANCE
 
     @property
     def price_is_unknown(self) -> bool:
         """True when the zeros in this row mean "nobody filled the price in".
 
-        A catalog that lists ids without prices (DeepSeek, Anthropic) leaves the
-        columns at zero, which would otherwise make the model look like the
-        cheapest thing in the registry and win every automatic selection.
+        Two ways a row ends up with zeros nobody chose: a catalog that lists ids
+        without prices (DeepSeek, Anthropic) stores them as `unknown`, and a
+        bootstrap seed for a provider with no catalog at all (image, stt, tts)
+        stores them as `estimate`. Both used to read as "free", which made them
+        the cheapest thing in the registry and won every automatic selection —
+        and made three of the five modalities bill at exactly zero.
+
+        A zero that somebody confirmed is a different thing and stays free.
         """
-        return self.price_source_kind == "unknown" and (
-            self.prompt_price == 0.0
-            and self.completion_price == 0.0
-            and self.image_price == 0.0
-            and self.audio_price_per_second == 0.0
-        )
+        return not self.price_is_verified and self._all_prices_zero
 
     @property
-    def is_free(self) -> bool:
+    def _all_prices_zero(self) -> bool:
         return (
             self.prompt_price == 0.0
             and self.completion_price == 0.0
             and self.image_price == 0.0
             and self.audio_price_per_second == 0.0
+            and self.character_price == 0.0
         )
+
+    @property
+    def is_free(self) -> bool:
+        """Free as a fact, not as a gap: confirmed provenance and zero rates."""
+        return self._all_prices_zero and self.price_is_verified
+
+    def has_rate_for(self, modality: Modality) -> bool:
+        """Whether this row can price that modality at all.
+
+        `unpriced` on a run means exactly this returning False while the run
+        consumed something: there is no methodology, and a zero would be a
+        statement rather than a gap (§2, §7.2).
+        """
+        if modality is Modality.IMAGE:
+            return self.image_price > 0.0
+        if modality is Modality.TTS:
+            return self.character_price > 0.0 or self.audio_price_per_second > 0.0
+        if modality is Modality.STT:
+            return self.audio_price_per_second > 0.0
+        # chat and cli are token-billed; either rate being set is enough.
+        return self.prompt_price > 0.0 or self.completion_price > 0.0
 
     @property
     def is_cheap(self) -> bool:
