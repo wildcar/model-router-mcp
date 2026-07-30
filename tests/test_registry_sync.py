@@ -277,3 +277,33 @@ async def test_prune_keeps_confirmed_curated_and_logged_rows(tmp_path):
         assert len(await db.list_registry_models(active_only=False)) == 6
     finally:
         await db.close()
+
+
+@pytest.mark.asyncio
+async def test_browsed_sync_does_not_resurrect_a_pruned_row(tmp_path):
+    """Found on prod, the hard way: prune retired 363 OpenRouter rows and the
+    next forced sync brought every one of them back, because "listed upstream"
+    re-activates a row — a rule that means something for a mirrored catalog and
+    nothing for a market that lists everything always. The way back into a
+    browsed registry is adoption, not a timer."""
+    db = await _db(tmp_path)
+    try:
+        adapter = FakeBrowseAdapter([_model("swept", price_source_kind="api"),
+                                     _model("kept", price_source_kind="api")])
+        registry = RegistryService(db, adapters={"vendor": adapter})
+        await db.upsert_registry_model(_model("swept"))
+        await db.upsert_registry_model(_model("kept"))
+        await db.confirm_registry_model("vendor", "kept")
+
+        await registry.prune_unconfirmed("vendor", dry_run=False)
+        report = (await registry.sync_all(force=True))[0]
+
+        assert report.updated == 1        # only the live row is refreshed
+        active = {m.model_id for m in await db.list_registry_models()}
+        assert active == {"kept"}
+        # And adoption is still the explicit way back.
+        await registry.adopt_models("vendor", ["swept"])
+        active = {m.model_id for m in await db.list_registry_models()}
+        assert active == {"kept", "swept"}
+    finally:
+        await db.close()

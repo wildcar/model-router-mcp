@@ -154,11 +154,19 @@ class RegistryService:
         for fresh in incoming:
             seen.add(fresh.model_id)
             old = existing.get(fresh.model_id)
-            if old is None and browse_only:
+            if browse_only and (old is None or not old.is_active):
                 # A browsed catalog is not an inventory: mirroring it filled the
                 # registry with hundreds of ids nobody addressed, and every one of
                 # them joined the automatic-selection pool. The list stays
                 # available through `browse_provider`.
+                #
+                # Retired rows are skipped too, and that is the difference between
+                # the scopes in one line. A full catalog re-activates a row the
+                # provider lists again — the registry follows the provider. In a
+                # browse catalog the provider lists everything always, so "listed
+                # upstream" says nothing; what retired the row was the operator's
+                # sweep, and the first sync after it must not quietly undo it.
+                # The way back is `adopt_models`, which is explicit.
                 report.offered += 1
                 continue
             await self._db.upsert_registry_model(self._merge(old, fresh, stamp))

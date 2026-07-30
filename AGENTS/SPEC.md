@@ -193,10 +193,12 @@ Contract for requirement 34. Reasoning and rejected alternatives:
 `docs/adr/0008-catalogs-are-asked-registry-keeps-what-answered.md`.
 
 - `ProviderAdapter.catalog_scope` — `full` (mirror the catalog, the default) or
-  `browse` (refresh known rows, insert none). OpenRouter is `browse`: it lists
-  424 ids of which five were ever addressed here, and every mirrored row joined
-  the pool automatic selection sorts by price. `SyncReport.offered` counts what
-  was left out.
+  `browse` (refresh *active* rows only: no inserts, and no re-activating a row a
+  sweep retired — in a market that lists everything always, "seen upstream" says
+  nothing, and the way back is adoption). OpenRouter is `browse`: it lists 424
+  ids of which five were ever addressed here, and every mirrored row joined the
+  pool automatic selection sorts by price. `SyncReport.offered` counts what was
+  left out.
 - `registry_models.confirmed_at` — when a request to that exact pair came back
   with an answer. Set once and never moved, written only by
   `confirm_registry_model` (a catalog sync cannot touch it), no revision bump,

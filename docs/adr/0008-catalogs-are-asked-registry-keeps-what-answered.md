@@ -50,9 +50,16 @@ restart looking unproven.
 
 **`ProviderAdapter.catalog_scope`.** `"full"` (the default) means the catalog is
 small enough to mirror — Anthropic, DeepSeek, Codex, the Replicate allowlist.
-`"browse"` means it is a market: the sync refreshes the rows already held,
-inserts none, and reports how many were `offered` and left out. OpenRouter is the
-only `"browse"` provider today.
+`"browse"` means it is a market: the sync refreshes only the rows that are held
+*and active*, inserts none, and reports how many were `offered` and left out.
+OpenRouter is the only `"browse"` provider today.
+
+Skipping retired rows is the scope difference in one line, and it was learned on
+prod: the first sweep retired 363 rows and the next forced sync brought every one
+back, because "seen upstream re-activates" is a rule that means something for a
+mirrored inventory and nothing for a market that lists everything always. In a
+browse catalog what retired a row was the operator's sweep, and the way back is
+`adopt_models`, which is explicit.
 
 **Three operations instead of one.** `sync_provider` reconciles what is stored.
 `browse_provider` asks the provider live and stores nothing, annotating each entry
