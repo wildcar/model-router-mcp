@@ -32,6 +32,44 @@ from router_mcp.web.views import error_envelope
 logger = logging.getLogger(__name__)
 
 
+async def _drain_request_body(receive) -> None:
+    """Consume the request body before answering without it.
+
+    Responding while the body is still in flight makes uvicorn close a
+    connection with unread data, which the kernel escalates to a TCP RST — the
+    client then sees ECONNRESET instead of our status code. Any early response
+    on /mcp must drain first.
+    """
+    while True:
+        message = await receive()
+        if message["type"] != "http.request" or not message.get("more_body"):
+            return
+
+
+class McpTrailingSlashMiddleware:
+    """Rewrite `/mcp` to `/mcp/` in the scope instead of letting the mounted
+    sub-app answer with redirect_slashes' 307.
+
+    That 307 was sent before the request body was read, so uvicorn closed the
+    connection on an unconsumed body and the kernel sent a TCP RST. Callers
+    POSTing megabyte-scale bodies to /mcp got an instant ECONNRESET — sometimes
+    at ~1.5 MB (a race between reading the 307 and the RST), always past the
+    ~4 MB that tcp_wmem lets the client buffer. Serving the path directly
+    removes the redirect and with it the whole failure mode.
+    """
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope.get("type") == "http" and scope.get("path") == "/mcp":
+            scope["path"] = "/mcp/"
+            raw_path = scope.get("raw_path")
+            if raw_path is not None:
+                scope["raw_path"] = raw_path + b"/"
+        await self.app(scope, receive, send)
+
+
 class McpBearerAuthMiddleware:
     """Pure-ASGI gate: require `Authorization: Bearer <token>` on /mcp.
 
@@ -53,6 +91,7 @@ class McpBearerAuthMiddleware:
                 auth = headers.get(b"authorization", b"").decode()
                 scheme, _, value = auth.partition(" ")
                 if scheme.lower() != "bearer" or value.strip() != self.token:
+                    await _drain_request_body(receive)
                     response = JSONResponse({"detail": "Unauthorized"}, status_code=401)
                     await response(scope, receive, send)
                     return
@@ -134,6 +173,8 @@ def build_app(settings: Settings | None = None) -> FastAPI:
 
     # Bearer-token gate for /mcp (no-op when AUTH_TOKEN is unset).
     app.add_middleware(McpBearerAuthMiddleware, token=settings.auth_token)
+    # Outermost, so nothing ever sees a slash-less /mcp and redirects it.
+    app.add_middleware(McpTrailingSlashMiddleware)
 
     @app.exception_handler(RouterError)
     async def router_error_handler(request: Request, exc: RouterError) -> JSONResponse:
