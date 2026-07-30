@@ -50,6 +50,12 @@ CODEX_TOKEN_REFRESH_URL = "https://auth.openai.com/oauth/token"
 # not publish any, which is why catalog rows come back `unknown`.
 CODEX_PRICING_PAGE = "https://platform.openai.com/docs/pricing"
 
+# What `/responses` actually accepts as `reasoning.effort` — its own 400 lists
+# exactly these. The model catalog names more: `ultra` on gpt-5.6 is a CLI mode
+# («maximum reasoning with automatic task delegation»), and offering it in the
+# console reproduced the very error this adapter's form exists to prevent.
+API_REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+
 
 class CodexOAuthAdapter(ProviderAdapter):
     name = "codex-oauth"
@@ -297,10 +303,12 @@ class CodexOAuthAdapter(ProviderAdapter):
                 tasks.append(Task.IMAGE_TO_TEXT)
                 caps.append("vision")
             # The per-model reasoning levels, stored as capabilities so the
-            # console can offer exactly these and nothing else.
+            # console can offer exactly these and nothing else. Filtered against
+            # what `/responses` takes: the catalog speaks for the CLI and lists
+            # `ultra`, which the API rejects with a 400.
             for level in item.get("supported_reasoning_levels") or []:
                 effort = str((level or {}).get("effort") or "").strip()
-                if effort:
+                if effort and effort in API_REASONING_EFFORTS:
                     caps.append(f"effort:{effort}")
             models.append(
                 RegistryModel(

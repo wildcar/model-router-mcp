@@ -27,9 +27,11 @@ six text models (`gpt-5.6-sol`, `-terra`, `-luna`, `gpt-5.5`, `gpt-5.4`,
 `gpt-5.4-mini`), and nothing in the console could say so. The backend does
 publish the list: `GET /backend-api/codex/models?client_version=…`, the same one
 the codex CLI caches in `~/.codex/models_cache.json`. It also names, per model,
-the reasoning levels that model accepts — `gpt-5.6` takes `ultra`, the
-five-series stops at `xhigh` — and that fact exists nowhere else: `/responses`
-rejects an unknown level with a 400 that lists values, not models.
+the reasoning levels that model accepts — `gpt-5.6` goes beyond the five-series'
+`xhigh` — and that fact exists nowhere else: `/responses` rejects an unknown
+level with a 400 that lists values, not models. One catalog value is filtered on
+the way in: `ultra` is a CLI mode («maximum reasoning with automatic task
+delegation»), and `/responses` rejects it too — verified live, prod log #8664.
 
 Underneath both is one missing fact. A catalog entry says the provider lists an
 id; a seed says somebody typed it. Neither says the id works. The only evidence

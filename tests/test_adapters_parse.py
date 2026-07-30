@@ -328,8 +328,10 @@ async def test_codex_catalog_lists_every_model_and_its_own_effort_levels(monkeyp
     sol = rows["gpt-5.6-sol"]
     assert sol.tasks == (Task.TEXT_TO_TEXT, Task.IMAGE_TO_TEXT)
     assert "vision" in sol.capabilities
+    # `ultra` is in the catalog and NOT here: the catalog speaks for the CLI,
+    # and `/responses` answers 400 for it (verified live on prod, log #8664).
     assert [c for c in sol.capabilities if c.startswith("effort:")] == [
-        "effort:low", "effort:medium", "effort:ultra"
+        "effort:low", "effort:medium"
     ]
     assert sol.context_length == 272000
     # Text-only: no vision task, so no vision candidacy either.
