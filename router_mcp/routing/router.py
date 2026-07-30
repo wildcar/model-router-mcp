@@ -910,6 +910,13 @@ class ModelRouter:
         # replays the same steps the operator watched go by.
         rec.plan_json = _steps_json(steps, dropped())
         await self._db.finish_request_log(log_id, rec)
+        # An answer is the only proof the model id is real (ADR-0008). Written
+        # after the row is closed, and only for a row that has no date yet, so a
+        # provider in daily use pays for this once.
+        if model.confirmed_at is None:
+            await self._db.confirm_registry_model(
+                model.service_provider_id, model.model_id, finished_at
+            )
         return DispatchResult(
             response=response,
             cost=cost,

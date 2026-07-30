@@ -15,7 +15,7 @@ from router_mcp.domain.modality import Modality
 from router_mcp.domain.task import Task
 from router_mcp.registry.models import RegistryModel
 from router_mcp.registry.service import RegistryService
-from router_mcp.storage.database import Database
+from router_mcp.storage.database import Database, RequestLogRecord
 
 
 def _model(model_id: str, **kw) -> RegistryModel:
@@ -168,5 +168,112 @@ async def test_provider_without_catalog_is_left_alone(tmp_path):
 
         assert report.skipped == "no catalog endpoint"
         assert [m.model_id for m in await db.list_registry_models()] == ["cli"]
+    finally:
+        await db.close()
+
+
+# --- browsed catalogs (ADR-0008) ---------------------------------------
+class FakeBrowseAdapter(FakeCatalogAdapter):
+    """A provider whose catalog is a market: asked, not mirrored."""
+
+    catalog_scope = "browse"
+
+
+@pytest.mark.asyncio
+async def test_browsed_catalog_refreshes_known_rows_and_inserts_none(tmp_path):
+    """OpenRouter offers four hundred ids; five were ever addressed here. The
+    sync must keep those five fresh and leave the rest out of the registry —
+    every mirrored row joined the pool automatic selection picks from."""
+    db = await _db(tmp_path)
+    try:
+        await db.upsert_registry_model(_model("known", prompt_price=1e-6))
+        adapter = FakeBrowseAdapter([
+            _model("known", prompt_price=2e-6, price_source_kind="api"),
+            _model("offered-1"),
+            _model("offered-2"),
+        ])
+        report = (await RegistryService(db, adapters={"vendor": adapter}).sync_all(force=True))[0]
+
+        assert (report.added, report.updated, report.offered) == (0, 1, 2)
+        stored = await db.list_registry_models(active_only=False)
+        assert [m.model_id for m in stored] == ["known"]
+        assert stored[0].prompt_price == pytest.approx(2e-6)
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_browse_reports_what_is_known_and_confirmed(tmp_path):
+    db = await _db(tmp_path)
+    try:
+        await db.upsert_registry_model(_model("known"))
+        await db.confirm_registry_model("vendor", "known", "2026-07-30T10:00:00+00:00")
+        adapter = FakeBrowseAdapter([_model("known"), _model("offered")])
+        answer = await RegistryService(db, adapters={"vendor": adapter}).browse_provider("vendor")
+
+        assert answer["total"] == 2 and answer["known"] == 1
+        by_id = {i["model_id"]: i for i in answer["items"]}
+        assert by_id["known"]["confirmed_at"] == "2026-07-30T10:00:00+00:00"
+        assert by_id["offered"]["known"] is False
+        # Browsing stores nothing: the second model is still not a row.
+        assert [m.model_id for m in await db.list_registry_models()] == ["known"]
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_adopt_writes_the_providers_row_not_the_browsers(tmp_path):
+    db = await _db(tmp_path)
+    try:
+        adapter = FakeBrowseAdapter([_model("offered", prompt_price=3e-6, display_name="Offered")])
+        registry = RegistryService(db, adapters={"vendor": adapter})
+        assert await registry.adopt_models("vendor", ["offered"]) == ["offered"]
+
+        stored = (await db.list_registry_models())[0]
+        assert stored.display_name == "Offered"
+        assert stored.prompt_price == pytest.approx(3e-6)
+        # Adopted, not confirmed: only an answer confirms an id.
+        assert stored.confirmed_at is None
+
+        with pytest.raises(Exception):
+            await registry.adopt_models("vendor", ["never-offered"])
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_prune_keeps_confirmed_curated_and_logged_rows(tmp_path):
+    db = await _db(tmp_path)
+    try:
+        await db.upsert_registry_model(_model("answered"))
+        await db.confirm_registry_model("vendor", "answered")
+        await db.upsert_registry_model(_model("by-hand", source="manual"))
+        await db.upsert_registry_model(_model("priced-by-hand", price_source_kind="page"))
+        await db.upsert_registry_model(_model("seeded", source="seed"))
+        await db.upsert_registry_model(_model("tried-and-failed"))
+        await db.upsert_registry_model(_model("never-touched"))
+        await db.log_request(
+            RequestLogRecord(
+                external_user_id="u",
+                modality="chat",
+                service_provider_id="vendor",
+                model_id="tried-and-failed",
+                status="error",
+            )
+        )
+        registry = RegistryService(db, adapters={"vendor": FakeBrowseAdapter([])})
+
+        plan = await registry.prune_unconfirmed("vendor", dry_run=True)
+        assert plan.retired == ["never-touched"]
+        assert (plan.kept_confirmed, plan.kept_curated, plan.kept_in_log) == (1, 3, 1)
+        # A dry run changes nothing.
+        assert len(await db.list_registry_models()) == 6
+
+        done = await registry.prune_unconfirmed("vendor", dry_run=False)
+        assert done.retired == ["never-touched"]
+        active = {m.model_id for m in await db.list_registry_models()}
+        assert "never-touched" not in active and len(active) == 5
+        # Retired, not deleted.
+        assert len(await db.list_registry_models(active_only=False)) == 6
     finally:
         await db.close()

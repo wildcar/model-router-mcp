@@ -84,6 +84,7 @@ on it; adapters never touch storage/mcp directly.
 31. ✅ Asynchronous providers: a prediction is created, polled, cancellable upstream, and its result is fetched into the blob store before the provider's link expires. Billing per second of provider compute is its own unit and its own rate. [ADR-0007]
 32. ✅ Replicate as a provider: the catalog is an env-configured allowlist, inputs are mapped through each model's own OpenAPI schema, prices arrive `unknown` and are typed in by hand.
 33. ✅ A stored file can be handed to a provider by a signed, expiring link on a separate host; without a signing key nothing is served on that path.
+34. ✅ A provider's model list can be asked for on demand and stored selectively: the registry keeps the models that answered a request (`confirmed_at`), what a human curated, and nothing else. A market-sized catalog is browsed, not mirrored. [ADR-0008]
 
 ## Tasks, media and billing groups (30)
 
@@ -185,6 +186,39 @@ the provider's stop reason for both successful and failed calls.
   - a catalog without pricing (DeepSeek, Anthropic) never zeroes an existing price.
 - Bootstrap seeds are insert-if-absent, so a retired model id cannot be
   resurrected by a restart.
+
+### Asking a provider, and keeping only what answered (34)
+
+Contract for requirement 34. Reasoning and rejected alternatives:
+`docs/adr/0008-catalogs-are-asked-registry-keeps-what-answered.md`.
+
+- `ProviderAdapter.catalog_scope` — `full` (mirror the catalog, the default) or
+  `browse` (refresh known rows, insert none). OpenRouter is `browse`: it lists
+  424 ids of which five were ever addressed here, and every mirrored row joined
+  the pool automatic selection sorts by price. `SyncReport.offered` counts what
+  was left out.
+- `registry_models.confirmed_at` — when a request to that exact pair came back
+  with an answer. Set once and never moved, written only by
+  `confirm_registry_model` (a catalog sync cannot touch it), no revision bump,
+  and a failed attempt confirms nothing. Backfilled from the log on migration.
+- `GET /api/v1/registry/catalog/{provider}` — the live list, stored nowhere, each
+  entry flagged `known` / `active` / `confirmed_at`. 503 when the provider has no
+  credentials; `has_catalog: false` when it has no catalog endpoint at all.
+- `POST /api/v1/registry/catalog/{provider}/adopt` — writes named rows from the
+  provider's own answer. An adopted row is unconfirmed until something answers.
+- `POST /api/v1/registry/catalog/{provider}/prune?dry_run=` — retires rows that
+  nothing confirmed. Kept: confirmed, `source` of `manual`/`seed`, a price a human
+  vouched for, or a model_id the log mentions at all. Retires, never deletes.
+- codex-oauth has a catalog: `GET {CODEX_BASE_URL}/models?client_version=` (see
+  `CODEX_CLIENT_VERSION`) lists the account's six text models with their context
+  window, input media and their own reasoning levels; `visibility: hide` and
+  `supported_in_api: false` entries are skipped, and the image tool model is
+  appended because it is addressable but not listed. Rows are priced `unknown`:
+  a subscription publishes no rate, and a zero would win every automatic pick.
+- Per-model parameter options: levels a catalog publishes are stored as
+  capabilities (`effort:xhigh`) and served on the tree node as `param_options`.
+  A pinned model narrows the «Глубина рассуждения» select to its own levels; with
+  no model pinned the form offers the union the backends accept.
 
 ### Price provenance (16)
 
@@ -367,6 +401,12 @@ cascade plus a `model_id` field that reports found / retired / provider-off as
 it is typed). Fallback is one select in plain words, with `max_steps` under
 "ещё настройки". The plan is recomputed 300 ms after any discrete change, and
 the send button carries the estimate.
+
+«Модели» carries the registry table, the price card (unit inside the field, the
+previous value underneath, an order-of-magnitude jump confirmed out loud) and the
+«Спросить поставщика» block: a provider select, the live catalog with per-row
+adoption, and «Свернуть до подтверждённых». The card says whether anything ever
+answered on the model.
 
 One inspector component serves «Прогон» and «Журнал», over the single `Run`
 envelope, with five tabs — Запрос, Ответ, Шаги, JSON, Сырьё. «Ответ» opens

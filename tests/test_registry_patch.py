@@ -204,3 +204,41 @@ def test_cache_rates_are_reachable_through_the_api(client):
         "/api/v1/registry/models",
         params={"service_provider_id": "deepseek", "model_id": "demo/cached"},
     )
+
+
+# --- asking a provider what it offers (ADR-0008) ---------------------------
+def test_browse_of_an_unconfigured_provider_says_so(client):
+    """Nothing is configured in the test app, and the answer must be the reason
+    rather than an empty list that reads as «поставщик ничего не предлагает»."""
+    r = client.get("/api/v1/registry/catalog/openrouter")
+    assert r.status_code == 503
+    assert r.json()["error"]["code"] == "not_configured"
+
+
+def test_browse_of_an_unknown_provider_is_a_bad_request(client):
+    r = client.get("/api/v1/registry/catalog/nope")
+    assert r.status_code == 400
+
+
+def test_prune_dry_run_touches_nothing(client):
+    """The console asks twice on purpose: the dry run names the rows, and the
+    confirmation the operator agreed to has to match what the second call does."""
+    client.post(
+        "/api/v1/registry/models",
+        json={
+            "service_provider_id": "openrouter",
+            "model_id": "demo/never-answered",
+            "modalities": ["chat"],
+        },
+    )
+    plan = client.post(
+        "/api/v1/registry/catalog/openrouter/prune?dry_run=true"
+    ).json()
+    assert plan["dry_run"] is True
+    # A hand-created row is curated, so it is kept rather than swept.
+    assert "demo/never-answered" not in plan["retired"]
+    assert plan["kept_curated"] >= 1
+    still_there = client.get(
+        "/api/v1/registry/models?provider=openrouter&state=active"
+    ).json()
+    assert any(m["model_id"] == "demo/never-answered" for m in still_there["items"])

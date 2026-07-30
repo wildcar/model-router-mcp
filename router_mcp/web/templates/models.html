@@ -20,6 +20,18 @@
       <button id="reload" type="button">Обновить</button>
       <button id="add-model" type="button">Добавить вручную</button>
     </div>
+    {# «Что вообще есть у поставщика» — a question, not a record. The answer is
+       fetched live and stored only for the models somebody adopts, because a
+       mirrored market put four hundred unaddressed ids into the pool automatic
+       selection picks from (ADR-0008). #}
+    <div class="row">
+      <label>Спросить поставщика
+        <select id="ask-provider"><option value="">— выберите —</option></select>
+      </label>
+      <button id="ask" type="button">Показать доступные модели</button>
+      <button id="prune" type="button">Свернуть до подтверждённых</button>
+    </div>
+    <div id="offer"></div>
     <p class="hint">Цены в <b>USD за 1&nbsp;000&nbsp;000 токенов</b>.
       <b>Промпт</b> — входные токены, <b>Ответ</b> — выходные.
       Щёлкните строку, чтобы открыть карточку.</p>

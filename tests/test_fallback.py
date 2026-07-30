@@ -289,3 +289,35 @@ def test_policy_parsing_rejects_nonsense():
         FallbackPolicy.parse({"policy": "cheapest"})
     with pytest.raises(ValueError):
         FallbackPolicy.parse({"policy": "same", "scope": "galaxy"})
+
+
+@pytest.mark.asyncio
+async def test_an_answer_confirms_the_model_and_a_failure_does_not(tmp_path):
+    """The registry keeps for good only what actually served a request (ADR-0008),
+    and the proof is a response — the model that was tried and threw is still an
+    unconfirmed id."""
+    adapter = ScriptedAdapter(broken={"mid": ProviderError("boom")})
+    db, router = await _core(tmp_path, adapter, _ladder())
+    try:
+        await router.dispatch(RouterRequest(
+            task=Task.TEXT_TO_TEXT, external_user_id="u", model_id="flash", text="hi"
+        ))
+        with pytest.raises(RouterError):
+            await router.dispatch(RouterRequest(
+                task=Task.TEXT_TO_TEXT, external_user_id="u", model_id="mid", text="hi"
+            ))
+
+        rows = {m.model_id: m for m in await db.list_registry_models()}
+        assert rows["flash"].confirmed_at is not None
+        assert rows["mid"].confirmed_at is None
+        assert rows["pro"].confirmed_at is None
+
+        # The date is the first answer and does not move on the next one.
+        first = rows["flash"].confirmed_at
+        await router.dispatch(RouterRequest(
+            task=Task.TEXT_TO_TEXT, external_user_id="u", model_id="flash", text="hi"
+        ))
+        again = {m.model_id: m for m in await db.list_registry_models()}
+        assert again["flash"].confirmed_at == first
+    finally:
+        await db.close()

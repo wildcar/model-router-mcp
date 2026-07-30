@@ -4,6 +4,15 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-07-30 · Каталог спрашивают, а храним тот, который ответил (ADR-0008)
+- What: подпись «— по умолчанию —» больше не уезжает в API значением параметра (`<option>` без `value` берёт значением свою подпись — отсюда `HTTP 400 Invalid value` на `reasoning.effort` у Codex). У codex-oauth появился каталог: `GET {CODEX_BASE_URL}/models?client_version=` отдаёт шесть текстовых моделей вместо одной засеянной и уровни рассуждения по каждой (пятёрка до `xhigh`, gpt-5.6 до `ultra`) — они хранятся возможностями и сужают список в форме, когда модель выбрана. `registry_models.confirmed_at` ставится успешной отправкой и заполняется из журнала миграцией. `catalog_scope='browse'` у OpenRouter: синхронизация обновляет известные строки и не вставляет новых; живой список, принятие и свёртка неподтверждённых доступны ручками и блоком «Спросить поставщика» на «Моделях».
+- Why: две правки пользователя. Фраза-заглушка ломала каждый запрос с глубиной рассуждения, а реестр одновременно хранил лишнее (424 строки OpenRouter, использовано 5, и все 424 участвовали в автовыборе по цене) и недостаточное (у codex-oauth две строки, написанные руками).
+- Files: router_mcp/{adapters/{base,openrouter,codex_oauth}.py, registry/{models,service}.py, storage/database.py, routing/router.py, web/{api,capabilities}.py, web/templates/models.html, web/static/js/pages/{models,run}.js, config.py, bootstrap.py, mcp_server/serialize.py}, .env.example, tests/{test_adapters_parse,test_registry_sync,test_registry_patch,test_fallback,test_migrations}.py, tests/js/run-pages.mjs, docs/adr/0008-*.md, AGENTS/SPEC.md
+- Verified: dev, живьём. Каталог codex-oauth отвечает семью строками; `gpt-5.6-sol` с `reasoning_effort=xhigh` ответил «Астана», строка реестра получила `confirmed_at`, расход записан `unpriced`. Синхронизация OpenRouter на чистой базе: `seen=367, added=0, offered=367`. `pytest` 316 прошло, падает только `test_mcp_tab_lists_tools_with_schemas` — он падал и до правок.
+- Next: деплой на прод и там же свёртка каталога OpenRouter до использованных (сначала `dry_run=true` глазами).
+
+---
+
 ## 2026-07-26 · Деплой на прод, `blob.wildcar.org` и четыре дефекта живой проверки
 - What: восемь волн выкачены на прод (`f8a94a2`). Миграция прошла на первом перезапуске: 8293 строки журнала получили `task`, колонки денег вышли байт в байт против резервной копии, сумма расхода не изменилась ($6.541389). Синхронизация каталога вылечила разметку OpenRouter — рисующих моделей 13 вместо 183, 172 vision-модели уехали в `text-to-text,image-to-text`. Поднят второй хост `blob.wildcar.org` (свой серверный блок в nginx, сертификат Let's Encrypt, редирект с 80), в прод `.env` добавлены `REPLICATE_MODELS`, `PUBLIC_BLOB_BASE_URL`, `PUBLIC_BLOB_SIGNING_KEY`.
 - Why: пользователь попросил развернуть и настроить домен для передачи файлов провайдеру.

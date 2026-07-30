@@ -135,6 +135,10 @@ class Settings(BaseSettings):
     )
     codex_image_main_model: str = Field(default="gpt-5.4", alias="CODEX_IMAGE_MAIN_MODEL")
     codex_image_tool_model: str = Field(default="gpt-image-2", alias="CODEX_IMAGE_TOOL_MODEL")
+    # The model list endpoint filters by client version (a model can declare a
+    # `minimal_client_version`), so the version is a request parameter, not
+    # decoration. Keep it at or above the codex CLI installed beside us.
+    codex_client_version: str = Field(default="0.146.0", alias="CODEX_CLIENT_VERSION")
     codex_image_size: str = Field(default="1024x1536", alias="CODEX_IMAGE_SIZE")
     codex_image_quality: str = Field(default="medium", alias="CODEX_IMAGE_QUALITY")
 

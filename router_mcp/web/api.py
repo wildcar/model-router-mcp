@@ -734,6 +734,38 @@ async def api_refresh_catalog(provider: str | None = None) -> dict[str, Any]:
     return {"providers": [r.as_dict() for r in reports]}
 
 
+@api_router.get("/registry/catalog/{provider_id}")
+async def api_browse_catalog(provider_id: str) -> dict[str, Any]:
+    """What the provider offers right now. Nothing is stored by this call.
+
+    The registry keeps the models that were used and answered; the full list is a
+    question, not a record, so it is asked when somebody asks it (ADR-0008).
+    """
+    return await get_core().registry.browse_provider(provider_id)
+
+
+class AdoptBody(BaseModel):
+    model_ids: list[str]
+
+
+@api_router.post("/registry/catalog/{provider_id}/adopt")
+async def api_adopt_models(provider_id: str, body: AdoptBody) -> dict[str, Any]:
+    """Add named models from the live catalog to the registry."""
+    if not body.model_ids:
+        raise BadRequest("No models given")
+    if len(body.model_ids) > 200:
+        raise BadRequest("Too many models in one action (max 200)")
+    adopted = await get_core().registry.adopt_models(provider_id, body.model_ids)
+    return {"provider_id": provider_id, "adopted": adopted, "count": len(adopted)}
+
+
+@api_router.post("/registry/catalog/{provider_id}/prune")
+async def api_prune_catalog(provider_id: str, dry_run: bool = True) -> dict[str, Any]:
+    """Retire the rows nothing ever confirmed. `dry_run=true` only counts them."""
+    report = await get_core().registry.prune_unconfirmed(provider_id, dry_run=dry_run)
+    return report.as_dict()
+
+
 def _facets(models: list[RegistryModel]) -> dict[str, Any]:
     """Counts for the sidebar, computed over the same list that was returned.
 
@@ -842,6 +874,17 @@ async def api_bulk_models(body: BulkModelsBody) -> dict[str, Any]:
     return {"action": body.action, "changed": changed, "count": len(changed)}
 
 
+def _model_param_options(model: RegistryModel) -> dict[str, list[str]]:
+    """Per-model option lists, read off the capabilities the catalog published.
+
+    Today that is the reasoning levels: the Codex catalog names them per model
+    (gpt-5.6 accepts `ultra`, gpt-5.4 stops at `xhigh`), and the console used to
+    offer a fixed low/medium/high to every model that reads the parameter.
+    """
+    efforts = [c.split(":", 1)[1] for c in model.capabilities if c.startswith("effort:")]
+    return {"reasoning_effort": efforts} if efforts else {}
+
+
 @api_router.get("/registry/tree")
 async def api_registry_tree(
     task: str | None = None, modality: str | None = None
@@ -884,6 +927,11 @@ async def api_registry_tree(
         family["children"].append(
             {
                 "value": m.model_id,
+                # What this model in particular accepts, when its catalog says so.
+                # The form-level list is the union across a provider's models, and
+                # a model rejects a level it does not know with a 400 — so a
+                # pinned model narrows the select to its own levels.
+                "param_options": _model_param_options(m),
                 # The variant carries its price, because "cheap" as a word tells
                 # an operator nothing they can act on.
                 "label": f"{variant or 'базовая'} · ${(m.prompt_price + m.completion_price) * 1e6:.3f}/1M",

@@ -46,6 +46,9 @@ logger = logging.getLogger(__name__)
 
 CODEX_OAUTH_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 CODEX_TOKEN_REFRESH_URL = "https://auth.openai.com/oauth/token"
+# Where the rates live for anyone who does pay per token. The subscription does
+# not publish any, which is why catalog rows come back `unknown`.
+CODEX_PRICING_PAGE = "https://platform.openai.com/docs/pricing"
 
 
 class CodexOAuthAdapter(ProviderAdapter):
@@ -72,6 +75,7 @@ class CodexOAuthAdapter(ProviderAdapter):
         image_model: str,
         size: str,
         quality: str,
+        client_version: str = "0.146.0",
         timeout_seconds: float = 180.0,
         retries: int = 1,
     ) -> None:
@@ -81,6 +85,7 @@ class CodexOAuthAdapter(ProviderAdapter):
         self._image_model = image_model
         self._size = size
         self._quality = quality
+        self._client_version = client_version
         self._retries = retries
         self._client = httpx.AsyncClient(timeout=timeout_seconds)
 
@@ -251,6 +256,128 @@ class CodexOAuthAdapter(ProviderAdapter):
             usage=Usage(images=1, raw={"size": size, "quality": quality}),
             attachments=[Attachment(kind="image", mime="image/png", data=image_bytes)],
         )
+
+    # --- catalog ---------------------------------------------------------
+    async def list_catalog(self) -> list[RegistryModel] | None:
+        """The models this ChatGPT account may actually address.
+
+        The backend does publish a list — `GET /models?client_version=…`, the
+        same one the codex CLI caches in `~/.codex/models_cache.json` — and it
+        answers with six usable slugs, not the one the seed row held. It also
+        names, per model, the reasoning levels that model accepts, which is the
+        only place that fact exists: `/responses` rejects an unknown level with a
+        400 and no list of models attached.
+
+        No prices: a ChatGPT subscription does not publish per-token rates, so
+        the rows come back `unknown` rather than free (a zero here would make
+        them the cheapest thing in the registry and win every automatic pick).
+        """
+        if not self.is_configured():
+            return None
+        payload = await self._get_json("/models", {"client_version": self._client_version})
+        raw = payload.get("models") if isinstance(payload, dict) else None
+        if not isinstance(raw, list):
+            raise ProviderError("Codex model list has no `models` array")
+
+        models: list[RegistryModel] = []
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            slug = str(item.get("slug") or "").strip()
+            if not slug or item.get("supported_in_api") is False:
+                continue
+            # `visibility: hide` is an internal model the client never offers
+            # (codex-auto-review); listing it would put it in the picker.
+            if str(item.get("visibility") or "list") != "list":
+                continue
+            media = {str(m).lower() for m in item.get("input_modalities") or []}
+            tasks = [Task.TEXT_TO_TEXT]
+            caps: list[str] = []
+            if "image" in media:
+                tasks.append(Task.IMAGE_TO_TEXT)
+                caps.append("vision")
+            # The per-model reasoning levels, stored as capabilities so the
+            # console can offer exactly these and nothing else.
+            for level in item.get("supported_reasoning_levels") or []:
+                effort = str((level or {}).get("effort") or "").strip()
+                if effort:
+                    caps.append(f"effort:{effort}")
+            models.append(
+                RegistryModel(
+                    service_provider_id=self.name,
+                    model_provider="openai",
+                    model_id=slug,
+                    display_name=str(item.get("display_name") or slug),
+                    tasks=tuple(tasks),
+                    capabilities=tuple(caps),
+                    context_length=self._int(item.get("context_window")),
+                    tier="expensive",
+                    source="catalog",
+                    is_active=True,
+                    price_source=CODEX_PRICING_PAGE,
+                    price_source_kind="unknown",
+                )
+            )
+        # The image tool is not in that list — it is a tool `/responses` calls,
+        # not a model the account chats with — but it is addressable, so it
+        # belongs in the answer. Without it every sync would retire the row that
+        # `generate_image` runs on.
+        models.append(
+            RegistryModel(
+                service_provider_id=self.name,
+                model_provider="openai",
+                model_id=self._image_model,
+                display_name="Codex image generation",
+                tasks=(Task.TEXT_TO_IMAGE,),
+                tier="expensive",
+                source="catalog",
+                is_active=True,
+                price_source=CODEX_PRICING_PAGE,
+                price_source_kind="unknown",
+            )
+        )
+        return models
+
+    async def _get_json(self, path: str, params: dict[str, str]) -> Any:
+        """One authenticated GET, retried once on an expired token.
+
+        Same recovery as `_with_recovery` and for the same reason — the refresh
+        token is single-use — but this side of the adapter reads a plain JSON
+        body rather than an SSE stream.
+        """
+        tokens = self._load_tokens()
+        try:
+            return await self._get_once(path, params, tokens)
+        except AccessDenied:
+            return await self._get_once(path, params, await self._recover_tokens(tokens))
+
+    async def _get_once(self, path: str, params: dict[str, str], tokens: dict[str, str]) -> Any:
+        response = await self._client.get(
+            f"{self._base_url}{path}",
+            params=params,
+            headers=self._headers(tokens["access_token"], tokens.get("account_id")),
+        )
+        if response.status_code in (401, 403):
+            raise AccessDenied("Codex OAuth access token is expired or rejected")
+        if response.status_code in (429, 500, 502, 503, 504):
+            raise ProviderUnavailable(
+                f"Codex backend unavailable: HTTP {response.status_code}"
+            )
+        if response.status_code >= 400:
+            raise ProviderError(
+                f"Codex backend error HTTP {response.status_code}: {response.text[:500]}"
+            )
+        try:
+            return response.json()
+        except json.JSONDecodeError as exc:
+            raise ProviderUnavailable("Codex backend returned invalid JSON") from exc
+
+    @staticmethod
+    def _int(value: Any) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
 
     # --- auth.json handling --------------------------------------------
     def _load_auth_data(self) -> dict[str, Any]:

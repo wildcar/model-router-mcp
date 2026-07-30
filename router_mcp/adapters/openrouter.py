@@ -61,6 +61,9 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
     # Everything goes through /chat/completions, including the models that answer
     # with an image, so the knobs are the same for all three.
     supported_tasks = {Task.TEXT_TO_TEXT, Task.IMAGE_TO_TEXT, Task.TEXT_TO_IMAGE}
+    # A market of four hundred ids, five of which were ever addressed from here.
+    # Fetched on demand, stored on adoption or on a confirmed answer (ADR-0008).
+    catalog_scope = "browse"
     _CHAT_PARAMS = ("temperature", "max_tokens", "top_p", "reasoning")
     SUPPORTED_PARAMS = {
         Task.TEXT_TO_TEXT: _CHAT_PARAMS,

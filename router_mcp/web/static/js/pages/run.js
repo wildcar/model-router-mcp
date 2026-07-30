@@ -77,6 +77,27 @@ function paramSpecs() {
   });
 }
 
+// What the pinned model itself accepts for a parameter, when its catalog entry
+// says so. The pair-level list is a union across the provider's models, and a
+// model answers 400 for a value it does not know — so a chosen model narrows the
+// select to its own values. Nothing pinned: null, and the union stands.
+function modelOptions(name) {
+  const id = currentModelId();
+  if (!id || !tree) return null;
+  for (const provider of tree.children) {
+    for (const vendor of provider.children) {
+      for (const family of vendor.children) {
+        for (const variant of family.children) {
+          if (variant.value !== id) continue;
+          const options = variant.param_options?.[name];
+          return options && options.length ? options : null;
+        }
+      }
+    }
+  }
+  return null;
+}
+
 function renderParams() {
   const specs = paramSpecs();
   const host = $('params');
@@ -92,8 +113,15 @@ function renderParams() {
     let field;
     if (spec.type === 'select') {
       field = el('select');
-      field.appendChild(el('option', '— по умолчанию —'));
-      for (const option of spec.options || []) {
+      // The empty value is the point of the placeholder: an <option> without one
+      // takes its label as its value, and «— по умолчанию —» then travelled to
+      // the provider as the parameter itself (the Codex backend answered
+      // «Invalid value: '— по умолчанию —'» on reasoning.effort). `collectParams`
+      // drops empty strings, which is how "не задавать" reaches the adapter.
+      const placeholder = el('option', '— по умолчанию —');
+      placeholder.value = '';
+      field.appendChild(placeholder);
+      for (const option of modelOptions(spec.name) || spec.options || []) {
         const node = el('option', option);
         node.value = option;
         field.appendChild(node);
@@ -143,7 +171,9 @@ function currentModelId() {
 function fillSelect(select, options, anyLabel) {
   const previous = select.value;
   clear(select);
-  select.appendChild(el('option', anyLabel));
+  const any = el('option', anyLabel);
+  any.value = '';           // same reason as in renderParams: no value, no meaning
+  select.appendChild(any);
   for (const option of options) {
     const node = el('option', option.label ?? option.value);
     node.value = option.value;

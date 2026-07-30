@@ -9,7 +9,11 @@ timer), then reconciles the answer with `registry_models`:
                             request logs and cost history point at the row);
   * manual rows          -> keep their prices, name and pricing mode; the sync
                             only updates freshness and availability;
-  * catalogs without prices (DeepSeek, Anthropic) never zero an existing price.
+  * catalogs without prices (DeepSeek, Anthropic) never zero an existing price;
+  * browsed catalogs (`catalog_scope = "browse"`, i.e. OpenRouter) refresh the
+    rows we already hold and insert none: a market of four hundred ids is asked
+    on demand (`browse_provider`) and a row appears when an operator adopts a
+    model or a request to it comes back with an answer (ADR-0008).
 
 All reads go through the DB so routing, the MCP tools and the admin UI see one
 merged view.
@@ -26,7 +30,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from router_mcp.adapters.base import ProviderAdapter
-from router_mcp.domain.errors import BadRequest, RouterError
+from router_mcp.domain.errors import BadRequest, NotConfigured
 from router_mcp.registry.models import RegistryModel
 from router_mcp.storage.database import Database
 
@@ -48,7 +52,26 @@ class SyncReport:
     added: int = 0
     updated: int = 0
     deprecated: int = 0
+    # Models the provider offers that the registry deliberately did not store,
+    # because this catalog is browsed rather than mirrored. Reported so the
+    # console can say «предлагает 424, храним 6» instead of looking broken.
+    offered: int = 0
     skipped: str | None = None  # why nothing happened, when nothing happened
+
+    def as_dict(self) -> dict:
+        return dataclasses.asdict(self)
+
+
+@dataclass(slots=True)
+class PruneReport:
+    """What a sweep of unconfirmed rows retired, or would retire."""
+
+    provider_id: str
+    dry_run: bool
+    retired: list[str] = dataclasses.field(default_factory=list)
+    kept_confirmed: int = 0
+    kept_curated: int = 0
+    kept_in_log: int = 0
 
     def as_dict(self) -> dict:
         return dataclasses.asdict(self)
@@ -126,10 +149,18 @@ class RegistryService:
             )
         }
         stamp = _now()
+        browse_only = getattr(adapter, "catalog_scope", "full") == "browse"
         seen: set[str] = set()
         for fresh in incoming:
             seen.add(fresh.model_id)
             old = existing.get(fresh.model_id)
+            if old is None and browse_only:
+                # A browsed catalog is not an inventory: mirroring it filled the
+                # registry with hundreds of ids nobody addressed, and every one of
+                # them joined the automatic-selection pool. The list stays
+                # available through `browse_provider`.
+                report.offered += 1
+                continue
             await self._db.upsert_registry_model(self._merge(old, fresh, stamp))
             if old is None:
                 report.added += 1
@@ -143,6 +174,139 @@ class RegistryService:
             await self._db.deprecate_registry_model(provider_id, model_id)
             report.deprecated += 1
         return report
+
+    # --- browse / adopt / prune ------------------------------------------
+    async def browse_provider(self, provider_id: str) -> dict:
+        """Ask one provider what it offers right now, and store nothing.
+
+        This is the answer to «какие модели вообще есть» — the question the
+        registry could not answer for a provider whose catalog it does not mirror,
+        and answered wrongly for one whose seed row was written by hand once
+        (codex-oauth looked like it had a single text model; it has six).
+
+        Every entry says whether the registry already holds it and whether a
+        request to it ever came back with an answer, because those are the two
+        facts that decide whether it is worth adopting.
+        """
+        adapter = self._require_adapter(provider_id)
+        if not adapter.is_configured():
+            raise NotConfigured(
+                f"Provider {provider_id!r} has no credentials, so it cannot be asked"
+            )
+        incoming = await adapter.list_catalog()
+        if incoming is None:
+            return {
+                "provider_id": provider_id,
+                "scope": getattr(adapter, "catalog_scope", "full"),
+                "has_catalog": False,
+                "total": 0,
+                "known": 0,
+                "items": [],
+            }
+        existing = {
+            m.model_id: m
+            for m in await self._db.list_registry_models(
+                service_provider_id=provider_id, active_only=False
+            )
+        }
+        items = []
+        for fresh in incoming:
+            old = existing.get(fresh.model_id)
+            items.append(
+                {
+                    "model_id": fresh.model_id,
+                    "display_name": fresh.display_name,
+                    "tasks": [t.value for t in fresh.tasks],
+                    "capabilities": list(fresh.capabilities),
+                    "context_length": fresh.context_length,
+                    "prompt_price": fresh.prompt_price,
+                    "completion_price": fresh.completion_price,
+                    "price_source_kind": fresh.price_source_kind,
+                    "known": old is not None,
+                    "active": bool(old and old.is_active),
+                    "confirmed_at": old.confirmed_at if old else None,
+                }
+            )
+        items.sort(key=lambda i: (not i["known"], i["model_id"]))
+        return {
+            "provider_id": provider_id,
+            "scope": getattr(adapter, "catalog_scope", "full"),
+            "has_catalog": True,
+            "total": len(items),
+            "known": sum(1 for i in items if i["known"]),
+            "items": items,
+        }
+
+    async def adopt_models(self, provider_id: str, model_ids: list[str]) -> list[str]:
+        """Put named models from the live catalog into the registry.
+
+        The row is written from the provider's own answer rather than from what
+        the browser displayed: a form can be stale, and a price typed by a page
+        is not a price the provider published. An adopted row starts unconfirmed
+        — it becomes permanent when a request to it succeeds.
+        """
+        adapter = self._require_adapter(provider_id)
+        incoming = await adapter.list_catalog()
+        if incoming is None:
+            raise BadRequest(f"Provider {provider_id!r} has no catalog to adopt from")
+        wanted = set(model_ids)
+        offered = {m.model_id: m for m in incoming}
+        missing = sorted(wanted - set(offered))
+        if missing:
+            raise BadRequest(
+                f"{provider_id} does not offer: {', '.join(missing)}"
+            )
+        stamp = _now()
+        adopted: list[str] = []
+        async with self._lock:
+            for model_id in sorted(wanted):
+                old = await self._db.get_registry_model(provider_id, model_id)
+                await self._db.upsert_registry_model(
+                    self._merge(old, offered[model_id], stamp)
+                )
+                adopted.append(model_id)
+        return adopted
+
+    async def prune_unconfirmed(
+        self, provider_id: str, *, dry_run: bool = True
+    ) -> PruneReport:
+        """Retire the rows nothing ever confirmed, keeping what was curated.
+
+        Four reasons a row survives: a request to it came back (`confirmed_at`),
+        an admin created or priced it by hand, a bootstrap seed put it there, or
+        the log mentions it at all — a failed attempt is still the row that
+        explains the error somebody is reading.
+
+        Retire, never delete: the rows stay in the table, out of the active pool,
+        and «восстановить» is one call away.
+        """
+        self._require_adapter(provider_id)
+        report = PruneReport(provider_id=provider_id, dry_run=dry_run)
+        in_log = await self._db.model_ids_in_logs(provider_id)
+        for model in await self._db.list_registry_models(
+            service_provider_id=provider_id, active_only=True
+        ):
+            if model.confirmed_at:
+                report.kept_confirmed += 1
+            elif model.source in ("manual", "seed") or model.price_source_kind in (
+                "manual",
+                "page",
+            ):
+                report.kept_curated += 1
+            elif model.model_id in in_log:
+                report.kept_in_log += 1
+            else:
+                report.retired.append(model.model_id)
+        if not dry_run:
+            for model_id in report.retired:
+                await self._db.deprecate_registry_model(provider_id, model_id)
+        return report
+
+    def _require_adapter(self, provider_id: str) -> ProviderAdapter:
+        adapter = self._adapters.get(provider_id)
+        if adapter is None:
+            raise BadRequest(f"Unknown provider {provider_id!r}")
+        return adapter
 
     @staticmethod
     def _merge(old: RegistryModel | None, fresh: RegistryModel, stamp: str) -> RegistryModel:

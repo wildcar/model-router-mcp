@@ -251,6 +251,9 @@ function select(model) {
     ['Контекст', model.context_length || '—'],
     ['Ценовой уровень', model.tier],
     ['Строка', caps.labels.sources[model.source]?.label || model.source],
+    // Whether anything ever answered on this id. A catalog entry and a seed both
+    // look identical here until one of them has served a request.
+    ['Подтверждена ответом', model.confirmed_at || 'ответа не было'],
     ['Ревизия', model.revision],
   ]) {
     const tr = el('tr');
@@ -315,6 +318,129 @@ function select(model) {
   }));
   card.appendChild(actions);
   render();
+}
+
+// --- what the provider offers ------------------------------------------
+// The registry keeps the models that were used and answered; the full list is a
+// question asked on demand. Adopting a row makes it addressable; it becomes
+// permanent when a request to it comes back (ADR-0008).
+const offered = new Set();     // model_ids ticked in the offer table
+
+function renderOffer(answer) {
+  const host = $('offer');
+  clear(host);
+  offered.clear();
+  if (!answer.has_catalog) {
+    host.appendChild(el('p',
+      `У ${answer.provider_id} нет каталога: спросить список не у кого, `
+      + 'модели такого поставщика задаются вручную.',
+      { className: 'hint warn' }));
+    return;
+  }
+  host.appendChild(el('p',
+    `${answer.provider_id}: предлагает ${answer.total}, в реестре ${answer.known}.`
+    + (answer.scope === 'browse'
+      ? ' Каталог этого поставщика не хранится целиком — отметьте нужные.'
+      : ' Синхронизация хранит этот каталог полностью.'),
+    { className: 'hint' }));
+
+  const table = el('table');
+  const head = el('thead');
+  const hr = el('tr');
+  for (const title of ['', 'model_id', 'Название', 'Задачи', 'Контекст', 'Состояние']) {
+    hr.appendChild(el('th', title));
+  }
+  head.appendChild(hr);
+  table.appendChild(head);
+  const body = el('tbody');
+  for (const item of answer.items) {
+    const tr = el('tr');
+    const pick = el('td');
+    if (!item.known) {
+      const box = el('input');
+      box.type = 'checkbox';
+      box.addEventListener('change', () => {
+        if (box.checked) offered.add(item.model_id);
+        else offered.delete(item.model_id);
+        $('adopt').disabled = offered.size === 0;
+        $('adopt').textContent = `Добавить в реестр (${offered.size})`;
+      });
+      pick.appendChild(box);
+    }
+    tr.appendChild(pick);
+    tr.appendChild(el('td', item.model_id, { className: 'mono' }));
+    tr.appendChild(el('td', item.display_name));
+    tr.appendChild(el('td', (item.tasks || []).join(', ')));
+    tr.appendChild(el('td', item.context_length || '—', { className: 'num' }));
+    // Three states, three different facts: never stored, stored but nothing ever
+    // answered on it, and confirmed by an answer on such a date.
+    if (!item.known) {
+      tr.appendChild(el('td', 'нет в реестре', { className: 'muted' }));
+    } else if (item.confirmed_at) {
+      tr.appendChild(el('td', `подтверждена ${item.confirmed_at}`, { className: 'ok' }));
+    } else {
+      tr.appendChild(el('td', item.active ? 'в реестре, ответа не было' : 'снята',
+        { className: 'warn' }));
+    }
+    body.appendChild(tr);
+  }
+  table.appendChild(body);
+  host.appendChild(table);
+
+  const adopt = el('button', 'Добавить в реестр (0)', {
+    id: 'adopt',
+    className: 'primary',
+    onClick: () => adoptPicked(answer.provider_id).catch((e) => toast(e.message, true)),
+  });
+  adopt.disabled = true;
+  host.appendChild(adopt);
+}
+
+async function ask() {
+  const provider = $('ask-provider').value;
+  if (!provider) {
+    toast('Выберите поставщика', true);
+    return;
+  }
+  renderOffer(await api(`/registry/catalog/${encodeURIComponent(provider)}`));
+}
+
+async function adoptPicked(provider) {
+  const model_ids = [...offered];
+  await api(`/registry/catalog/${encodeURIComponent(provider)}/adopt`,
+    { method: 'POST', body: { model_ids } });
+  toast(`Добавлено: ${model_ids.length}`);
+  await load();
+  await ask();
+}
+
+// Two calls on purpose: the dry run names the rows, and only then does the
+// confirmation the operator agreed to match what the second call retires.
+async function prune() {
+  const provider = $('ask-provider').value;
+  if (!provider) {
+    toast('Выберите поставщика', true);
+    return;
+  }
+  const url = `/registry/catalog/${encodeURIComponent(provider)}/prune`;
+  const plan = await api(`${url}?dry_run=true`, { method: 'POST' });
+  if (!plan.retired.length) {
+    toast(`${provider}: сворачивать нечего`);
+    return;
+  }
+  const names = plan.retired.slice(0, 10).join('\n');
+  const more = plan.retired.length > 10 ? `\n…и ещё ${plan.retired.length - 10}` : '';
+  if (!window.confirm(
+    `Снять с учёта ${plan.retired.length} строк ${provider}?\n\n${names}${more}\n\n`
+    + `Останутся: подтверждённых ответом ${plan.kept_confirmed}, `
+    + `ручных и засеянных ${plan.kept_curated}, упомянутых в журнале ${plan.kept_in_log}.\n`
+    + 'Строки не удаляются, вернуть можно фильтром «снятые».')) {
+    return;
+  }
+  const done = await api(`${url}?dry_run=false`, { method: 'POST' });
+  toast(`Снято с учёта: ${done.retired.length}`);
+  await load();
+  await ask();
 }
 
 // A price off by a factor of ten is invisible in a table and expensive in a
@@ -418,6 +544,8 @@ function addModelForm() {
 $('search').addEventListener('input', () => load().catch((e) => toast(e.message, true)));
 $('reload').addEventListener('click', () => load().catch((e) => toast(e.message, true)));
 $('add-model').addEventListener('click', addModelForm);
+$('ask').addEventListener('click', () => ask().catch((e) => toast(e.message, true)));
+$('prune').addEventListener('click', () => prune().catch((e) => toast(e.message, true)));
 $('reset-facets').addEventListener('click', () => {
   writeParams({});
   $('search').value = '';
@@ -454,6 +582,11 @@ $('undo-action').addEventListener('click', async () => {
 
 (async () => {
   caps = await api('/capabilities');
+  for (const provider of caps.providers || []) {
+    const option = el('option', provider.configured ? provider.id : `${provider.id} (не настроен)`);
+    option.value = provider.id;
+    $('ask-provider').appendChild(option);
+  }
   const params = readParams();
   if (params.search) $('search').value = params.search;
   await load();

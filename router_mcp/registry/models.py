@@ -82,6 +82,12 @@ class RegistryModel:
     # writes inside one second would slip through the optimistic lock.
     updated_at: str | None = None
     revision: int = 0
+    # When a request to this exact pair last came back with an answer. This is
+    # the only proof a model id is real: a catalog entry says the provider lists
+    # it, a seed says somebody typed it, and both are routinely wrong. Rows the
+    # registry keeps for good are the confirmed ones plus what an admin curated;
+    # everything else is a candidate that a sweep may retire (ADR-0008).
+    confirmed_at: str | None = None
     extra: dict = field(default_factory=dict)
 
     # Provenances under which a zero price means "confirmed free" rather than

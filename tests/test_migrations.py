@@ -106,6 +106,19 @@ async def _build_old(path: str) -> None:
                 (sp, vendor, model_id, model_id, modality, prompt, completion,
                  "2026-01-01T00:00:00Z", "2026-01-01T00:00:00Z"),
             )
+        # Two rows that name their model: the confirmation backfill reads these,
+        # and it must count the answer and not the failure.
+        for model_id, status, when in (
+            ("llama", "ok", "2026-02-01T00:00:00Z"),
+            ("llama", "ok", "2026-03-01T00:00:00Z"),
+            ("gpt-4o", "error", "2026-04-01T00:00:00Z"),
+        ):
+            await conn.execute(
+                "INSERT INTO request_logs (external_user_id, service_provider_id, "
+                "model_id, modality, status, cost_usd, cost_source, created_at) "
+                "VALUES ('u4', 'openrouter', ?, 'chat', ?, 0, 'computed', ?)",
+                (model_id, status, when),
+            )
         for user, modality, prompt, completion, cost in _OLD_LOGS:
             await conn.execute(
                 "INSERT INTO request_logs (external_user_id, modality, prompt_tokens, "
@@ -210,3 +223,15 @@ async def test_the_migration_is_idempotent(migrated):
     await db._add_missing_columns()
     rows = await db._fetchall("SELECT tasks FROM registry_models WHERE model_id = 'llama'")
     assert rows[0]["tasks"] == "text-to-text"
+
+
+async def test_history_counts_as_confirmation(migrated):
+    """A model in daily use must not come out of the migration looking unproven:
+    the first sweep of unconfirmed rows would retire it. The date is the last
+    successful request, and a failed attempt confirms nothing."""
+    db, _ = migrated
+    rows = await db._fetchall("SELECT model_id, confirmed_at FROM registry_models")
+    got = {r["model_id"]: r["confirmed_at"] for r in rows}
+    assert got["llama"] == "2026-03-01T00:00:00Z"
+    assert got["gpt-4o"] is None       # only an error row names it
+    assert got["nova-2"] is None       # never addressed

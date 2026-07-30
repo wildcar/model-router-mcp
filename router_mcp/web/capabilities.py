@@ -164,8 +164,13 @@ PARAM_SPECS: dict[str, dict[str, Any]] = {
     ),
     "reasoning_effort": _param(
         "reasoning_effort", "select", "Глубина рассуждения",
-        "Сколько модели думать перед ответом. Дольше — дороже",
-        options=["low", "medium", "high"], default=None,
+        "Сколько модели думать перед ответом. Дольше — дороже. Список у каждой "
+        "модели свой: пятёрка берёт до xhigh, gpt-5.6 — до ultra",
+        # The union of what the backends accept. A pinned model narrows this to
+        # the levels its own catalog entry declares (`param_options` on the tree
+        # node); without a pinned model the union is all the form can honestly
+        # offer, and the provider rejects a level it does not know.
+        options=["minimal", "low", "medium", "high", "xhigh", "max"], default=None,
     ),
     "voice": _param(
         "voice", "text", "Голос",

@@ -46,6 +46,29 @@ const ROUTES = {
     error: null, log_id: null },
   '/api/v1/runs/r-1': { run_id: 'r-1', status: 'ok', log_id: 4821,
     steps: fixture('run-ok').steps, result: fixture('run-ok'), error: null },
+  // The live catalog: asked on demand, stored only for what is adopted.
+  '/api/v1/registry/catalog/codex-oauth': {
+    provider_id: 'codex-oauth', scope: 'full', has_catalog: true, total: 3, known: 1,
+    items: [
+      { model_id: 'gpt-5.4', display_name: 'GPT-5.4', tasks: ['text-to-text'],
+        capabilities: ['vision', 'effort:high'], context_length: 272000,
+        prompt_price: 0, completion_price: 0, price_source_kind: 'unknown',
+        known: true, active: true, confirmed_at: '2026-07-20T10:00:00+00:00' },
+      { model_id: 'gpt-5.6-sol', display_name: 'GPT-5.6-Sol', tasks: ['text-to-text'],
+        capabilities: ['effort:ultra'], context_length: 272000,
+        prompt_price: 0, completion_price: 0, price_source_kind: 'unknown',
+        known: false, active: false, confirmed_at: null },
+      { model_id: 'gpt-5.6-luna', display_name: 'GPT-5.6-Luna', tasks: ['text-to-text'],
+        capabilities: [], context_length: 272000,
+        prompt_price: 0, completion_price: 0, price_source_kind: 'unknown',
+        known: false, active: false, confirmed_at: null },
+    ],
+  },
+  'POST /api/v1/registry/catalog/codex-oauth/adopt': {
+    provider_id: 'codex-oauth', adopted: ['gpt-5.6-sol'], count: 1 },
+  'POST /api/v1/registry/catalog/codex-oauth/prune': {
+    provider_id: 'codex-oauth', dry_run: true, retired: ['gpt-5.4-mini'],
+    kept_confirmed: 2, kept_curated: 1, kept_in_log: 0 },
   'POST /api/v1/registry/refresh': { providers: [
     { provider_id: 'openrouter', seen: 345, added: 2, updated: 14, deprecated: 1, skipped: null },
     { provider_id: 'deepseek', seen: 0, added: 0, updated: 0, deprecated: 0, skipped: 'not configured' },
@@ -166,7 +189,7 @@ await runPage('logs', 'logs', async (doc, _calls, settleNow) => {
     (doc.getElementById('s-export').attributes.href || '').includes('/usage/export'));
 });
 
-await runPage('models', 'models', (doc) => {
+await runPage('models', 'models', async (doc, calls, settleNow) => {
   check('модели: таблица заполнена', rowsOf(doc, 'models') > 0);
   check('модели: счётчик показан', text(doc, 'count') !== '');
   // Facet counts come back with the rows, so the sidebar cannot disagree.
@@ -178,6 +201,29 @@ await runPage('models', 'models', (doc) => {
   check('модели: карточка открывается', card.hidden === false);
   check('модели: единица внутри поля', card.textContent.includes('$/1M'));
   check('модели: прежнее значение показано', card.textContent.includes('было'));
+  check('модели: карточка говорит, подтверждена ли модель ответом',
+    card.textContent.includes('Подтверждена ответом'));
+
+  // «Спросить поставщика»: the live list, and adopting from it.
+  const ask = doc.getElementById('ask-provider');
+  check('модели: поставщики предложены для опроса', ask.children.length > 1);
+  ask.value = 'codex-oauth';
+  doc.getElementById('ask').dispatch('click');
+  await settleNow();
+  const offer = doc.getElementById('offer');
+  check('каталог: живой список запрошен, ничего не сохранено',
+    calls.some((c) => c.url.includes('/registry/catalog/codex-oauth') && c.method === 'GET'));
+  check('каталог: модель вне реестра помечена',
+    offer.textContent.includes('нет в реестре'), offer.textContent.slice(0, 200));
+  check('каталог: подтверждённая модель названа подтверждённой',
+    offer.textContent.includes('подтверждена 2026-07-20'));
+  const adopt = doc.getElementById('adopt');
+  check('каталог: без выбора добавлять нечего', adopt.disabled === true);
+  const box = offer.querySelector('tbody').children[1].querySelector('input');
+  box.checked = true;
+  box.dispatch('change');
+  check('каталог: кнопка считает выбранные',
+    adopt.textContent.includes('(1)'), adopt.textContent);
 });
 
 await runPage('connections', 'connections', async (doc, _calls, settleNow) => {
@@ -212,6 +258,16 @@ await runPage('run', 'run', async (doc, calls, settleNow) => {
     doc.getElementById('params').children.length > 0);
   check('прогон: у параметра есть видимое пояснение',
     doc.getElementById('params').textContent.length > 20);
+  // The regression: an <option> without a value takes its label as its value, so
+  // «— по умолчанию —» travelled to the Codex backend as reasoning.effort and
+  // came back HTTP 400. A placeholder must select to the empty string.
+  const selects = doc.getElementById('params').querySelectorAll('select');
+  check('прогон: у пустого варианта пустое значение',
+    selects.length > 0 && selects.every((s) => s.children[0].value === ''),
+    selects.map((s) => s.children[0].value).join('|'));
+  check('прогон: подпись «по умолчанию» не уезжает в запрос',
+    !JSON.stringify(calls.filter((c) => c.body).map((c) => c.body))
+      .includes('по умолчанию'));
   check('прогон: настройки сервера показаны именами переменных',
     text(doc, 'server-settings').includes('HTTP_TIMEOUT_SECONDS'));
   check('прогон: варианты фолбэка человеческими словами',

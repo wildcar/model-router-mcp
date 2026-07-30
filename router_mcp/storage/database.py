@@ -175,6 +175,9 @@ def _model_to_row(m: RegistryModel) -> dict[str, Any]:
         "price_source": m.price_source,
         "price_source_kind": m.price_source_kind,
         "price_checked_at": m.price_checked_at,
+        # `confirmed_at` is deliberately absent: it is a fact about our own
+        # traffic, and a catalog sync writing this row must not touch it. It is
+        # set by `confirm_registry_model` alone.
     }
 
 
@@ -223,6 +226,7 @@ def _row_to_model(row: aiosqlite.Row) -> RegistryModel:
         price_checked_at=row["price_checked_at"],
         updated_at=row["updated_at"],
         revision=row["revision"],
+        confirmed_at=_col(row, "confirmed_at"),
     )
 
 
@@ -307,6 +311,10 @@ class Database:
                     price_source TEXT,
                     price_source_kind TEXT NOT NULL DEFAULT 'estimate',
                     price_checked_at DATETIME,
+                    -- When a request to this pair last came back with an answer.
+                    -- The registry keeps confirmed rows for good; the rest are
+                    -- candidates a sweep may retire (ADR-0008).
+                    confirmed_at DATETIME,
                     -- Bumped on every write. The optimistic lock counts on it
                     -- rather than on updated_at: two edits inside the same
                     -- second carry the same timestamp and the lock would pass.
@@ -429,6 +437,9 @@ class Database:
             "tasks": "TEXT NOT NULL DEFAULT ''",
             # Seconds of provider compute, which is not seconds of audio.
             "compute_price_per_second": "REAL NOT NULL DEFAULT 0",
+            # ADR-0008: the model id a provider actually answered on. Backfilled
+            # from the log below, so history counts as confirmation.
+            "confirmed_at": "DATETIME",
         },
         "request_logs": {
             "finish_reason": "TEXT",
@@ -503,6 +514,23 @@ class Database:
                                     ") WHERE (',' || modality || ',') LIKE ?",
                                     (task, task, f"%,{group},%"),
                                 )
+                        elif table == "registry_models" and name == "confirmed_at":
+                            # A model that already answered us is confirmed, and
+                            # the log is the record of that. Without this backfill
+                            # every row on a deployed database would start out
+                            # unconfirmed and the first sweep would retire models
+                            # in daily use.
+                            await conn.execute(
+                                """
+                                UPDATE registry_models SET confirmed_at = (
+                                    SELECT MAX(l.created_at) FROM request_logs l
+                                    WHERE l.service_provider_id =
+                                              registry_models.service_provider_id
+                                      AND l.model_id = registry_models.model_id
+                                      AND l.status = 'ok'
+                                )
+                                """
+                            )
                         elif table == "request_logs" and name == "task":
                             # One value per row here, so a plain map is enough.
                             for group, task in self._TASK_BACKFILL.items():
@@ -642,6 +670,44 @@ class Database:
                 (_now(), replaced_by, _now(), service_provider_id, model_id),
             )
             await conn.commit()
+
+    async def confirm_registry_model(
+        self, service_provider_id: str, model_id: str, when: str | None = None
+    ) -> None:
+        """Record that this pair answered a request.
+
+        Written on every successful dispatch, and cheap on purpose: no revision
+        bump, because confirmation is not an edit an operator made and must not
+        invalidate the form they have open. A row that is already confirmed keeps
+        its first timestamp — «когда подтвердилась» is a fact with one date.
+        """
+        stamp = when or _now()
+        conn = await self._get_conn()
+        async with self._write_lock:
+            await conn.execute(
+                """
+                UPDATE registry_models
+                SET confirmed_at = COALESCE(confirmed_at, ?), updated_at = ?
+                WHERE service_provider_id = ? AND model_id = ?
+                """,
+                (stamp, _now(), service_provider_id, model_id),
+            )
+            await conn.commit()
+
+    async def model_ids_in_logs(self, service_provider_id: str | None = None) -> set[str]:
+        """Model ids the log mentions at all, successful or not.
+
+        A failed attempt still means somebody chose that model, so a sweep that
+        retires "unused" rows must leave these alone: the operator would lose the
+        row explaining an error they are still reading.
+        """
+        query = "SELECT DISTINCT model_id FROM request_logs WHERE model_id IS NOT NULL"
+        params: tuple = ()
+        if service_provider_id:
+            query += " AND service_provider_id = ?"
+            params = (service_provider_id,)
+        rows = await self._fetchall(query, params)
+        return {r["model_id"] for r in rows}
 
     async def restore_registry_model(self, service_provider_id: str, model_id: str) -> None:
         """Undo a deprecation — the other half of the "few seconds to take it

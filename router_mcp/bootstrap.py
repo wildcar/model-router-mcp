@@ -164,6 +164,7 @@ def _build_adapters(settings: Settings) -> list[ProviderSpec]:
                 image_model=settings.codex_image_tool_model,
                 size=settings.codex_image_size,
                 quality=settings.codex_image_quality,
+                client_version=settings.codex_client_version,
             ),
             # Two models, because there are two: the image tool and the model
             # that answers text and reads pictures. One seeded row was why the

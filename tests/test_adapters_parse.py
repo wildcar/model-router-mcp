@@ -287,3 +287,63 @@ def test_anthropic_uses_its_own_image_block():
     assert blocks[0]["source"]["media_type"] == "image/png"
     assert blocks[0]["source"]["type"] == "base64"
     assert blocks[1] == {"type": "text", "text": "что на картинке?"}
+
+
+# --- codex-oauth: the model list the seed row hid --------------------------
+_CODEX_MODELS = {
+    "models": [
+        {"slug": "gpt-5.6-sol", "display_name": "GPT-5.6-Sol", "visibility": "list",
+         "supported_in_api": True, "context_window": 272000,
+         "input_modalities": ["text", "image"],
+         "supported_reasoning_levels": [{"effort": "low"}, {"effort": "medium"},
+                                        {"effort": "ultra"}]},
+        {"slug": "gpt-5.4", "display_name": "GPT-5.4", "visibility": "list",
+         "supported_in_api": True, "context_window": 272000,
+         "input_modalities": ["text"],
+         "supported_reasoning_levels": [{"effort": "high"}, {"effort": "xhigh"}]},
+        # Internal: the client never offers it, so neither does the picker.
+        {"slug": "codex-auto-review", "display_name": "Codex Auto Review",
+         "visibility": "hide", "supported_in_api": True},
+        {"slug": "legacy-not-in-api", "display_name": "Legacy", "visibility": "list",
+         "supported_in_api": False},
+    ]
+}
+
+
+async def test_codex_catalog_lists_every_model_and_its_own_effort_levels(monkeypatch):
+    """The seed row said gpt-5.4 was all there was for text. The backend lists
+    six, and names the reasoning levels per model — gpt-5.6 takes `ultra`, the
+    five-series stops at `xhigh`, and sending the wrong one is a 400."""
+    adapter = _codex()
+    monkeypatch.setattr(adapter, "is_configured", lambda: True)
+
+    async def fake_get(path, params):
+        assert path == "/models" and params["client_version"]
+        return _CODEX_MODELS
+
+    monkeypatch.setattr(adapter, "_get_json", fake_get)
+    rows = {m.model_id: m for m in await adapter.list_catalog()}
+
+    assert set(rows) == {"gpt-5.6-sol", "gpt-5.4", "gpt-image-2"}
+    sol = rows["gpt-5.6-sol"]
+    assert sol.tasks == (Task.TEXT_TO_TEXT, Task.IMAGE_TO_TEXT)
+    assert "vision" in sol.capabilities
+    assert [c for c in sol.capabilities if c.startswith("effort:")] == [
+        "effort:low", "effort:medium", "effort:ultra"
+    ]
+    assert sol.context_length == 272000
+    # Text-only: no vision task, so no vision candidacy either.
+    assert rows["gpt-5.4"].tasks == (Task.TEXT_TO_TEXT,)
+    # The image tool is addressable but not in the list; without it every sync
+    # would retire the row `generate_image` runs on.
+    assert rows["gpt-image-2"].tasks == (Task.TEXT_TO_IMAGE,)
+    # A subscription publishes no rates, and an unpriced zero must not read as
+    # free — that would make it the cheapest thing in the registry.
+    assert all(m.price_source_kind == "unknown" for m in rows.values())
+    assert all(m.price_is_unknown for m in rows.values())
+
+
+async def test_codex_catalog_is_silent_without_credentials():
+    """None, not an empty list: an empty list means "offers nothing" and the sync
+    would deprecate every row."""
+    assert await _codex().list_catalog() is None

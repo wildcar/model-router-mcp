@@ -34,6 +34,9 @@ def model_to_dict(m: RegistryModel) -> dict[str, Any]:
         "is_active": m.is_active,
         "last_seen_at": m.last_seen_at,
         "deprecated_at": m.deprecated_at,
+        # When a request to this pair last came back with an answer. Null means
+        # the id is listed or seeded but never actually served anything here.
+        "confirmed_at": m.confirmed_at,
         "replaced_by": m.replaced_by,
         # Price provenance: a caller comparing costs needs to know which numbers
         # are confirmed and which are guesses.

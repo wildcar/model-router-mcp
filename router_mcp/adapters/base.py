@@ -204,6 +204,18 @@ class ProviderAdapter(abc.ABC):
     async def generate(self, request: RouterRequest, model: RegistryModel) -> RouterResponse:
         """Execute the request against the provider and return a normalized response."""
 
+    # Whether the catalog is small enough to keep in the registry wholesale.
+    #
+    # "full"   — the provider offers a handful of models (Anthropic, DeepSeek,
+    #            Codex, the Replicate allowlist) and the sync stores all of them.
+    # "browse" — the catalog is a market, not an inventory: OpenRouter lists
+    #            hundreds of ids of which five were ever addressed here. The sync
+    #            refreshes the rows we already have and never inserts new ones;
+    #            the list is fetched on demand instead, and a row appears when an
+    #            operator adopts a model or a request comes back with an answer
+    #            (ADR-0008).
+    catalog_scope: str = "full"
+
     async def list_catalog(self) -> list[RegistryModel] | None:
         """The provider's current model list, or None if it has no catalog API.
 
