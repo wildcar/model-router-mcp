@@ -277,6 +277,30 @@ await runPage('run', 'run', async (doc, calls, settleNow) => {
   check('прогон: ни одного вызова модели при загрузке',
     !calls.some((c) => c.method === 'POST' && /\/(chat|image|tts|cli|runs)$/.test(c.url)));
 
+  // The regression from the screenshot: pick a model whose family has one
+  // variant («базовая»), and model_id must fill itself — it used to stay empty
+  // until the variant was clicked by hand, so «выбрана gpt-5.6-sol» left the
+  // form as a bare provider hint and a different model answered.
+  doc.getElementById('mode-pick').dispatch('click');
+  await settleNow();
+  doc.getElementById('sel-provider').value = 'deepseek';
+  doc.getElementById('sel-provider').dispatch('change');
+  doc.getElementById('sel-vendor').value = 'deepseek';
+  doc.getElementById('sel-vendor').dispatch('change');
+  doc.getElementById('sel-family').value = 'deepseek-v4-flash';
+  doc.getElementById('sel-family').dispatch('change');
+  await settleNow();
+  check('выбор: единственный вариант семьи заполняет model_id сам',
+    doc.getElementById('model-id').value === 'deepseek-v4-flash',
+    `model-id="${doc.getElementById('model-id').value}"`);
+  // And walking away from the pick does not silently pin the old id.
+  doc.getElementById('sel-family').value = '';
+  doc.getElementById('sel-family').dispatch('change');
+  await settleNow();
+  check('выбор: уход с выбора очищает подставленный id',
+    doc.getElementById('model-id').value === '',
+    `model-id="${doc.getElementById('model-id').value}"`);
+
   doc.getElementById('show-plan').dispatch('click');
 
   // Multi-model mode: chips in, one run per chip, one table row per run.

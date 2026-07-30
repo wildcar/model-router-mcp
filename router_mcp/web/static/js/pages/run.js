@@ -216,12 +216,27 @@ function rebuildCascade(from) {
       '— любая —');
   }
   if (from <= 3) {
-    fillSelect($('sel-variant'),
-      provider && vendor && family ? treeLevel([provider, vendor, family]) : [],
-      '— любой —');
+    const variants = provider && vendor && family ? treeLevel([provider, vendor, family]) : [];
+    fillSelect($('sel-variant'), variants, '— любой —');
+    // A family with exactly one variant IS the model. Codex and Anthropic ids
+    // have no ":variant" part, so every family there is a single «базовая» —
+    // and until it was clicked by hand, model_id stayed empty and the request
+    // left with a provider hint alone: «выбрана gpt-5.6-sol, ответила gpt-5.4».
+    if (variants.length === 1) $('sel-variant').value = variants[0].value;
   }
   const variant = $('sel-variant').value;
-  if (variant) $('model-id').value = variant;
+  const field = $('model-id');
+  if (variant) {
+    field.value = variant;
+    field.dataset.fromCascade = '1';
+  } else if (field.dataset.fromCascade) {
+    // The id came from the previous pick and the cascade no longer says it:
+    // keeping it would silently pin the model the operator just walked away
+    // from. A hand-typed id (no flag) is not ours to erase.
+    field.value = '';
+    delete field.dataset.fromCascade;
+  }
+  checkModelId();
   onFormChange();
 }
 
@@ -885,7 +900,12 @@ $('sel-provider').addEventListener('change', () => rebuildCascade(1));
 $('sel-vendor').addEventListener('change', () => rebuildCascade(2));
 $('sel-family').addEventListener('change', () => rebuildCascade(3));
 $('sel-variant').addEventListener('change', () => rebuildCascade(4));
-$('model-id').addEventListener('input', () => { checkModelId(); onFormChange(); });
+$('model-id').addEventListener('input', () => {
+  // Typed by hand: from here on the id is the operator's, not the cascade's.
+  delete $('model-id').dataset.fromCascade;
+  checkModelId();
+  onFormChange();
+});
 $('fallback').addEventListener('change', onFormChange);
 $('fallback-steps').addEventListener('change', onFormChange);
 $('prompt').addEventListener('input',
