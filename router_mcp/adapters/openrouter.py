@@ -364,6 +364,12 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
         # Published for the models whose provider prices native search (~150 of
         # the catalog); absent means the server tool is not separately billed.
         web_search_price = cls._to_float(pricing.get("web_search"))
+        # Cache rates. Left unparsed, every cached prompt token was billed at
+        # the assumed full prompt rate and the whole figure read `estimated` —
+        # prod run 10242 came out $0.0172 against the provider's $0.0147, and
+        # with these two rates the arithmetic matches the charge to the cent.
+        cache_read_price = cls._to_float(pricing.get("input_cache_read"))
+        cache_write_price = cls._to_float(pricing.get("input_cache_write"))
         try:
             context_length = int(raw.get("context_length") or 0)
         except (ValueError, TypeError):
@@ -387,6 +393,8 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
             completion_price=completion_price,
             image_price=image_price,
             web_search_price=web_search_price,
+            cache_read_price=cache_read_price,
+            cache_write_price=cache_write_price,
             context_length=context_length,
             source="catalog",
             is_active=True,

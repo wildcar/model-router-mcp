@@ -146,6 +146,18 @@ def test_the_web_search_price_is_read_from_the_catalog():
     assert plain.web_search_price == 0.0
 
 
+def test_the_cache_rates_are_read_from_the_catalog():
+    """Unparsed, cached tokens billed at the assumed full prompt rate and every
+    cache-hitting run read `estimated`; with the real rates the arithmetic
+    matched the provider's charge to the cent (prod run 10242)."""
+    entry = _entry(input_modalities=["text"], output_modalities=["text"])
+    entry["pricing"]["input_cache_read"] = "0.000000075"
+    entry["pricing"]["input_cache_write"] = "0.0000001"
+    model = OpenRouterAdapter._parse_catalog_model(entry)
+    assert model.cache_read_price == 0.075e-6
+    assert model.cache_write_price == 0.1e-6
+
+
 def test_the_deepseek_catalog_row_declares_both_axes():
     """A row that declares neither axis can never be selected, and the failure is
     silent — it just stops appearing as a candidate. This one broke the whole

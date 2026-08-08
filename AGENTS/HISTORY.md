@@ -8,7 +8,8 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 - What: колонка `web_search_price` (USD за один поиск, из каталожного `pricing.web_search`, синк и ручная правка как у остальных ставок); адаптер кладёт `server_tool_use_details.web_search_requests` в `Usage.web_searches`; расход получает слагаемое «веб-поиск», без ставки — весь итог `estimated`.
 - Why: прод-прогон 10234 — провайдер списал $0.028, реестр насчитал $0.011: два поиска по $0.01 не входили в токенные ставки, расход по поисковым запросам занижался.
 - Files: router_mcp/{registry/models.py,storage/database.py,adapters/openrouter.py,domain/messages.py,accounting/cost.py,registry/service.py,web/api.py,mcp_server/serialize.py}, tests/{test_accounting,test_web_search,test_adapters_parse}.py, AGENTS/SPEC.md
-- Verified: pytest 338 прошло; живая проверка на проде после выката — см. STATE.
+- Verified: pytest 339 прошло; прод, строка 10242 — сначала `estimated` $0.0172 против $0.0147 провайдера, причина ниже; после кэш-ставок арифметика сходится с суммой провайдера копейка в копейку.
+- Fixes-on-the-fly: каталожные `input_cache_read/input_cache_write` никогда не разбирались — кэшированные токены шли по полной ставке промпта «допущением»; теперь обе кэш-ставки берутся из каталога.
 - Next: плагинный режим оплачивается за результат и счётчика не сообщает — там полной цифрой остаётся сумма от провайдера.
 
 ---
