@@ -4,6 +4,15 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-08-08 · Нормализованный `web_search` у OpenRouter
+- What: булев `params.web_search` (текстовые задачи); внутри адаптера лесенка «серверный инструмент → плагин web → без поиска», ступенька только на `ProviderUnavailable`; 401 и отказ модели не маскируются. Флаг — в `request_json.params`, фактический режим — в таймлайне и в `web_search_mode` ответа `chat`; в консоли чекбокс (тип `boolean`).
+- Why: боту нужен веб-поиск, а OpenRouter-специфика (словарь tools/plugins) не должна возвращаться в клиентов MCP — нормализованный флаг оставляет место другим поставщикам.
+- Files: router_mcp/adapters/openrouter.py, router_mcp/web/capabilities.py, router_mcp/web/static/js/pages/run.js, router_mcp/mcp_server/tools.py, tests/test_web_search.py, tests/js/{run-pages.mjs,fixtures/capabilities.json}, AGENTS/SPEC.md
+- Verified: pytest — 332 прошло (падает только давний `test_mcp_tab_lists_tools_with_schemas`, он падал и на чистом HEAD); node-харнесс зелёный, чекбокс рисуется. Живого запроса с ключом не было.
+- Next: живая проверка на проде: `chat` с `web_search=true` через модель с поддержкой поиска, глазами посмотреть таймлайн.
+
+---
+
 ## 2026-07-30 · Выбранная в каскаде модель доезжает до model_id
 - What: семья с единственным вариантом заполняет `model_id` сама; id, подставленный каскадом, помечается и очищается при уходе с выбора, набранный руками — не трогается.
 - Why: скриншот пользователя — «Выбрать самому», модель gpt-5.6-sol выбрана, а запрос ушёл с `model_id: null` и одной подсказкой поставщика, ответила gpt-5.4. `model_id` заполнялся только из «Варианта», а у codex/anthropic вариант всегда один («базовая») и его надо было ткнуть отдельно.

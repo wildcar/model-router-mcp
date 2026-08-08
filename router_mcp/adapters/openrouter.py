@@ -24,6 +24,7 @@ from router_mcp.adapters.base import (
     openai_shaped_usage,
     truncated_error,
 )
+from router_mcp.domain import progress
 from router_mcp.domain.errors import ProviderError, ProviderUnavailable
 from router_mcp.domain.messages import Attachment, RouterRequest, RouterResponse, Usage
 from router_mcp.domain.task import Task
@@ -36,6 +37,12 @@ IMAGE_HTTP_RE = re.compile(r"^https?://.+\.(?:png|jpe?g|webp|gif)(?:\?.*)?$", re
 # OpenRouter is the one provider whose catalog carries prices, so rows it
 # produces are the only ones marked as API-sourced.
 PRICE_SOURCE = "api:openrouter GET /models (pricing)"
+
+# OpenRouter's server-side web search: the current server tool and the legacy
+# plugin it superseded (both from ort_bot/services/openrouter.py, where the
+# search ladder lived before it moved here).
+WEB_SEARCH_TOOL_TYPE = "openrouter:web_search"
+LEGACY_WEB_PLUGIN_ID = "web"
 
 
 
@@ -65,9 +72,13 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
     # Fetched on demand, stored on adoption or on a confirmed answer (ADR-0008).
     catalog_scope = "browse"
     _CHAT_PARAMS = ("temperature", "max_tokens", "top_p", "reasoning")
+    # `web_search` is normalized, not a passthrough field: the caller says a
+    # boolean, this adapter translates it into whatever OpenRouter accepts
+    # today. That keeps MCP clients unaware of OpenRouter's tool vocabulary and
+    # leaves room for other providers to honour the same flag later.
     SUPPORTED_PARAMS = {
-        Task.TEXT_TO_TEXT: _CHAT_PARAMS,
-        Task.IMAGE_TO_TEXT: _CHAT_PARAMS,
+        Task.TEXT_TO_TEXT: _CHAT_PARAMS + ("web_search",),
+        Task.IMAGE_TO_TEXT: _CHAT_PARAMS + ("web_search",),
         Task.TEXT_TO_IMAGE: _CHAT_PARAMS,
     }
 
@@ -107,18 +118,15 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
             if key in request.params:
                 payload[key] = request.params[key]
 
-        response = await self._request_with_retry("POST", "/chat/completions", json=payload)
-        try:
-            data = response.json()
-        except json.JSONDecodeError as exc:
-            raise ProviderUnavailable("OpenRouter returned invalid JSON") from exc
-
-        top_error = self._extract_top_level_error(data)
-        if top_error is not None:
-            message, code = top_error
-            if code in (429, 500, 502, 503, 504):
-                raise ProviderUnavailable(f"OpenRouter temporarily unavailable: {message}")
-            raise ProviderError(message)
+        # Only for tasks that declare it: on text-to-image the flag stays out of
+        # the payload and the router names it in `ignored_params` instead.
+        web_search = bool(request.params.get("web_search")) and "web_search" in (
+            self.SUPPORTED_PARAMS.get(request.task) or ()
+        )
+        if web_search:
+            data, search_mode = await self._chat_with_web_search(payload, model.model_id)
+        else:
+            data, search_mode = await self._chat_data(payload), None
 
         choices = data.get("choices", []) if isinstance(data, dict) else []
         choice0 = choices[0] if choices and isinstance(choices[0], dict) else {}
@@ -151,6 +159,19 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
             usage.images = len(image_urls)
 
         raw_usage = data.get("usage") if isinstance(data, dict) else None
+        raw_meta: dict[str, Any] = {
+            "finish_reason": choice0.get("finish_reason"),
+            "provider_request_id": data.get("id") if isinstance(data, dict) else None,
+            # Kept beside the registry-based figure rather than replacing it:
+            # the difference between the two is the staleness signal.
+            "provider_cost_usd": self._reported_cost(raw_usage),
+        }
+        if web_search:
+            # What was asked for and what actually ran. The ladder may have
+            # answered without search at all, and the caller must not learn
+            # that by noticing the answer cites nothing.
+            raw_meta["web_search"] = True
+            raw_meta["web_search_mode"] = search_mode
         return RouterResponse(
             task=request.task,
             provider=self.name,
@@ -158,14 +179,73 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
             usage=usage,
             text=text or None,
             attachments=attachments,
-            raw_meta={
-                "finish_reason": choice0.get("finish_reason"),
-                "provider_request_id": data.get("id") if isinstance(data, dict) else None,
-                # Kept beside the registry-based figure rather than replacing it:
-                # the difference between the two is the staleness signal.
-                "provider_cost_usd": self._reported_cost(raw_usage),
-            },
+            raw_meta=raw_meta,
         )
+
+    async def _chat_data(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """POST /chat/completions and return the parsed body.
+
+        Transient failures — 429/5xx (also when reported as a top-level `error`
+        object in a 200 body), timeouts, invalid JSON — surface as
+        `ProviderUnavailable`; everything else is `ProviderError`/`AccessDenied`
+        from the retry mixin.
+        """
+        response = await self._request_with_retry("POST", "/chat/completions", json=payload)
+        try:
+            data = response.json()
+        except json.JSONDecodeError as exc:
+            raise ProviderUnavailable("OpenRouter returned invalid JSON") from exc
+
+        top_error = self._extract_top_level_error(data)
+        if top_error is not None:
+            message, code = top_error
+            if code in (429, 500, 502, 503, 504):
+                raise ProviderUnavailable(f"OpenRouter temporarily unavailable: {message}")
+            raise ProviderError(message)
+        return data if isinstance(data, dict) else {}
+
+    async def _chat_with_web_search(
+        self, payload: dict[str, Any], model_id: str
+    ) -> tuple[dict[str, Any], str]:
+        """The search ladder: server tool → legacy plugin → no search.
+
+        Restored from ort_bot's `chat_completion`. A rung falls through only on
+        `ProviderUnavailable` — the transient failures `_chat_data` reserves for
+        "try again later". `AccessDenied` and `ProviderError` propagate: a bad
+        key, a rejected prompt or a refusal would fail identically without
+        search, and a retry would only mask which request the provider refused.
+
+        Returns the parsed body and the mode that actually answered
+        ("server_tool" | "plugin" | "off"); the progress events land in the run
+        timeline, which is how the journal keeps the mode.
+        """
+        try:
+            data = await self._chat_data(
+                {**payload, "tools": [{"type": WEB_SEARCH_TOOL_TYPE}]}
+            )
+            progress.emit("web_search", "веб-поиск: серверный инструмент")
+            return data, "server_tool"
+        except ProviderUnavailable as exc:
+            logger.warning(
+                "OpenRouter web_search server tool unavailable model=%s (%s); "
+                "retrying with legacy web plugin", model_id, exc,
+            )
+            progress.emit("web_search", "серверный поиск недоступен, пробую плагин web")
+        try:
+            data = await self._chat_data(
+                {**payload, "plugins": [{"id": LEGACY_WEB_PLUGIN_ID}]}
+            )
+            progress.emit("web_search", "веб-поиск: плагин web")
+            return data, "plugin"
+        except ProviderUnavailable as exc:
+            logger.warning(
+                "OpenRouter legacy web plugin unavailable model=%s (%s); "
+                "retrying without web search", model_id, exc,
+            )
+            progress.emit("web_search", "плагин web недоступен, выполняю запрос без поиска")
+        data = await self._chat_data(payload)
+        progress.emit("web_search", "веб-поиск не выполнялся, ответ без поиска")
+        return data, "off"
 
     # --- catalog ---------------------------------------------------------
     async def list_catalog(self) -> list[RegistryModel] | None:

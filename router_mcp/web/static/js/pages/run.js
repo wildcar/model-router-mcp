@@ -126,6 +126,11 @@ function renderParams() {
         node.value = option;
         field.appendChild(node);
       }
+    } else if (spec.type === 'boolean') {
+      // A checkbox, not a true/false select: unchecked means «не задавать»,
+      // same as an empty field, so the parameter simply stays out of the call.
+      field = el('input');
+      field.type = 'checkbox';
     } else {
       field = el('input');
       field.type = spec.type === 'text' ? 'text' : 'number';
@@ -149,6 +154,12 @@ function renderParams() {
 function collectParams() {
   const out = {};
   for (const field of $('params').querySelectorAll('[data-param]')) {
+    if (field.dataset.kind === 'boolean') {
+      // `field.value` of a checkbox is the constant "on"; the state lives in
+      // `checked`. Unchecked stays out of the call entirely.
+      if (field.checked) out[field.dataset.param] = true;
+      continue;
+    }
     const raw = field.value;
     if (raw === '' || raw === null) continue;
     out[field.dataset.param] =

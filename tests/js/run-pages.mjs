@@ -268,6 +268,17 @@ await runPage('run', 'run', async (doc, calls, settleNow) => {
   check('прогон: подпись «по умолчанию» не уезжает в запрос',
     !JSON.stringify(calls.filter((c) => c.body).map((c) => c.body))
       .includes('по умолчанию'));
+  // A boolean parameter is a checkbox: unchecked means «не задавать», so the
+  // flag must stay out of the call, never travel as "on"/"false".
+  doc.getElementById('auto-provider').value = 'openrouter';
+  doc.getElementById('auto-provider').dispatch('change');
+  await settleNow();
+  const webSearch = doc.getElementById('param-web_search');
+  check('прогон: web_search рисуется чекбоксом',
+    !!webSearch && webSearch.type === 'checkbox');
+  doc.getElementById('auto-provider').value = '';
+  doc.getElementById('auto-provider').dispatch('change');
+  await settleNow();
   check('прогон: настройки сервера показаны именами переменных',
     text(doc, 'server-settings').includes('HTTP_TIMEOUT_SECONDS'));
   check('прогон: варианты фолбэка человеческими словами',

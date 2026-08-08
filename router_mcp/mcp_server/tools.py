@@ -131,6 +131,12 @@ async def chat(
     out["text"] = result.response.text
     if result.response.attachments:
         out["image_urls"] = [a.url for a in result.response.attachments if a.url]
+    # Present only when `params.web_search` was honoured: which search actually
+    # ran ("server_tool" | "plugin" | "off") — the adapter may have degraded to
+    # no search at all, and the caller must hear that from the reply, not guess
+    # it from an answer that cites nothing.
+    if "web_search_mode" in result.response.raw_meta:
+        out["web_search_mode"] = result.response.raw_meta["web_search_mode"]
     return out
 
 

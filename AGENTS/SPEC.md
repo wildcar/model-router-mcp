@@ -341,6 +341,23 @@ the caller sent outside it comes back as `ignored_params` on the run: silently
 dropping `tools` or `seed` lets a caller pay for a request that ignored half of
 what they asked for.
 
+### Web search (normalized `web_search`)
+
+`params.web_search: true` is a normalized boolean, not a passthrough field —
+callers never speak a provider's tool vocabulary, and other adapters may honour
+the same flag later. OpenRouter (text tasks only) translates it into a ladder:
+the `openrouter:web_search` server tool, then the legacy `{"id": "web"}` plugin,
+then the request without search. A rung falls through only on a *transient*
+failure (`ProviderUnavailable`: 429/5xx, also when reported as a top-level
+`error` object in a 200 body, timeouts, invalid JSON); `AccessDenied` and
+`ProviderError` (bad key, rejected prompt, refusal) propagate — a retry would
+only mask which request the provider refused. The journal keeps both sides: the
+flag in `request_json.params`, the mode that actually answered in the timeline
+(`plan_json`) and in `raw_meta.web_search_mode`
+(`server_tool` | `plugin` | `off`), which the MCP `chat` reply also carries as
+`web_search_mode` — a degradation is stated, never inferred from an answer that
+cites nothing.
+
 ### Response files
 
 Blobs render inline only for `image/*` and `audio/*`; everything else is
