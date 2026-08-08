@@ -105,6 +105,11 @@ class RequestLogRecord:
     attempts: int | None = None  # HTTP tries inside the successful provider attempt
     provider_status: int | None = None  # last upstream HTTP status
     provider_request_id: str | None = None  # upstream id, for support tickets
+    # The sum the provider itself said it charged (OpenRouter's `usage.cost`).
+    # Its own column, not a key inside `usage_raw`: SQL compares it with
+    # `cost_usd`, and the difference is how a stale or incomplete registry
+    # price gets noticed (§7.4) — twice already, in fact.
+    provider_cost_usd: float | None = None
     session_id: str | None = None  # CLI engines
     return_code: int | None = None  # CLI engines
     plan_json: str | None = None  # routing plan, for replaying the timeline
@@ -369,6 +374,7 @@ class Database:
                     attempts INTEGER,
                     provider_status INTEGER,
                     provider_request_id TEXT,
+                    provider_cost_usd REAL,
                     session_id TEXT,
                     return_code INTEGER,
                     plan_json TEXT,
@@ -477,6 +483,9 @@ class Database:
             # it. `task` is the finer fact, backfilled below.
             "task": "TEXT",
             "compute_seconds": "REAL",
+            # The provider's own figure, lifted out of the usage JSON so SQL can
+            # compare it with `cost_usd`. Backfilled below.
+            "provider_cost_usd": "REAL",
         },
     }
 
@@ -518,6 +527,17 @@ class Database:
                                     ") WHERE (',' || modality || ',') LIKE ?",
                                     (task, task, f"%,{group},%"),
                                 )
+                        elif table == "request_logs" and name == "provider_cost_usd":
+                            # OpenRouter has reported the charged sum all along;
+                            # it sat inside the usage JSON where no query could
+                            # compare it with what we computed. Old rows join
+                            # the reconciliation the moment the column appears.
+                            await conn.execute(
+                                "UPDATE request_logs SET provider_cost_usd = "
+                                "CAST(json_extract(usage_raw, '$.cost') AS REAL) "
+                                "WHERE usage_raw IS NOT NULL "
+                                "AND json_extract(usage_raw, '$.cost') IS NOT NULL"
+                            )
                         elif table == "registry_models" and name == "confirmed_at":
                             # A model that already answered us is confirmed, and
                             # the log is the record of that. Without this backfill
@@ -1002,11 +1022,20 @@ class Database:
         "status", "error_message", "channel", "tool", "client_id", "batch_id",
         "prompt_tokens", "completion_tokens", "total_tokens", "cache_read_tokens",
         "reasoning_tokens", "audio_seconds", "compute_seconds", "images", "characters",
-        "cost_usd", "cost_source", "pricing_mode",
+        "cost_usd", "cost_source", "pricing_mode", "provider_cost_usd",
         "latency_ms", "attempts", "finish_reason", "request_text",
     )
 
     _LOG_UNVERIFIED_COST = ("estimated", "unpriced", "cost_unknown", "provider_notional")
+
+    # When our arithmetic and the provider's charge count as "разошлись":
+    # more than 2% apart and more than a hundredth of a cent — the second
+    # bound keeps float dust out of the work list without hiding a systematic
+    # miss on cheap requests (a $0.001 run billed as $0.002 must still flag).
+    # Sources where the two figures are one number by construction (the
+    # provider's sum *is* the cost) are excluded in the clause itself.
+    _COST_MISMATCH_REL = 0.02
+    _COST_MISMATCH_ABS = 0.0001
 
     def _log_filters(
         self,
@@ -1023,6 +1052,7 @@ class Database:
         with_fallback: bool,
         with_retries: bool,
         unverified_cost: bool,
+        cost_mismatch: bool = False,
     ) -> tuple[list[str], list[Any]]:
         clauses: list[str] = []
         params: list[Any] = []
@@ -1061,6 +1091,17 @@ class Database:
             placeholders = ", ".join("?" for _ in self._LOG_UNVERIFIED_COST)
             clauses.append(f"cost_source IN ({placeholders})")
             params.extend(self._LOG_UNVERIFIED_COST)
+        if cost_mismatch:
+            # Rows where the provider named a sum and our arithmetic landed
+            # somewhere else. `provider`/`provider_notional` rows are excluded:
+            # there the recorded cost *is* the provider's figure, and amortized
+            # rows spread a subscription — neither comparison means anything.
+            clauses.append(
+                "provider_cost_usd IS NOT NULL AND provider_cost_usd > 0 "
+                "AND cost_source NOT IN ('provider', 'provider_notional', 'amortized') "
+                "AND ABS(cost_usd - provider_cost_usd) > MAX(?, ? * provider_cost_usd)"
+            )
+            params.extend([self._COST_MISMATCH_ABS, self._COST_MISMATCH_REL])
         return clauses, params
 
     async def list_request_logs(
@@ -1078,6 +1119,7 @@ class Database:
         with_fallback: bool = False,
         with_retries: bool = False,
         unverified_cost: bool = False,
+        cost_mismatch: bool = False,
         before_id: int | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
@@ -1099,6 +1141,7 @@ class Database:
             with_fallback=with_fallback,
             with_retries=with_retries,
             unverified_cost=unverified_cost,
+            cost_mismatch=cost_mismatch,
         )
         if before_id is not None:
             clauses.append("id < ?")
@@ -1127,6 +1170,7 @@ class Database:
         with_fallback: bool = False,
         with_retries: bool = False,
         unverified_cost: bool = False,
+        cost_mismatch: bool = False,
     ) -> int:
         clauses, params = self._log_filters(
             external_user_id=external_user_id,
@@ -1141,6 +1185,7 @@ class Database:
             with_fallback=with_fallback,
             with_retries=with_retries,
             unverified_cost=unverified_cost,
+            cost_mismatch=cost_mismatch,
         )
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         row = await self._fetchone(

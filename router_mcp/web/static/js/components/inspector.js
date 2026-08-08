@@ -12,7 +12,7 @@
 // operator came for, and the request is the thing they already know.
 
 import { el, clear, toast } from '../core/dom.js';
-import { costCell, duration, localTime, tokens } from '../core/format.js';
+import { costCell, duration, localTime, money, tokens } from '../core/format.js';
 import { jsonBlock, jsonView } from './json-view.js';
 import { timeline } from './timeline.js';
 
@@ -56,6 +56,18 @@ function summary(run, labels) {
   head.appendChild(status);
   head.appendChild(el('span', duration(run.latency_ms), { className: 'num' }));
   head.appendChild(costCell(run.cost.value, run.cost.source, labels));
+  // The provider's own figure, when it named one. Two numbers apart by more
+  // than rounding is the signal a registry rate is stale or incomplete (§7.4).
+  const provider = run.cost.provider_value;
+  if (provider != null && provider > 0
+      && run.cost.source !== 'provider' && run.cost.source !== 'provider_notional') {
+    const apart = Math.abs((run.cost.value || 0) - provider)
+      > Math.max(0.0001, 0.02 * provider);
+    head.appendChild(el('span', `поставщик: ${money(provider)}${apart ? ' ≠' : ''}`, {
+      className: apart ? 'err' : 'muted',
+      title: 'Сумма, которую назвал сам поставщик (usage.cost)',
+    }));
+  }
   head.appendChild(el('span', labels?.channels?.[run.channel]?.label || run.channel || '—', {
     className: 'muted',
   }));

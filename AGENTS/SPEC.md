@@ -330,8 +330,21 @@ get the same facts appended to the message text, since FastMCP hands clients
 because the log grows from the head) and projected to the columns the table
 shows — the full row carries the response text and the raw usage block.
 Filters: user, status, modality, model, channel, since/until, `with_fallback`,
-`with_retries`, `unverified_cost`. `GET /api/v1/logs/{id}` returns the full row
-as a `Run`.
+`with_retries`, `unverified_cost`, `cost_mismatch`. `GET /api/v1/logs/{id}`
+returns the full row as a `Run`.
+
+### Cost reconciliation
+
+`request_logs.provider_cost_usd` holds the sum the provider itself reported
+(OpenRouter's `usage.cost`; lifted out of the usage JSON, backfilled by
+migration). `cost_mismatch=true` selects rows where it sits more than 2% *and*
+more than $0.0001 away from `cost_usd` — excluding sources where the two are
+one number by construction (`provider`, `provider_notional`, `amortized`).
+The console marks such rows `≠` in the log table, the inspector prints the
+provider figure beside ours, and «Обзор» counts the last week's divergences as
+a work-list line. Both pricing gaps found so far (the web-search fee, the
+cache rates) had exactly this signature; the point of the filter is that the
+next one names itself.
 
 ### Adapter parameter declarations
 

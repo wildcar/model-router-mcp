@@ -4,6 +4,15 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-08-08 · Сверка с суммой поставщика — расхождение называет себя само
+- What: `request_logs.provider_cost_usd` (из `usage.cost` OpenRouter; миграция поднимает его из JSON у старых строк); фильтр `cost_mismatch` (>2% и >$0.0001, кроме provider/notional/amortized); в журнале метка `≠`, в инспекторе сумма поставщика рядом с расчётной, на «Обзоре» счётчик за неделю.
+- Why: обе дыры в ставках (цена поиска, кэш-ставки) проявлялись одинаково — расчёт врозь с суммой провайдера — и обнаруживались только ручной сверкой; теперь это строка в списке дел.
+- Files: router_mcp/{storage/database.py,routing/router.py,web/{api,views,health}.py,web/templates/logs.html,web/static/js/{pages/logs.js,components/inspector.js}}, tests/{test_cost_reconciliation,test_migrations,test_web_search}.py, AGENTS/SPEC.md
+- Verified: pytest 346 прошло, node-харнесс зелёный; на проде после выката фильтр должен показать строки 10234 и 10242 (обе — вчерашние находки), 10246 — тихая.
+- Next: DeepSeek per-request суммы не даёт (только баланс аккаунта) — сверка там остаётся точной арифметикой по каталожным ставкам.
+
+---
+
 ## 2026-08-08 · Цена веб-поиска в реестре и в расходе
 - What: колонка `web_search_price` (USD за один поиск, из каталожного `pricing.web_search`, синк и ручная правка как у остальных ставок); адаптер кладёт `server_tool_use_details.web_search_requests` в `Usage.web_searches`; расход получает слагаемое «веб-поиск», без ставки — весь итог `estimated`.
 - Why: прод-прогон 10234 — провайдер списал $0.028, реестр насчитал $0.011: два поиска по $0.01 не входили в токенные ставки, расход по поисковым запросам занижался.

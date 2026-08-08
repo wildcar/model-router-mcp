@@ -29,7 +29,19 @@ function filters() {
     with_fallback: $('f-fallback').checked,
     with_retries: $('f-retries').checked,
     unverified_cost: $('f-unverified').checked,
+    cost_mismatch: $('f-mismatch').checked,
   };
+}
+
+// Flags a row whose provider-reported sum sits away from our arithmetic —
+// same thresholds as the server-side filter (2% and a hundredth of a cent),
+// so the marks on screen and the filtered list never disagree.
+function costMismatch(r) {
+  const provider = r.provider_cost_usd;
+  if (!provider || provider <= 0) return false;
+  if (r.cost_source === 'provider' || r.cost_source === 'provider_notional'
+      || r.cost_source === 'amortized') return false;
+  return Math.abs((r.cost_usd || 0) - provider) > Math.max(0.0001, 0.02 * provider);
 }
 
 // The model cell says which pair actually ran and, when it is not the one that
@@ -98,7 +110,16 @@ function logRow(r) {
         images: r.images,
         characters: r.characters,
       }), className: 'num' },
-    { node: costCell(r.cost_usd, r.cost_source, labels) },
+    { node: (() => {
+        const cell = costCell(r.cost_usd, r.cost_source, labels);
+        if (costMismatch(r)) {
+          cell.appendChild(el('span', ' ≠', {
+            className: 'err',
+            title: `Поставщик списал ${money(r.provider_cost_usd)} — расходится с расчётом`,
+          }));
+        }
+        return cell;
+      })() },
     { text: (r.request_text || '').slice(0, 60), className: 'trunc', title: r.request_text || '' },
   ]);
   tr.addEventListener('click', () => {
@@ -226,7 +247,7 @@ function reload() {
 }
 
 for (const id of ['f-user', 'f-status', 'f-task', 'f-modality', 'f-channel',
-                  'f-fallback', 'f-retries', 'f-unverified']) {
+                  'f-fallback', 'f-retries', 'f-unverified', 'f-mismatch']) {
   $(id).addEventListener('change', () => loadLogs());
 }
 $('reload').addEventListener('click', reload);
@@ -243,6 +264,7 @@ if (initial.channel) $('f-channel').value = initial.channel;
 $('f-fallback').checked = initial.with_fallback === 'true';
 $('f-retries').checked = initial.with_retries === 'true';
 $('f-unverified').checked = initial.unverified_cost === 'true';
+$('f-mismatch').checked = initial.cost_mismatch === 'true';
 
 // Which tab is open lives in the address, like every other bit of screen state.
 function showTab(name) {

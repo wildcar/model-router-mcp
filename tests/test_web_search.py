@@ -34,7 +34,12 @@ def _ok_body(text: str = "нашлось") -> dict[str, Any]:
     return {
         "id": "gen-1",
         "choices": [{"message": {"content": text}, "finish_reason": "stop"}],
-        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        "usage": {
+            "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
+            # The sum OpenRouter itself charged; the journal keeps it beside
+            # the computed figure for the reconciliation.
+            "cost": 0.028,
+        },
     }
 
 
@@ -259,6 +264,8 @@ async def test_the_journal_keeps_the_flag_and_the_mode_that_actually_ran(tmp_pat
         assert row is not None
         # The request side: the flag as the caller sent it.
         assert json.loads(row["request_json"])["params"]["web_search"] is True
+        # The provider's own charge lands in its column, ready to reconcile.
+        assert row["provider_cost_usd"] == pytest.approx(0.028)
         # The execution side: the timeline names the mode that answered.
         timeline = json.loads(row["plan_json"])
         titles = [s.get("title", "") for s in timeline]

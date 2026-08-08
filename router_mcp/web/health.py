@@ -169,6 +169,18 @@ async def summary(core, started_at: float) -> dict[str, Any]:
             "text": f"{day_totals['unknown_requests']} запросов с неизвестной стоимостью",
             "href": "/logs?unverified_cost=true",
         })
+    # Our arithmetic against the provider's charge, over the last week. More
+    # than 2% and more than a tenth of a cent apart means the row's rate is
+    # missing something — both past finds (the search fee, the cache rates)
+    # looked exactly like this.
+    mismatched = await core.db.count_request_logs(
+        cost_mismatch=True, since=_hours_ago(7 * 24)
+    )
+    if mismatched:
+        work.append({
+            "text": f"{mismatched} запросов за неделю разошлись с суммой поставщика",
+            "href": "/logs?cost_mismatch=true",
+        })
     broken = [p for p in provider_rows if p["enabled"] and not p["configured"]]
     for p in broken:
         work.append({

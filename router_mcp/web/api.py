@@ -552,6 +552,7 @@ async def api_logs(
     with_fallback: bool = False,
     with_retries: bool = False,
     unverified_cost: bool = False,
+    cost_mismatch: bool = False,
     cursor: int | None = None,
     limit: int = 50,
 ) -> dict[str, Any]:
@@ -575,6 +576,7 @@ async def api_logs(
         with_fallback=with_fallback,
         with_retries=with_retries,
         unverified_cost=unverified_cost,
+        cost_mismatch=cost_mismatch,
     )
     rows = await core.db.list_request_logs(before_id=cursor, limit=limit, **filters)
     total = await core.db.count_request_logs(**filters)

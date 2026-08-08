@@ -122,6 +122,13 @@ def _provider_request_id(meta: dict[str, Any]) -> str | None:
     return None
 
 
+def _float_or_none(value: Any) -> float | None:
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 def _finish_reason(response: RouterResponse) -> str | None:
     """Providers name the stop reason differently; log whichever one arrived."""
     meta = response.raw_meta or {}
@@ -901,6 +908,7 @@ class ModelRouter:
             attempts=max(len(http_trace), 1),
             provider_status=_last_status(http_trace),
             provider_request_id=_provider_request_id(meta),
+            provider_cost_usd=_float_or_none(meta.get("provider_cost_usd")),
             session_id=meta.get("session_id"),
             return_code=meta.get("return_code"),
             finished_at=finished_at,

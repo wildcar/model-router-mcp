@@ -126,6 +126,14 @@ async def _build_old(path: str) -> None:
                 "VALUES (?, ?, ?, ?, ?, 'computed', '2026-01-01T00:00:00Z')",
                 (user, modality, prompt, completion, cost),
             )
+        # One row whose usage JSON carries the provider's charged sum: the
+        # provider_cost_usd backfill must lift it into the new column, so old
+        # rows join the reconciliation instead of reading as "never reported".
+        await conn.execute(
+            "INSERT INTO request_logs (external_user_id, modality, cost_usd, "
+            "cost_source, usage_raw, created_at) VALUES ('u5', 'chat', 0.011, "
+            "'computed', '{\"cost\": 0.028}', '2026-01-01T00:00:00Z')"
+        )
         await conn.commit()
 
 
@@ -149,8 +157,10 @@ async def test_the_new_columns_arrive(migrated):
     for table, column in (
         ("registry_models", "tasks"),
         ("registry_models", "compute_price_per_second"),
+        ("registry_models", "web_search_price"),
         ("request_logs", "task"),
         ("request_logs", "compute_seconds"),
+        ("request_logs", "provider_cost_usd"),
     ):
         rows = await db._fetchall(f"PRAGMA table_info({table})")
         assert column in {r["name"] for r in rows}, f"{table}.{column} missing"
@@ -215,6 +225,18 @@ async def test_a_migrated_registry_row_loads_and_still_prices(migrated):
         llama, Modality.CHAT, Usage(prompt_tokens=1000, completion_tokens=500)
     )
     assert result.cost_usd == pytest.approx(1000 * 5e-7 + 500 * 5e-7)
+
+
+async def test_the_provider_charge_is_lifted_from_the_usage_json(migrated):
+    """OpenRouter reported the charged sum all along; it sat in the usage JSON
+    where SQL could not compare it. The backfill moves it into the column —
+    and only where it actually was: rows without it stay NULL, not zero."""
+    db, _ = migrated
+    rows = await db._fetchall(
+        "SELECT provider_cost_usd FROM request_logs ORDER BY id"
+    )
+    lifted = [r["provider_cost_usd"] for r in rows if r["provider_cost_usd"] is not None]
+    assert lifted == [pytest.approx(0.028)]
 
 
 async def test_the_migration_is_idempotent(migrated):

@@ -53,13 +53,25 @@ def _usage(
     }
 
 
-def _cost(value: float | None, source: str | None, breakdown: list[dict[str, Any]] | None = None):
+def _cost(
+    value: float | None,
+    source: str | None,
+    breakdown: list[dict[str, Any]] | None = None,
+    provider_value: float | None = None,
+):
     """Money always travels with its provenance — see §7.1 of the concept.
 
     A number without `source` is exactly the kind of confidently wrong figure the
-    console exists to prevent, so the key is never omitted.
+    console exists to prevent, so the key is never omitted. `provider_value` is
+    the sum the provider itself reported, when it did: the second opinion the
+    reconciliation compares ours against.
     """
-    return {"value": value, "source": source, "breakdown": breakdown or []}
+    return {
+        "value": value,
+        "source": source,
+        "breakdown": breakdown or [],
+        "provider_value": provider_value,
+    }
 
 
 def _run(
@@ -257,7 +269,8 @@ def run_from_dispatch(
             raw=usage.raw,
         ),
         cost=_cost(result.cost.cost_usd, result.cost.cost_source,
-                   result.cost.breakdown),
+                   result.cost.breakdown,
+                   provider_value=result.response.raw_meta.get("provider_cost_usd")),
         latency_ms=result.latency_ms,
         attempts=result.attempts,
         provider_status=result.provider_status,
@@ -324,7 +337,8 @@ def run_from_log(row: dict[str, Any]) -> dict[str, Any]:
             characters=row.get("characters"),
             raw=_json_or_empty(row.get("usage_raw")),
         ),
-        cost=_cost(row.get("cost_usd"), row.get("cost_source")),
+        cost=_cost(row.get("cost_usd"), row.get("cost_source"),
+                   provider_value=row.get("provider_cost_usd")),
         latency_ms=row.get("latency_ms"),
         attempts=row.get("attempts"),
         provider_status=row.get("provider_status"),
