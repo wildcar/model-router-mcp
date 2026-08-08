@@ -4,6 +4,15 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-08-08 · Модель без tools уводит поиск на плагин (найдено живой проверкой)
+- What: первая ступенька лесенки web_search дополнительно падает на 404 «No endpoints found that support tool use» — плагин ничего не требует от модели; остальные ProviderError по-прежнему наружу (снятая модель не гоняется по плагину).
+- Why: живая проверка на dev с реальным ключом: gpt-5.4-mini → `server_tool` (ссылка на источник, $0.025), а ui-tars-1.5-7b умирал целиком вместо деградации — самый частый практический случай плагина.
+- Files: router_mcp/adapters/openrouter.py, tests/test_web_search.py, AGENTS/SPEC.md
+- Verified: живьём — ui-tars теперь `plugin`, в таймлайне обе ступеньки; pytest 334 прошло (давний test_mcp_tab_lists_tools_with_schemas падает и на чистом HEAD).
+- Next: выкат на прод (`deploy/deploy.sh` требует sudo — запуск за оператором) и контрольный `chat` с `web_search=true` там.
+
+---
+
 ## 2026-08-08 · Нормализованный `web_search` у OpenRouter
 - What: булев `params.web_search` (текстовые задачи); внутри адаптера лесенка «серверный инструмент → плагин web → без поиска», ступенька только на `ProviderUnavailable`; 401 и отказ модели не маскируются. Флаг — в `request_json.params`, фактический режим — в таймлайне и в `web_search_mode` ответа `chat`; в консоли чекбокс (тип `boolean`).
 - Why: боту нужен веб-поиск, а OpenRouter-специфика (словарь tools/plugins) не должна возвращаться в клиентов MCP — нормализованный флаг оставляет место другим поставщикам.

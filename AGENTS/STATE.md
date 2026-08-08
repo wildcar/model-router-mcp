@@ -327,7 +327,11 @@ it as a managed service on this host.
   Журнал хранит флаг в `request_json.params` и фактический режим в таймлайне;
   ответ MCP `chat` несёт `web_search_mode` (`server_tool`/`plugin`/`off`).
   В консоли параметр рисуется чекбоксом (новый тип `boolean` в матрице).
-  Не проверено живьём: нужен запрос с реальным ключом OpenRouter.
+  Живая проверка на dev с реальным ключом: gpt-5.4-mini → `server_tool`
+  (ответ со ссылкой, $0.025), ui-tars-1.5-7b → 404 «No endpoints found that
+  support tool use» → уточнение: этот 404 тоже уводит на плагин (модель без
+  tools — случай плагина, а не отказ), проверено живьём → `plugin`. На проде
+  ещё не выкачено и не прогнано.
 
 ## Next
 

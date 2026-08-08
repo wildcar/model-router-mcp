@@ -137,6 +137,34 @@ async def test_when_the_plugin_also_fails_the_request_runs_without_search():
 
 
 @pytest.mark.asyncio
+async def test_a_model_without_tool_support_falls_back_to_the_plugin():
+    # Checked live: OpenRouter answers HTTP 404 «No endpoints found that
+    # support tool use» for such models. Not transient — but the plugin rung
+    # asks nothing of the model, so this is its case, not a failure.
+    handler, bodies = _script([
+        httpx.Response(404, json={"error": {
+            "message": "No endpoints found that support tool use.", "code": 404,
+        }}),
+        httpx.Response(200, json=_ok_body()),
+    ])
+    response = await _adapter(handler).generate(_request(web_search=True), _model())
+    assert bodies[1]["plugins"] == [{"id": "web"}]
+    assert response.raw_meta["web_search_mode"] == "plugin"
+
+
+@pytest.mark.asyncio
+async def test_a_retired_model_is_not_retried_with_the_plugin():
+    # A 404 that does not name tools is about the model itself; two more calls
+    # against the same dead id would only delay the router-level fallback.
+    handler, bodies = _script([
+        httpx.Response(404, json={"error": {"message": "Model not found", "code": 404}}),
+    ])
+    with pytest.raises(ProviderError, match="Model not found"):
+        await _adapter(handler).generate(_request(web_search=True), _model())
+    assert len(bodies) == 1
+
+
+@pytest.mark.asyncio
 async def test_a_dead_provider_still_fails_after_the_last_rung():
     handler, bodies = _script([httpx.Response(500, text="boom")])
     with pytest.raises(ProviderUnavailable):

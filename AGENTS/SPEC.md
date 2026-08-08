@@ -347,11 +347,14 @@ what they asked for.
 callers never speak a provider's tool vocabulary, and other adapters may honour
 the same flag later. OpenRouter (text tasks only) translates it into a ladder:
 the `openrouter:web_search` server tool, then the legacy `{"id": "web"}` plugin,
-then the request without search. A rung falls through only on a *transient*
+then the request without search. A rung falls through on a *transient*
 failure (`ProviderUnavailable`: 429/5xx, also when reported as a top-level
-`error` object in a 200 body, timeouts, invalid JSON); `AccessDenied` and
-`ProviderError` (bad key, rejected prompt, refusal) propagate — a retry would
-only mask which request the provider refused. The journal keeps both sides: the
+`error` object in a 200 body, timeouts, invalid JSON), and the tool rung
+additionally on OpenRouter's 404 «No endpoints found that support tool use» —
+the plugin asks nothing of the model, so a model without tools is the plugin's
+case, not a failure. `AccessDenied` and every other `ProviderError` (bad key,
+rejected prompt, refusal, retired model) propagate — a retry would only mask
+which request the provider refused. The journal keeps both sides: the
 flag in `request_json.params`, the mode that actually answered in the timeline
 (`plan_json`) and in `raw_meta.web_search_mode`
 (`server_tool` | `plugin` | `off`), which the MCP `chat` reply also carries as

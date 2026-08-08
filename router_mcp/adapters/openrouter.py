@@ -44,6 +44,14 @@ PRICE_SOURCE = "api:openrouter GET /models (pricing)"
 WEB_SEARCH_TOOL_TYPE = "openrouter:web_search"
 LEGACY_WEB_PLUGIN_ID = "web"
 
+# "No endpoints found that support tool use" — OpenRouter's HTTP 404 when the
+# pinned model has no tool-capable endpoint. Not transient, but exactly the
+# case the legacy plugin covers: the plugin injects search results server-side
+# and asks nothing of the model. Matched on the word because the wording is the
+# provider's, not ours; on the tool rung an error naming tools is about the
+# tool — the payload contains nothing else unusual.
+TOOL_UNSUPPORTED_RE = re.compile(r"\btools?\b", re.IGNORECASE)
+
 
 
 def _image_part(att: Attachment) -> dict[str, Any] | None:
@@ -209,11 +217,14 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
     ) -> tuple[dict[str, Any], str]:
         """The search ladder: server tool → legacy plugin → no search.
 
-        Restored from ort_bot's `chat_completion`. A rung falls through only on
+        Restored from ort_bot's `chat_completion`. A rung falls through on
         `ProviderUnavailable` — the transient failures `_chat_data` reserves for
-        "try again later". `AccessDenied` and `ProviderError` propagate: a bad
-        key, a rejected prompt or a refusal would fail identically without
-        search, and a retry would only mask which request the provider refused.
+        "try again later" — and the tool rung additionally on the 404 that says
+        the model has no tool-capable endpoint (checked live: ui-tars answers
+        exactly that, and the plugin then works). `AccessDenied` and every other
+        `ProviderError` propagate: a bad key, a rejected prompt or a refusal
+        would fail identically without search, and a retry would only mask
+        which request the provider refused.
 
         Returns the parsed body and the mode that actually answered
         ("server_tool" | "plugin" | "off"); the progress events land in the run
@@ -231,6 +242,14 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
                 "retrying with legacy web plugin", model_id, exc,
             )
             progress.emit("web_search", "серверный поиск недоступен, пробую плагин web")
+        except ProviderError as exc:
+            if not TOOL_UNSUPPORTED_RE.search(str(exc)):
+                raise
+            logger.warning(
+                "OpenRouter model has no tool-use endpoint model=%s (%s); "
+                "retrying with legacy web plugin", model_id, exc,
+            )
+            progress.emit("web_search", "модель без поддержки tools, пробую плагин web")
         try:
             data = await self._chat_data(
                 {**payload, "plugins": [{"id": LEGACY_WEB_PLUGIN_ID}]}
