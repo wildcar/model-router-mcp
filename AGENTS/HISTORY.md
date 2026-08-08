@@ -4,6 +4,15 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-08-08 · Цена веб-поиска в реестре и в расходе
+- What: колонка `web_search_price` (USD за один поиск, из каталожного `pricing.web_search`, синк и ручная правка как у остальных ставок); адаптер кладёт `server_tool_use_details.web_search_requests` в `Usage.web_searches`; расход получает слагаемое «веб-поиск», без ставки — весь итог `estimated`.
+- Why: прод-прогон 10234 — провайдер списал $0.028, реестр насчитал $0.011: два поиска по $0.01 не входили в токенные ставки, расход по поисковым запросам занижался.
+- Files: router_mcp/{registry/models.py,storage/database.py,adapters/openrouter.py,domain/messages.py,accounting/cost.py,registry/service.py,web/api.py,mcp_server/serialize.py}, tests/{test_accounting,test_web_search,test_adapters_parse}.py, AGENTS/SPEC.md
+- Verified: pytest 338 прошло; живая проверка на проде после выката — см. STATE.
+- Next: плагинный режим оплачивается за результат и счётчика не сообщает — там полной цифрой остаётся сумма от провайдера.
+
+---
+
 ## 2026-08-08 · Модель без tools уводит поиск на плагин (найдено живой проверкой)
 - What: первая ступенька лесенки web_search дополнительно падает на 404 «No endpoints found that support tool use» — плагин ничего не требует от модели; остальные ProviderError по-прежнему наружу (снятая модель не гоняется по плагину).
 - Why: живая проверка на dev с реальным ключом: gpt-5.4-mini → `server_tool` (ссылка на источник, $0.025), а ui-tars-1.5-7b умирал целиком вместо деградации — самый частый практический случай плагина.

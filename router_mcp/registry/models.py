@@ -50,6 +50,12 @@ class RegistryModel:
     # an estimate rather than quietly making the request look cheap.
     cache_read_price: float = 0.0  # USD per cached prompt token
     cache_write_price: float = 0.0  # USD per token written to cache
+    # Server-side web search is billed per search call, on top of the tokens
+    # (OpenRouter publishes it as `pricing.web_search`; gpt-5.4-mini ran two
+    # searches in one request and each cost this much). Zero means "nobody
+    # filled this in", and accounting then marks a searched run as an estimate
+    # rather than quietly understating it.
+    web_search_price: float = 0.0  # USD per web search call
     # Seconds of *provider compute*, which is not seconds of audio: Replicate
     # bills a hosted model by how long its hardware ran, and that quantity has
     # nothing to do with the length of the file it produced. Two different

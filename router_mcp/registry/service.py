@@ -345,6 +345,7 @@ class RegistryService:
                 "character_price": fresh.character_price,
                 "cache_read_price": fresh.cache_read_price,
                 "cache_write_price": fresh.cache_write_price,
+                "web_search_price": fresh.web_search_price,
                 "compute_price_per_second": fresh.compute_price_per_second,
                 "tier": fresh.tier,
                 "price_source": fresh.price_source,

@@ -163,6 +163,7 @@ def _model_to_row(m: RegistryModel) -> dict[str, Any]:
         "character_price": m.character_price,
         "cache_read_price": m.cache_read_price,
         "cache_write_price": m.cache_write_price,
+        "web_search_price": m.web_search_price,
         "compute_price_per_second": m.compute_price_per_second,
         "context_length": m.context_length,
         "source": m.source,
@@ -212,6 +213,7 @@ def _row_to_model(row: aiosqlite.Row) -> RegistryModel:
         character_price=row["character_price"],
         cache_read_price=row["cache_read_price"],
         cache_write_price=row["cache_write_price"],
+        web_search_price=_col(row, "web_search_price") or 0.0,
         compute_price_per_second=_col(row, "compute_price_per_second") or 0.0,
         context_length=row["context_length"],
         source=row["source"],
@@ -299,6 +301,7 @@ class Database:
                     character_price REAL NOT NULL DEFAULT 0,
                     cache_read_price REAL NOT NULL DEFAULT 0,
                     cache_write_price REAL NOT NULL DEFAULT 0,
+                    web_search_price REAL NOT NULL DEFAULT 0,
                     compute_price_per_second REAL NOT NULL DEFAULT 0,
                     context_length INTEGER NOT NULL DEFAULT 0,
                     source TEXT NOT NULL DEFAULT 'manual',
@@ -432,6 +435,7 @@ class Database:
             "character_price": "REAL NOT NULL DEFAULT 0",
             "cache_read_price": "REAL NOT NULL DEFAULT 0",
             "cache_write_price": "REAL NOT NULL DEFAULT 0",
+            "web_search_price": "REAL NOT NULL DEFAULT 0",
             # ADR-0006: what the model can be asked to do, as opposed to the
             # group it bills in. Backfilled from `modality` below.
             "tasks": "TEXT NOT NULL DEFAULT ''",
@@ -796,7 +800,8 @@ class Database:
         {
             "display_name", "tier", "prompt_price", "completion_price",
             "image_price", "audio_price_per_second", "character_price",
-            "cache_read_price", "cache_write_price", "compute_price_per_second",
+            "cache_read_price", "cache_write_price", "web_search_price",
+            "compute_price_per_second",
             "context_length", "pricing_mode", "subscription_id", "price_source",
             "price_source_kind", "price_checked_at",
             # Editable because a model's task set is sometimes only knowable by

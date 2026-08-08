@@ -28,6 +28,7 @@ def model_to_dict(m: RegistryModel) -> dict[str, Any]:
         "compute_price_per_second": m.compute_price_per_second,
         "cache_read_price": m.cache_read_price,
         "cache_write_price": m.cache_write_price,
+        "web_search_price": m.web_search_price,
         "context_length": m.context_length,
         "source": m.source,
         "pricing_mode": m.pricing_mode,

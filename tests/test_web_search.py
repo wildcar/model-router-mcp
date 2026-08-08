@@ -216,6 +216,18 @@ async def test_on_an_undeclared_task_the_flag_stays_out_of_the_payload():
     assert "tools" not in bodies[0] and "plugins" not in bodies[0]
 
 
+@pytest.mark.asyncio
+async def test_the_search_count_reaches_usage():
+    # OpenRouter reports the billable count as
+    # usage.server_tool_use_details.web_search_requests; accounting multiplies
+    # it by the row's web_search_price.
+    body = _ok_body()
+    body["usage"]["server_tool_use_details"] = {"web_search_requests": 2}
+    handler, _bodies = _script([httpx.Response(200, json=body)])
+    response = await _adapter(handler).generate(_request(web_search=True), _model())
+    assert response.usage.web_searches == 2
+
+
 # --- the journal -------------------------------------------------------------
 
 @pytest.mark.asyncio

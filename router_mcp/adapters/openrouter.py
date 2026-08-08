@@ -360,6 +360,10 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
         prompt_price = cls._to_float(pricing.get("prompt"))
         completion_price = cls._to_float(pricing.get("completion"))
         image_price = cls._to_float(pricing.get("image"))
+        # USD per server-side web search call, billed on top of the tokens.
+        # Published for the models whose provider prices native search (~150 of
+        # the catalog); absent means the server tool is not separately billed.
+        web_search_price = cls._to_float(pricing.get("web_search"))
         try:
             context_length = int(raw.get("context_length") or 0)
         except (ValueError, TypeError):
@@ -382,6 +386,7 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
             prompt_price=prompt_price,
             completion_price=completion_price,
             image_price=image_price,
+            web_search_price=web_search_price,
             context_length=context_length,
             source="catalog",
             is_active=True,
@@ -434,12 +439,19 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
         if not isinstance(raw, dict):
             return Usage()
         details = openai_shaped_usage(raw)
+        # How many server-side searches the request actually ran — the billable
+        # count behind `web_search_price` (two searches in one answer is
+        # routine). OpenRouter-specific shape, hence parsed here and not in
+        # `openai_shaped_usage`.
+        tool_use = raw.get("server_tool_use_details")
+        searches = tool_use.get("web_search_requests") if isinstance(tool_use, dict) else None
         return Usage(
             prompt_tokens=raw.get("prompt_tokens"),
             completion_tokens=raw.get("completion_tokens"),
             total_tokens=raw.get("total_tokens"),
             cache_read_tokens=details["cache_read"],
             reasoning_tokens=details["reasoning"],
+            web_searches=int(searches) if searches else None,
             raw=raw,
         )
 

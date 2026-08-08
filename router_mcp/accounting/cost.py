@@ -189,6 +189,14 @@ def _terms(model: RegistryModel, modality: Modality, usage: Usage) -> list[dict[
     terms.append(
         _term("completion", "ответ", usage.completion_tokens, model.completion_price)
     )
+    if usage.web_searches:
+        # Billed per search call on top of the tokens. With no rate on the row
+        # the term contributes zero and flags the total as an estimate — a
+        # searched run priced by tokens alone is understated, and it must read
+        # that way rather than look exact (§7).
+        term = _term("web_search", "веб-поиск", usage.web_searches, model.web_search_price)
+        term["assumed"] = model.web_search_price == 0.0
+        terms.append(term)
     return terms
 
 

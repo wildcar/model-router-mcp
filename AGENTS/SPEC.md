@@ -361,6 +361,16 @@ flag in `request_json.params`, the mode that actually answered in the timeline
 `web_search_mode` — a degradation is stated, never inferred from an answer that
 cites nothing.
 
+Search is billed per call on top of the tokens. The registry stores
+`web_search_price` (USD per search; from the catalog's `pricing.web_search`,
+synced like every api-sourced price and editable per call, not per million),
+the adapter normalizes `usage.server_tool_use_details.web_search_requests`
+into `Usage.web_searches`, and accounting adds `web_searches ×
+web_search_price` as its own breakdown term. A searched run on a row with no
+search rate is marked `estimated` — priced by tokens alone it is understated,
+and it must read that way. The plugin mode is billed per *result* and reports
+no count; there the provider-reported cost remains the only complete figure.
+
 ### Response files
 
 Blobs render inline only for `image/*` and `audio/*`; everything else is

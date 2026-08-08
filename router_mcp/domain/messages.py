@@ -66,6 +66,10 @@ class Usage:
     audio_seconds: float | None = None
     images: int | None = None
     characters: int | None = None  # TTS is billed per character, not per token
+    # Server-side web searches the provider ran (and bills per call, on top of
+    # the tokens). None means "not reported", which for a run without search is
+    # the normal case, not a gap.
+    web_searches: int | None = None
     # Seconds of the provider's own compute, as the provider reported them
     # (Replicate's `metrics.predict_time`). Deliberately not `audio_seconds`:
     # those are seconds of a *file*, priced by a different rate, and one column

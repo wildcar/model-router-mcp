@@ -88,6 +88,29 @@ def test_cache_reads_are_priced_at_their_own_rate():
     assert kinds == ["prompt", "cache_read", "completion"]
 
 
+def test_web_searches_are_billed_per_call_on_top_of_tokens():
+    """The prod defect this rate exists for: two searches at $0.01 doubled the
+    bill ($0.028 charged), and the registry math said $0.011."""
+    model = _model(prompt_price=0.75e-6, completion_price=4.5e-6, web_search_price=0.01)
+    usage = Usage(prompt_tokens=1000, completion_tokens=100, web_searches=2)
+    result = compute_cost(model, Modality.CHAT, usage)
+    search = next(t for t in result.breakdown if t["kind"] == "web_search")
+    assert search["units"] == 2 and search["amount"] == pytest.approx(0.02)
+    assert result.cost_source == "computed"
+    assert result.cost_usd == pytest.approx(0.00075 + 0.00045 + 0.02)
+
+
+def test_a_missing_search_rate_marks_the_number_estimated():
+    """A searched run priced by tokens alone is understated; it must say so."""
+    model = _model(prompt_price=1e-6, completion_price=2e-6)  # no web_search_price
+    usage = Usage(prompt_tokens=1000, completion_tokens=100, web_searches=1)
+    result = compute_cost(model, Modality.CHAT, usage)
+    assert result.cost_source == "estimated"
+    # And a run without searches on the same row stays exact.
+    plain = compute_cost(model, Modality.CHAT, Usage(prompt_tokens=1000, completion_tokens=100))
+    assert plain.cost_source == "computed"
+
+
 def test_an_assumed_cache_rate_marks_the_whole_number_estimated():
     """Charging a cache hit at the prompt rate overstates it several times over,
     so the figure must not look exact."""

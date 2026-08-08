@@ -976,6 +976,9 @@ class ModelPatch(BaseModel):
     image_price: float | None = None
     audio_price_per_second: float | None = None
     character_price: float | None = None    # USD per character (TTS)
+    # USD per one server-side web search call — per call, not per million:
+    # OpenRouter publishes it that way ($0.01 a search on the OpenAI models).
+    web_search_price: float | None = None
     # USD per second of the provider's own compute — not per second of audio.
     # This is the only rate most Replicate models have.
     compute_price_per_second: float | None = None
@@ -1021,6 +1024,7 @@ async def api_patch_model(
             ("image_price", body.image_price),
             ("audio_price_per_second", body.audio_price_per_second),
             ("character_price", body.character_price),
+            ("web_search_price", body.web_search_price),
             ("compute_price_per_second", body.compute_price_per_second),
             ("display_name", body.display_name),
             ("tier", body.tier),
@@ -1035,7 +1039,7 @@ async def api_patch_model(
             for k in ("prompt_price", "completion_price", "image_price",
                       "audio_price_per_second", "character_price",
                       "cache_read_price", "cache_write_price",
-                      "compute_price_per_second")
+                      "web_search_price", "compute_price_per_second")
         )
         if touched_price:
             # A hand-entered price survives synchronisation, and the criterion is
