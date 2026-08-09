@@ -64,11 +64,15 @@ class SyncReport:
 
 @dataclass(slots=True)
 class PruneReport:
-    """What a sweep of unconfirmed rows retired, or would retire."""
+    """What a sweep of unconfirmed rows retired or deleted, or would."""
 
     provider_id: str
     dry_run: bool
     retired: list[str] = dataclasses.field(default_factory=list)
+    # Rows that were already retired and that nothing confirmed, nobody curated
+    # and no log entry names: deleted outright, because a row nothing points at
+    # is not history — it is clutter in every list with a «снятые» filter.
+    deleted: list[str] = dataclasses.field(default_factory=list)
     kept_confirmed: int = 0
     kept_curated: int = 0
     kept_in_log: int = 0
@@ -285,21 +289,30 @@ class RegistryService:
         the log mentions it at all — a failed attempt is still the row that
         explains the error somebody is reading.
 
-        Retire, never delete: the rows stay in the table, out of the active pool,
-        and «восстановить» is one call away.
+        Active unconfirmed rows are retired, not deleted: they stay in the
+        table, out of the active pool, and «восстановить» is one call away.
+        Rows that are *already* retired and that none of the four reasons
+        protects are deleted outright — «не удаляем, на строку ссылаются»
+        is vacuous for a row nothing ever referenced, and such rows only
+        clutter every list that can show «снятые».
         """
         self._require_adapter(provider_id)
         report = PruneReport(provider_id=provider_id, dry_run=dry_run)
         in_log = await self._db.model_ids_in_logs(provider_id)
         for model in await self._db.list_registry_models(
-            service_provider_id=provider_id, active_only=True
+            service_provider_id=provider_id, active_only=False
         ):
-            if model.confirmed_at:
-                report.kept_confirmed += 1
-            elif model.source in ("manual", "seed") or model.price_source_kind in (
+            curated = model.source in ("manual", "seed") or model.price_source_kind in (
                 "manual",
                 "page",
-            ):
+            )
+            if not model.is_active:
+                if not model.confirmed_at and not curated and model.model_id not in in_log:
+                    report.deleted.append(model.model_id)
+                continue
+            if model.confirmed_at:
+                report.kept_confirmed += 1
+            elif curated:
                 report.kept_curated += 1
             elif model.model_id in in_log:
                 report.kept_in_log += 1
@@ -308,6 +321,8 @@ class RegistryService:
         if not dry_run:
             for model_id in report.retired:
                 await self._db.deprecate_registry_model(provider_id, model_id)
+            for model_id in report.deleted:
+                await self._db.delete_registry_model(provider_id, model_id)
         return report
 
     def _require_adapter(self, provider_id: str) -> ProviderAdapter:

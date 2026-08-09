@@ -545,6 +545,8 @@ async def api_logs(
     modality: str | None = None,
     task: str | None = None,
     model_id: str | None = None,
+    model: str | None = None,
+    provider: str | None = None,
     channel: str | None = None,
     batch_id: str | None = None,
     since: str | None = None,
@@ -560,15 +562,21 @@ async def api_logs(
 
     `cursor` is the id to page *before*: the log grows from the head, so an
     offset would show part of page one again on page two.
+
+    `user` and `model` match by substring — the console's boxes are search
+    fields, and «ort-bot» has to find every ort-bot-XXXX. `model_id` stays the
+    exact match for callers that hold a full id.
     """
     core = get_core()
     limit = max(1, min(limit, 200))
     filters = dict(
-        external_user_id=user,
+        user_contains=user,
         status=status,
         modality=modality,
         task=task,
         model_id=model_id,
+        model_contains=model,
+        provider=provider,
         channel=channel,
         batch_id=batch_id,
         since=since,
@@ -582,6 +590,23 @@ async def api_logs(
     total = await core.db.count_request_logs(**filters)
     next_cursor = rows[-1]["id"] if len(rows) == limit else None
     return page(rows, total=total, next_cursor=next_cursor)
+
+
+@api_router.get("/logs/suggest")
+async def api_logs_suggest(field: str, q: str = "", limit: int = 20) -> dict[str, Any]:
+    """Values a log filter can take, freshest first.
+
+    Declared before `/logs/{log_id}` so the path wins over the int-typed
+    parameter. The list comes from the log itself, not the registry: the filter
+    must offer exactly the users, models and providers the journal contains.
+    """
+    try:
+        items = await get_core().db.suggest_log_values(
+            field, contains=q.strip(), limit=max(1, min(limit, 50))
+        )
+    except ValueError as exc:
+        raise BadRequest(str(exc)) from exc
+    return page(items, total=len(items))
 
 
 @api_router.get("/logs/{log_id}")

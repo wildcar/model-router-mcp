@@ -24,6 +24,9 @@ const ROUTES = {
   '/api/v1/registry/tree': fixture('tree'),
   '/api/v1/registry/models': fixture('models'),
   '/api/v1/logs': fixture('logs'),
+  // One route serves all three fields: the stub matches on the path alone.
+  '/api/v1/logs/suggest': { items: ['web-tester', 'bot-77'], total: 2,
+    next_cursor: null, facets: {} },
   '/api/v1/logs/1': fixture('log-detail'),
   '/api/v1/logs/4821': fixture('run-ok'),
   '/api/v1/usage': fixture('usage'),
@@ -68,7 +71,7 @@ const ROUTES = {
     provider_id: 'codex-oauth', adopted: ['gpt-5.6-sol'], count: 1 },
   'POST /api/v1/registry/catalog/codex-oauth/prune': {
     provider_id: 'codex-oauth', dry_run: true, retired: ['gpt-5.4-mini'],
-    kept_confirmed: 2, kept_curated: 1, kept_in_log: 0 },
+    deleted: ['gpt-5.2-relic'], kept_confirmed: 2, kept_curated: 1, kept_in_log: 0 },
   'POST /api/v1/registry/refresh': { providers: [
     { provider_id: 'openrouter', seen: 345, added: 2, updated: 14, deprecated: 1, skipped: null },
     { provider_id: 'deepseek', seen: 0, added: 0, updated: 0, deprecated: 0, skipped: 'not configured' },
@@ -80,7 +83,11 @@ function template(name) {
   const raw = readFileSync(join(web, 'templates', `${name}.html`), 'utf8');
   const start = raw.indexOf('{% block content %}');
   const end = raw.lastIndexOf('{% endblock %}');
-  return raw.slice(start, end).replace(/\{[%{][^}]*[%}]\}/g, '');
+  return raw.slice(start, end)
+    // Comments go first: now that the parser keeps inter-tag text, a Jinja
+    // comment left in place would surface as visible page text.
+    .replace(/\{#[\s\S]*?#\}/g, '')
+    .replace(/\{[%{][^}]*[%}]\}/g, '');
 }
 
 const failures = [];
@@ -152,6 +159,26 @@ await runPage('logs', 'logs', async (doc, _calls, settleNow) => {
   check('журнал: текст ошибки виден', body.textContent.includes('UnknownModel'),
     body.textContent.slice(0, 80));
 
+  // Provider before model, tokens split into their four kinds.
+  const header = doc.querySelector('#logs thead').textContent;
+  check('журнал: колонка поставщика перед моделью',
+    header.includes('Поставщик') && header.indexOf('Поставщик') < header.indexOf('Модель'));
+  check('журнал: токены разбиты на четыре колонки',
+    ['Промпт', 'Кэш', 'Ответ', 'Рассужд.'].every((t) => header.includes(t)), header);
+  // children: [error row, its error line, ok row] — the ok row carries the JSON request.
+  const okRow = body.children[2];
+  check('журнал: поставщик показан в строке', okRow.textContent.includes('openrouter'),
+    okRow.textContent.slice(0, 120));
+  check('журнал: в ячейке запроса текст, не JSON',
+    okRow.textContent.includes('сколько будет 2+2') && !okRow.textContent.includes('"role"'),
+    okRow.textContent.slice(-80));
+  const requestCell = okRow.children[okRow.children.length - 1];
+  check('журнал: JSON запроса остался в тултипе',
+    String(requestCell.title || '').includes('"role"'));
+  check('журнал: счётчики токенов по своим колонкам',
+    okRow.textContent.includes('1200') && okRow.textContent.includes('900')
+      && okRow.textContent.includes('340') && okRow.textContent.includes('64'));
+
   // Opening an entry has to answer «что спросили», not only «что ответили»:
   // before the «Запрос» tab the request was nowhere on this screen.
   body.children[0].dispatch('click');
@@ -185,6 +212,11 @@ await runPage('logs', 'logs', async (doc, _calls, settleNow) => {
   check('расход: итог 12.00, без условных 0.84',
     totals.includes('12.000000'), totals.slice(0, 200));
   check('расход: строки сгруппированы', rowsOf(doc, 'spend') > 0);
+  const spendHeader = doc.querySelector('#spend thead').textContent;
+  check('расход: итог токенов остался и колонки разбиты',
+    spendHeader.includes('Токенов')
+      && ['Промпт', 'Кэш', 'Ответ', 'Рассужд.'].every((t) => spendHeader.includes(t)),
+    spendHeader);
   check('расход: ссылка на выгрузку ведёт на CSV',
     (doc.getElementById('s-export').attributes.href || '').includes('/usage/export'));
 });

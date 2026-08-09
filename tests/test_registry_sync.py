@@ -265,6 +265,7 @@ async def test_prune_keeps_confirmed_curated_and_logged_rows(tmp_path):
 
         plan = await registry.prune_unconfirmed("vendor", dry_run=True)
         assert plan.retired == ["never-touched"]
+        assert plan.deleted == []
         assert (plan.kept_confirmed, plan.kept_curated, plan.kept_in_log) == (1, 3, 1)
         # A dry run changes nothing.
         assert len(await db.list_registry_models()) == 6
@@ -273,8 +274,51 @@ async def test_prune_keeps_confirmed_curated_and_logged_rows(tmp_path):
         assert done.retired == ["never-touched"]
         active = {m.model_id for m in await db.list_registry_models()}
         assert "never-touched" not in active and len(active) == 5
-        # Retired, not deleted.
+        # Retired, not deleted: the sweep that retired it stays reversible.
         assert len(await db.list_registry_models(active_only=False)) == 6
+
+        # The next sweep meets the same row already retired, still referenced by
+        # nothing — now it is clutter and goes for good.
+        again = await registry.prune_unconfirmed("vendor", dry_run=False)
+        assert again.retired == [] and again.deleted == ["never-touched"]
+        assert len(await db.list_registry_models(active_only=False)) == 5
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_prune_deletes_only_unreferenced_retired_rows(tmp_path):
+    """A retired row is deleted only when nothing at all points at it: no
+    confirmation, no curation, no log entry. Everything else stays retired."""
+    db = await _db(tmp_path)
+    try:
+        await db.upsert_registry_model(_model("ghost"))
+        await db.upsert_registry_model(_model("was-confirmed"))
+        await db.confirm_registry_model("vendor", "was-confirmed")
+        await db.upsert_registry_model(_model("by-hand", source="manual"))
+        await db.upsert_registry_model(_model("tried-once"))
+        await db.log_request(
+            RequestLogRecord(
+                external_user_id="u",
+                modality="chat",
+                service_provider_id="vendor",
+                model_id="tried-once",
+                status="error",
+            )
+        )
+        for model_id in ("ghost", "was-confirmed", "by-hand", "tried-once"):
+            await db.deprecate_registry_model("vendor", model_id)
+        registry = RegistryService(db, adapters={"vendor": FakeBrowseAdapter([])})
+
+        plan = await registry.prune_unconfirmed("vendor", dry_run=True)
+        assert plan.deleted == ["ghost"] and plan.retired == []
+        # A dry run deletes nothing.
+        assert len(await db.list_registry_models(active_only=False)) == 4
+
+        done = await registry.prune_unconfirmed("vendor", dry_run=False)
+        assert done.deleted == ["ghost"]
+        left = {m.model_id for m in await db.list_registry_models(active_only=False)}
+        assert left == {"was-confirmed", "by-hand", "tried-once"}
     finally:
         await db.close()
 

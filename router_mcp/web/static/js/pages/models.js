@@ -424,21 +424,36 @@ async function prune() {
   }
   const url = `/registry/catalog/${encodeURIComponent(provider)}/prune`;
   const plan = await api(`${url}?dry_run=true`, { method: 'POST' });
-  if (!plan.retired.length) {
+  const deleted = plan.deleted || [];
+  if (!plan.retired.length && !deleted.length) {
     toast(`${provider}: сворачивать нечего`);
     return;
   }
-  const names = plan.retired.slice(0, 10).join('\n');
-  const more = plan.retired.length > 10 ? `\n…и ещё ${plan.retired.length - 10}` : '';
+  // Two different fates in one confirmation: retiring is reversible, deleting
+  // a retired row nothing ever referenced is not — so each is named with its
+  // own count and its own consequence.
+  const actions = [];
+  if (plan.retired.length) actions.push(`снять с учёта ${plan.retired.length} строк`);
+  if (deleted.length) {
+    actions.push(`удалить ${deleted.length} снятых строк, к которым не было ни одного запроса`);
+  }
+  const listed = [
+    ...plan.retired.map((id) => `${id} — снять`),
+    ...deleted.map((id) => `${id} — удалить`),
+  ];
+  const names = listed.slice(0, 10).join('\n');
+  const more = listed.length > 10 ? `\n…и ещё ${listed.length - 10}` : '';
   if (!window.confirm(
-    `Снять с учёта ${plan.retired.length} строк ${provider}?\n\n${names}${more}\n\n`
+    `${provider}: ${actions.join(', ')}?\n\n${names}${more}\n\n`
     + `Останутся: подтверждённых ответом ${plan.kept_confirmed}, `
     + `ручных и засеянных ${plan.kept_curated}, упомянутых в журнале ${plan.kept_in_log}.\n`
-    + 'Строки не удаляются, вернуть можно фильтром «снятые».')) {
+    + 'Снятые строки можно вернуть фильтром «снятые»; удалённые не вернуть.')) {
     return;
   }
   const done = await api(`${url}?dry_run=false`, { method: 'POST' });
-  toast(`Снято с учёта: ${done.retired.length}`);
+  const doneDeleted = done.deleted || [];
+  toast(`Снято с учёта: ${done.retired.length}`
+    + (doneDeleted.length ? `, удалено: ${doneDeleted.length}` : ''));
   await load();
   await ask();
 }

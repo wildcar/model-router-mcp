@@ -208,9 +208,12 @@ Contract for requirement 34. Reasoning and rejected alternatives:
   credentials; `has_catalog: false` when it has no catalog endpoint at all.
 - `POST /api/v1/registry/catalog/{provider}/adopt` — writes named rows from the
   provider's own answer. An adopted row is unconfirmed until something answers.
-- `POST /api/v1/registry/catalog/{provider}/prune?dry_run=` — retires rows that
-  nothing confirmed. Kept: confirmed, `source` of `manual`/`seed`, a price a human
-  vouched for, or a model_id the log mentions at all. Retires, never deletes.
+- `POST /api/v1/registry/catalog/{provider}/prune?dry_run=` — retires active rows
+  that nothing confirmed. Kept: confirmed, `source` of `manual`/`seed`, a price a
+  human vouched for, or a model_id the log mentions at all. Rows *already*
+  retired that none of those four reasons protects are deleted outright
+  (reported as `deleted`): «не удаляем — на строку ссылаются» is vacuous for a
+  row nothing references, and such rows only clutter the «снятые» filter.
 - codex-oauth has a catalog: `GET {CODEX_BASE_URL}/models?client_version=` (see
   `CODEX_CLIENT_VERSION`) lists the account's six text models with their context
   window, input media and their own reasoning levels; `visibility: hide` and
@@ -329,9 +332,19 @@ get the same facts appended to the message text, since FastMCP hands clients
 `GET /api/v1/logs` is cursor-paged by descending id (offset would repeat rows,
 because the log grows from the head) and projected to the columns the table
 shows — the full row carries the response text and the raw usage block.
-Filters: user, status, modality, model, channel, since/until, `with_fallback`,
-`with_retries`, `unverified_cost`, `cost_mismatch`. `GET /api/v1/logs/{id}`
+Filters: user, status, modality, model, provider, channel, since/until,
+`with_fallback`, `with_retries`, `unverified_cost`, `cost_mismatch`. `user` and
+`model` match by substring, case-insensitive («ort-bot» finds every
+ort-bot-XXXX); `model_id` stays the exact match. `GET /api/v1/logs/{id}`
 returns the full row as a `Run`.
+
+`GET /api/v1/logs/suggest?field=user|model|provider&q=` — distinct values the
+log has seen for that column, freshest first, narrowed by `q` (substring).
+Feeds the journal's filter dropdowns and as-you-type подсказки; the field goes
+into SQL through a closed map, anything else is a 400. The console's day
+filter (◀ день ▶) is client-side sugar over since/until: the local day's
+bounds travel as UTC strings in the stored `+00:00` shape, because the
+comparison is lexicographic.
 
 ### Cost reconciliation
 
@@ -452,6 +465,16 @@ previous value underneath, an order-of-magnitude jump confirmed out loud) and th
 «Спросить поставщика» block: a provider select, the live catalog with per-row
 adoption, and «Свернуть до подтверждённых». The card says whether anything ever
 answered on the model.
+
+«Журнал» filters by user (substring, with as-you-type подсказки from
+`/logs/suggest`), provider, model (substring, datalist), status, task, group,
+channel and day (◀ ▶ page by local days; empty date is all days). The table
+shows the provider column before the model, tokens split into four columns
+(Промпт / Кэш / Ответ / Рассужд.; a row billed by seconds, characters or
+images shows its measure in the first of them), and «Запрос» shows the words
+that were asked — when `request_text` holds a message list, the cell extracts
+the last user message and the JSON stays in the tooltip. «Расход» keeps the
+token total and splits the same four kinds into their own columns.
 
 One inspector component serves «Прогон» and «Журнал», over the single `Run`
 envelope, with five tabs — Запрос, Ответ, Шаги, JSON, Сырьё. «Ответ» opens

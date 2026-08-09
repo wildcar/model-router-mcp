@@ -100,6 +100,45 @@ def test_filters(client, params, predicate):
     assert body["total"] == len(body["items"])
 
 
+def test_user_filter_matches_a_substring(client):
+    """The user box is a search field: «bot» must find every bot-XXXX."""
+    body = client.get("/api/v1/logs?limit=200&user=bot").json()
+    assert body["items"]
+    assert all(r["external_user_id"] == "bot-77" for r in body["items"])
+    # Case-insensitive, and a miss is an empty page, not an error.
+    assert client.get("/api/v1/logs?user=BOT").json()["total"] == body["total"]
+    assert client.get("/api/v1/logs?user=nobody").json()["total"] == 0
+
+
+def test_provider_and_model_filters(client):
+    assert client.get("/api/v1/logs?provider=openrouter").json()["total"] == 60
+    assert client.get("/api/v1/logs?provider=deepseek").json()["total"] == 0
+    # `model` is a substring, `model_id` stays the exact match.
+    assert client.get("/api/v1/logs?model=gpt-4o-mini").json()["total"] == 60
+    assert client.get("/api/v1/logs?model=claude").json()["total"] == 0
+    assert client.get("/api/v1/logs?model_id=openai/gpt-4o-mini").json()["total"] == 60
+    assert client.get("/api/v1/logs?model_id=gpt-4o-mini").json()["total"] == 0
+
+
+def test_suggest_offers_what_the_log_has_seen(client):
+    """The filter dropdowns and подсказки come from the log itself."""
+    users = client.get("/api/v1/logs/suggest?field=user").json()
+    assert set(users["items"]) == {"bot-77", "web-tester"}
+    narrowed = client.get("/api/v1/logs/suggest?field=user&q=bot").json()
+    assert narrowed["items"] == ["bot-77"]
+    providers = client.get("/api/v1/logs/suggest?field=provider").json()
+    assert providers["items"] == ["openrouter"]
+    models = client.get("/api/v1/logs/suggest?field=model").json()
+    assert models["items"] == ["openai/gpt-4o-mini"]
+
+
+def test_suggest_rejects_an_unknown_field(client):
+    """The field goes into SQL through a closed map, so anything else is 400."""
+    r = client.get("/api/v1/logs/suggest?field=response_text")
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "bad_request"
+
+
 def test_detail_returns_the_run_envelope(client):
     log_id = client.get("/api/v1/logs?limit=1&status=error").json()["items"][0]["id"]
     run = client.get(f"/api/v1/logs/{log_id}").json()

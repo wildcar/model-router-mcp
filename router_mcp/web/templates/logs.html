@@ -37,7 +37,10 @@
       <th scope="col" id="s-bucket-head">Пользователь</th>
       <th scope="col" class="num">Запросов</th>
       <th scope="col" class="num">Токенов</th>
-      <th scope="col" class="num">промпт / кэш / рассуждение</th>
+      <th scope="col" class="num">Промпт</th>
+      <th scope="col" class="num">Кэш</th>
+      <th scope="col" class="num">Ответ</th>
+      <th scope="col" class="num">Рассужд.</th>
       <th scope="col" class="num">$</th>
       <th scope="col" class="num">подтверждено</th>
     </tr></thead><tbody></tbody></table>
@@ -50,7 +53,19 @@
 <section class="card">
   <h2>Журнал запросов</h2>
   <div class="row">
-    <label>Метка пользователя <input id="f-user" placeholder="(все)"></label>
+    {# Search boxes, not equality tests: typing «ort-bot» must find every
+       ort-bot-XXXX, and the datalist offers the labels the log has seen. #}
+    <label>Метка пользователя
+      <input id="f-user" placeholder="(все)" list="f-user-options" autocomplete="off">
+    </label>
+    <datalist id="f-user-options"></datalist>
+    <label>Поставщик
+      <select id="f-provider"><option value="">все</option></select>
+    </label>
+    <label>Модель
+      <input id="f-model" placeholder="(все)" list="f-model-options" autocomplete="off">
+    </label>
+    <datalist id="f-model-options"></datalist>
     <label>Статус
       <select id="f-status">
         <option value="">все</option>
@@ -82,15 +97,24 @@
     <button id="reload" type="button">Обновить</button>
   </div>
   <div class="row">
+    {# One day of the log, pageable: ◀ и ▶ листают по дням, пустая дата — все дни. #}
+    <label>День
+      <button id="f-day-prev" type="button" title="Предыдущий день">◀</button>
+      <input id="f-date" type="date">
+      <button id="f-day-next" type="button" title="Следующий день">▶</button>
+      <button id="f-day-clear" type="button" title="Все дни">×</button>
+    </label>
     <label><input id="f-fallback" type="checkbox"> с подстановкой</label>
     <label><input id="f-retries" type="checkbox"> были повторы</label>
     <label><input id="f-unverified" type="checkbox"> цена не подтверждена</label>
     <label><input id="f-mismatch" type="checkbox"> расходится с поставщиком</label>
   </div>
   <table id="logs"><thead><tr>
-    <th class="num">id</th><th>Время</th><th>Метка</th><th>Модель</th><th>Задача</th>
-    <th>Канал</th><th>Статус</th><th class="num">Время ответа</th>
-    <th class="num">Токены</th><th class="num">$</th><th>Запрос</th>
+    <th class="num">id</th><th>Время</th><th>Метка</th><th>Поставщик</th><th>Модель</th>
+    <th>Задача</th><th>Канал</th><th>Статус</th><th class="num">Время ответа</th>
+    <th class="num">Промпт</th><th class="num">Кэш</th>
+    <th class="num">Ответ</th><th class="num">Рассужд.</th>
+    <th class="num">$</th><th>Запрос</th>
   </tr></thead><tbody></tbody></table>
   <div class="row">
     <span id="count" class="hint"></span>

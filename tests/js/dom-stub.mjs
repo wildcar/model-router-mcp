@@ -44,7 +44,12 @@ class Node {
     this.classList = new ClassList(this);
   }
 
-  get children() { return this.childNodes.filter((n) => n instanceof Node); }
+  // Elements only, the way a browser's `children` works: the fixture parser
+  // now emits text nodes for static markup, and counting those would shift
+  // every `children[i]` a page or a test relies on.
+  get children() {
+    return this.childNodes.filter((n) => n instanceof Node && n.tagName !== '#TEXT');
+  }
   get firstChild() { return this.childNodes[0] || null; }
 
   // Properties a browser reflects onto the attribute of the same name. Pages
@@ -169,12 +174,18 @@ export function makeDocument() {
   return doc;
 }
 
-/** Build a document from a tiny subset of HTML: tags, ids, classes, values. */
+/** Build a document from a tiny subset of HTML: tags, ids, classes, values,
+ * and the text between tags — a table header spelled out in markup is part of
+ * what the page shows, and a stub that drops it cannot check column names. */
 export function parseFixture(html, doc) {
   const stack = [doc.body];
   const tagRe = /<(\/?)([a-zA-Z0-9]+)([^>]*)>/g;
   let match;
+  let last = 0;
   while ((match = tagRe.exec(html)) !== null) {
+    const between = html.slice(last, match.index).replace(/\s+/g, ' ').trim();
+    if (between) stack[stack.length - 1].appendChild(doc.createTextNode(between));
+    last = tagRe.lastIndex;
     const [, closing, tag, rawAttrs] = match;
     const lower = tag.toLowerCase();
     if (closing) {

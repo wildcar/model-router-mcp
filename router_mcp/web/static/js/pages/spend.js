@@ -104,12 +104,21 @@ function renderRows(items) {
             ? 'Больше половины суммы посчитано по неподтверждённым ставкам'
             : '',
         });
+    // The total stays: it is the number the bill correlates with. The four
+    // kinds each get their own column — a combined cell hid which kind of
+    // token the money went to.
+    const count = (v) => ({
+      text: (v || 0).toLocaleString('ru-RU'),
+      className: v ? 'num' : 'num muted',
+    });
     return row([
       { text: item.bucket ?? '—', className: 'mono' },
       { text: item.requests, className: 'num' },
       { text: item.total_tokens.toLocaleString('ru-RU'), className: 'num' },
-      { text: `${item.prompt_tokens} / ${item.cache_read_tokens} / ${item.reasoning_tokens}`,
-        className: 'num' },
+      count(item.prompt_tokens),
+      count(item.cache_read_tokens),
+      count(item.completion_tokens),
+      count(item.reasoning_tokens),
       { text: money(item.total_usd), className: 'num' },
       { node: shareCell },
     ]);

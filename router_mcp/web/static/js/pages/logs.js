@@ -22,15 +22,36 @@ let labels = null;
 function filters() {
   return {
     user: $('f-user').value.trim(),
+    provider: $('f-provider').value,
+    model: $('f-model').value.trim(),
     status: $('f-status').value,
     task: $('f-task').value,
     modality: $('f-modality').value,
     channel: $('f-channel').value,
+    date: $('f-date').value,
     with_fallback: $('f-fallback').checked,
     with_retries: $('f-retries').checked,
     unverified_cost: $('f-unverified').checked,
     cost_mismatch: $('f-mismatch').checked,
   };
+}
+
+// The URL keeps the local day; the server compares UTC strings. The bounds are
+// rendered in the same `+00:00` shape the rows are stored in, because the
+// comparison is lexicographic and a stray `Z` sorts after `+`.
+function dayBounds(date) {
+  const [y, m, d] = date.split('-').map(Number);
+  const iso = (dt) => dt.toISOString().slice(0, 19) + '+00:00';
+  return {
+    since: iso(new Date(y, m - 1, d)),
+    until: iso(new Date(new Date(y, m - 1, d + 1).getTime() - 1000)),
+  };
+}
+
+// What actually goes to /logs: the day filter travels as since/until.
+function apiParams(f) {
+  const { date, ...rest } = f;
+  return date ? { ...rest, ...dayBounds(date) } : rest;
 }
 
 // Flags a row whose provider-reported sum sits away from our arithmetic —
@@ -89,11 +110,70 @@ function errorRow(r, columns) {
   return tr;
 }
 
+// Four counters, four columns — the combined cell hid which kind of token the
+// money went to. A row billed by seconds, characters or images has no token to
+// show, so its measure takes the first cell instead of four dashes lying zero.
+function tokenCells(r) {
+  const num = (v) => ({ text: v ?? '—', className: v ? 'num' : 'num muted' });
+  const counted = [r.prompt_tokens, r.completion_tokens, r.cache_read_tokens, r.reasoning_tokens]
+    .some((v) => v !== null && v !== undefined);
+  if (!counted) {
+    const measure = tokens({
+      audio_seconds: r.audio_seconds, images: r.images, characters: r.characters,
+    });
+    return [{ text: measure, className: 'num muted' }, num(null), num(null), num(null)];
+  }
+  return [num(r.prompt_tokens), num(r.cache_read_tokens),
+          num(r.completion_tokens), num(r.reasoning_tokens)];
+}
+
+// The cell shows the words that were asked; the JSON stays in the tooltip.
+// `request_text` holds the raw message list when the caller sent history, and
+// a column of JSON punctuation answers «что спросили» for nobody.
+function requestCell(r) {
+  const raw = (r.request_text || '').trim();
+  let text = raw;
+  let title = raw;
+  if (raw.startsWith('[') || raw.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(raw);
+      title = JSON.stringify(parsed, null, 2);
+      text = messagesText(parsed) || raw;
+    } catch (_) { /* truncated JSON: show it as it is */ }
+  }
+  return { text: text.slice(0, 60), className: 'trunc', title };
+}
+
+// The words the operator typed: the last user message, or failing that the
+// last message that carries any text at all.
+function messagesText(parsed) {
+  const messages = Array.isArray(parsed) ? parsed : [parsed];
+  const textOf = (m) => {
+    if (!m) return '';
+    const content = m.content ?? m.text;
+    if (typeof content === 'string') return content;
+    if (Array.isArray(content)) {
+      return content
+        .map((part) => (typeof part === 'string' ? part : (part && part.text) || ''))
+        .filter(Boolean).join(' ');
+    }
+    return '';
+  };
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.role === 'user' && textOf(messages[i])) return textOf(messages[i]);
+  }
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (textOf(messages[i])) return textOf(messages[i]);
+  }
+  return '';
+}
+
 function logRow(r) {
   const tr = row([
     { text: r.id, className: 'num' },
     { text: localTime(r.created_at), title: r.created_at },
     r.external_user_id,
+    r.service_provider_id || '—',
     { node: modelCell(r) },
     // The task, because the group is ambiguous between two of them: a row that
     // says «Картинка» does not say whether one was drawn or edited.
@@ -101,15 +181,7 @@ function logRow(r) {
     r.channel || '—',
     statusCell(r.status),
     { text: duration(r.latency_ms), className: 'num' },
-    { text: tokens({
-        prompt: r.prompt_tokens,
-        completion: r.completion_tokens,
-        cache_read: r.cache_read_tokens,
-        reasoning: r.reasoning_tokens,
-        audio_seconds: r.audio_seconds,
-        images: r.images,
-        characters: r.characters,
-      }), className: 'num' },
+    ...tokenCells(r),
     { node: (() => {
         const cell = costCell(r.cost_usd, r.cost_source, labels);
         if (costMismatch(r)) {
@@ -120,7 +192,7 @@ function logRow(r) {
         }
         return cell;
       })() },
-    { text: (r.request_text || '').slice(0, 60), className: 'trunc', title: r.request_text || '' },
+    requestCell(r),
   ]);
   tr.addEventListener('click', () => {
     writeParams({ ...readParams(), log: r.id });
@@ -129,10 +201,18 @@ function logRow(r) {
   return tr;
 }
 
-async function loadLogs({ append = false } = {}) {
+// The `change` listener and the debounced typeahead both call this, often for
+// the same filter state; the key check turns the second call into a no-op
+// instead of a second identical request.
+let lastKey = null;
+
+async function loadLogs({ append = false, force = false } = {}) {
   const params = filters();
+  const key = JSON.stringify(params);
+  if (!append && !force && key === lastKey) return;
   if (!append) { cursor = null; shown = 0; }
-  const answer = await api(`/logs${query({ ...params, cursor, limit: PAGE_SIZE })}`);
+  const answer = await api(`/logs${query({ ...apiParams(params), cursor, limit: PAGE_SIZE })}`);
+  lastKey = key;
   const body = document.querySelector('#logs tbody');
   if (!append) clear(body);
   const columns = document.querySelectorAll('#logs thead th').length;
@@ -161,7 +241,7 @@ function scheduleLiveRefresh(items) {
   clearTimeout(liveTimer);
   const live = items.some((r) => r.status === 'running' || r.status === 'queued');
   if (!live || cursor !== null) return;
-  liveTimer = setTimeout(() => loadLogs().catch(() => {}), LIVE_REFRESH_MS);
+  liveTimer = setTimeout(() => loadLogs({ force: true }).catch(() => {}), LIVE_REFRESH_MS);
 }
 
 // Opening a row uses the very same inspector the «Прогон» screen shows after a
@@ -243,10 +323,69 @@ function fillFilter(id, rows) {
 }
 
 function reload() {
-  loadLogs().catch((e) => toast(`Ошибка: ${e.message}`, true));
+  loadLogs({ force: true }).catch((e) => toast(`Ошибка: ${e.message}`, true));
 }
 
-for (const id of ['f-user', 'f-status', 'f-task', 'f-modality', 'f-channel',
+// Values a filter box can take, from the log itself: the datalist offers the
+// labels the journal has actually seen, narrowed as the operator types.
+async function suggest(field, q, listId) {
+  try {
+    const answer = await api(`/logs/suggest${query({ field, q })}`);
+    const list = $(listId);
+    clear(list);
+    for (const value of answer.items) {
+      const option = el('option');
+      option.value = value;
+      list.appendChild(option);
+    }
+  } catch (_) { /* подсказки — удобство, не повод ронять журнал */ }
+}
+
+function debounce(fn, ms) {
+  let timer = null;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), ms);
+  };
+}
+
+// Typing filters as it goes: the table narrows and the подсказки narrow with
+// it. Debounced so a fast typist is one request, not one per keystroke.
+const typeahead = debounce((field, inputId, listId) => {
+  suggest(field, $(inputId).value.trim(), listId);
+  loadLogs().catch(() => {});
+}, 300);
+
+$('f-user').addEventListener('input', () => typeahead('user', 'f-user', 'f-user-options'));
+$('f-model').addEventListener('input', () => typeahead('model', 'f-model', 'f-model-options'));
+
+// The day pager. From «все дни» either arrow steps into today — the newest day
+// is where the operator was looking anyway.
+function localDate(dt) {
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`
+    + `-${String(dt.getDate()).padStart(2, '0')}`;
+}
+
+function shiftDay(delta) {
+  const current = $('f-date').value;
+  let next = new Date();
+  if (current) {
+    const [y, m, d] = current.split('-').map(Number);
+    next = new Date(y, m - 1, d + delta);
+  }
+  $('f-date').value = localDate(next);
+  reload();
+}
+
+$('f-day-prev').addEventListener('click', () => shiftDay(-1));
+$('f-day-next').addEventListener('click', () => shiftDay(1));
+$('f-day-clear').addEventListener('click', () => {
+  $('f-date').value = '';
+  reload();
+});
+
+for (const id of ['f-user', 'f-provider', 'f-model', 'f-status', 'f-task',
+                  'f-modality', 'f-channel', 'f-date',
                   'f-fallback', 'f-retries', 'f-unverified', 'f-mismatch']) {
   $(id).addEventListener('change', () => loadLogs());
 }
@@ -257,10 +396,10 @@ $('tz').textContent = timeZoneLabel();
 // Restore the filters the URL carries before the first load.
 const initial = readParams();
 if (initial.user) $('f-user').value = initial.user;
+if (initial.model) $('f-model').value = initial.model;
 if (initial.status) $('f-status').value = initial.status;
-if (initial.task) $('f-task').value = initial.task;
-if (initial.modality) $('f-modality').value = initial.modality;
 if (initial.channel) $('f-channel').value = initial.channel;
+if (initial.date) $('f-date').value = initial.date;
 $('f-fallback').checked = initial.with_fallback === 'true';
 $('f-retries').checked = initial.with_retries === 'true';
 $('f-unverified').checked = initial.unverified_cost === 'true';
@@ -282,18 +421,34 @@ $('tab-spend').addEventListener('click', () => showTab('spend'));
 initSpend();
 
 // The glossary comes from the server so one concept keeps one name across the
-// table, the inspector and the reports.
-api('/capabilities')
-  .then((caps) => {
+// table, the inspector and the reports. The provider filter is asked of the
+// log itself, not the registry — a provider disabled yesterday still owns
+// yesterday's rows. Both must land before the first load: a deep link with
+// `provider=` selects an option that has to exist by then.
+Promise.allSettled([
+  api('/capabilities').then((caps) => {
     labels = caps.labels;
     // Both filter lists come from the server: spelled out in markup they went
-    // stale the moment a task or a group was added.
+    // stale the moment a task or a group was added. The URL's choice is applied
+    // after the options exist — set earlier, a select silently drops it.
     fillFilter('f-task', caps.labels.tasks);
     fillFilter('f-modality', caps.labels.modalities);
-  })
-  .catch(() => {})   // raw codes are ugly, never wrong
-  .finally(() => {
-    reload();
-    openDeepLink();
-    if (readParams().tab === 'spend') showTab('spend');
-  });
+    if (initial.task) $('f-task').value = initial.task;
+    if (initial.modality) $('f-modality').value = initial.modality;
+  }),   // raw codes are ugly, never wrong
+  api(`/logs/suggest${query({ field: 'provider' })}`).then((answer) => {
+    for (const value of answer.items) {
+      const option = el('option', value);
+      option.value = value;
+      $('f-provider').appendChild(option);
+    }
+    if (initial.provider) $('f-provider').value = initial.provider;
+  }),
+]).then(() => {
+  reload();
+  openDeepLink();
+  if (readParams().tab === 'spend') showTab('spend');
+  // Warm the datalists so the boxes offer recent labels on first focus.
+  suggest('user', $('f-user').value.trim(), 'f-user-options');
+  suggest('model', $('f-model').value.trim(), 'f-model-options');
+});

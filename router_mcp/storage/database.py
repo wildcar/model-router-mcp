@@ -1053,12 +1053,21 @@ class Database:
         with_retries: bool,
         unverified_cost: bool,
         cost_mismatch: bool = False,
+        user_contains: str | None = None,
+        model_contains: str | None = None,
+        provider: str | None = None,
     ) -> tuple[list[str], list[Any]]:
         clauses: list[str] = []
         params: list[Any] = []
         if external_user_id:
             clauses.append("external_user_id = ?")
             params.append(external_user_id)
+        # Substring, not equality: the console's user box is a search field, and
+        # «ort-bot» must find every ort-bot-XXXX. `instr` instead of LIKE so a
+        # legitimate % or _ in a label needs no escaping.
+        if user_contains:
+            clauses.append("instr(lower(external_user_id), lower(?)) > 0")
+            params.append(user_contains)
         if status:
             clauses.append("status = ?")
             params.append(status)
@@ -1071,6 +1080,12 @@ class Database:
         if model_id:
             clauses.append("model_id = ?")
             params.append(model_id)
+        if model_contains:
+            clauses.append("instr(lower(model_id), lower(?)) > 0")
+            params.append(model_contains)
+        if provider:
+            clauses.append("service_provider_id = ?")
+            params.append(provider)
         if channel:
             clauses.append("channel = ?")
             params.append(channel)
@@ -1120,6 +1135,9 @@ class Database:
         with_retries: bool = False,
         unverified_cost: bool = False,
         cost_mismatch: bool = False,
+        user_contains: str | None = None,
+        model_contains: str | None = None,
+        provider: str | None = None,
         before_id: int | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
@@ -1142,6 +1160,9 @@ class Database:
             with_retries=with_retries,
             unverified_cost=unverified_cost,
             cost_mismatch=cost_mismatch,
+            user_contains=user_contains,
+            model_contains=model_contains,
+            provider=provider,
         )
         if before_id is not None:
             clauses.append("id < ?")
@@ -1171,6 +1192,9 @@ class Database:
         with_retries: bool = False,
         unverified_cost: bool = False,
         cost_mismatch: bool = False,
+        user_contains: str | None = None,
+        model_contains: str | None = None,
+        provider: str | None = None,
     ) -> int:
         clauses, params = self._log_filters(
             external_user_id=external_user_id,
@@ -1186,12 +1210,48 @@ class Database:
             with_retries=with_retries,
             unverified_cost=unverified_cost,
             cost_mismatch=cost_mismatch,
+            user_contains=user_contains,
+            model_contains=model_contains,
+            provider=provider,
         )
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         row = await self._fetchone(
             f"SELECT COUNT(*) AS n FROM request_logs {where}", tuple(params)
         )
         return int(row["n"]) if row else 0
+
+    # Which columns the console may ask suggestions for. A closed map, not
+    # string interpolation: the field name goes straight into SQL.
+    LOG_SUGGEST_FIELDS = {
+        "user": "external_user_id",
+        "model": "model_id",
+        "provider": "service_provider_id",
+    }
+
+    async def suggest_log_values(
+        self, field: str, *, contains: str = "", limit: int = 20
+    ) -> list[str]:
+        """Distinct values one log column has seen, freshest first.
+
+        Feeds the filter dropdowns and the as-you-type подсказки: the list of
+        users, models or providers worth offering is exactly the list the log
+        already contains, not what the registry thinks exists today.
+        """
+        column = self.LOG_SUGGEST_FIELDS.get(field)
+        if column is None:
+            raise ValueError(f"Unknown suggest field {field!r}")
+        clauses = [f"{column} IS NOT NULL"]
+        params: list[Any] = []
+        if contains:
+            clauses.append(f"instr(lower({column}), lower(?)) > 0")
+            params.append(contains)
+        rows = await self._fetchall(
+            f"SELECT {column} AS value FROM request_logs "
+            f"WHERE {' AND '.join(clauses)} "
+            f"GROUP BY {column} ORDER BY MAX(id) DESC LIMIT ?",
+            tuple(params + [limit]),
+        )
+        return [str(r["value"]) for r in rows]
 
     # --- retention --------------------------------------------------------
     async def count_logs_before(self, before: str) -> int:
