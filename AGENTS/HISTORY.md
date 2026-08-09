@@ -9,7 +9,7 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 - Why: браузер отдаёт плоский список, а список умеет только порядок — примерочную из консоли было не запустить, только через API.
 - Files: router_mcp/web/labels.py, router_mcp/web/api.py, router_mcp/web/templates/run.html, router_mcp/web/static/js/pages/run.js, router_mcp/web/static/js/pages/models.js, router_mcp/web/static/app.css, tests/*
 - Verified: pytest 395 прошёл, node-харнесс зелёный; на проде заведена примерочная `cuuupid/idm-vton` (в `REPLICATE_MODELS`, `input_map` и `extra_params` через PATCH) и прогнана на двух картинках — строка 10575, predict_time 16 с: текст без prompt-свойства не уронил прогон (задача 1), человек и одежда сели на свои входы (задача 2), `category`/`garment_des`/`steps` ушли в модель с пустым `ignored_params` (задача 3).
-- Next: вбить ставку за секунду расчёта для примерочной — строка без цены, прогон записан как «нет методики».
+- Next: ставка примерочной вбита следом (0.0015 $/с = $0.024 за прогон / 16.043 с нашего замера, происхождение `page`); найдено попутно — `_estimate` для группы `image` смотрит только `image_price`, поэтому в сухом прогоне модель со ставкой за секунду расчёта читается как «ставки нет», хотя журнал считает её нормально.
 
 ## 2026-08-09 · свои параметры модели и громкий отказ без публичной выдачи
 - What: у строки реестра появился `extra_params` — список имён, который складывается с `SUPPORTED_PARAMS` адаптера только для этой модели (значение по-прежнему проверяется по схеме, в `ignored_params` не попадает, поле рисуется формой из `/registry/tree`); адаптер объявляет `inline_file_limit_bytes`, и незаданные `PUBLIC_BLOB_BASE_URL`/`PUBLIC_BLOB_SIGNING_KEY` теперь видны в `/capabilities`, `/health/summary` и `/plan`.
