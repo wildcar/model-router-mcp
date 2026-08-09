@@ -63,6 +63,31 @@ sudo -u modelrouter sed -i \
 sudo chmod 600 .env
 ```
 
+### Public file links — required whenever Replicate is enabled
+
+Not optional, and the failure is silent until it costs a user a request.
+Replicate takes a file input as a URL, or inline as a data URI up to **256 KB**
+(`DATA_URI_LIMIT`). A photo taken on a phone is 2–5 MB, so with these unset
+*every* image request from a mobile client fails at the adapter:
+
+```bash
+#   PUBLIC_BLOB_BASE_URL=https://blob.example.org   # resolves to this service
+#   PUBLIC_BLOB_SIGNING_KEY=$(openssl rand -hex 32)
+```
+
+Both, not one: without a key no link is ever issued (fail closed), so a base URL
+on its own delivers nothing. The host needs its own nginx server block and
+certificate pointed at the same upstream — see section 6.
+
+The installation says so itself when they are missing: «Обзор» puts a line in the
+work list, the provider reads «настроен наполовину» on «Подключения», and
+`POST /api/v1/plan` for a task that carries a file returns it in `warnings`.
+Check after the first start:
+
+```bash
+curl -fsS -u <web-user> https://router.example.com/api/v1/health/summary | jq .work
+```
+
 ## 5. Install the service
 
 ```bash

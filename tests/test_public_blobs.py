@@ -101,3 +101,127 @@ def test_a_signed_link_is_never_cached(client, monkeypatch):
     assert response.status_code == 200
     assert response.content == b"payload"
     assert response.headers["cache-control"] == "private, no-store"
+
+
+# --- saying so before the money is spent -----------------------------------
+# The failure these describe is entirely silent: the adapter's message is clear
+# but only appears on the first real request from a phone, long after the key was
+# entered, the model adopted and the operator convinced the installation works.
+class _TakesFilesByLink:
+    """A provider shaped like Replicate: files inline up to a cap, URL above it."""
+
+    inline_file_limit_bytes = 256 * 1024
+
+    def __init__(self, configured: bool = True) -> None:
+        self._configured = configured
+
+    def is_configured(self) -> bool:
+        return self._configured
+
+
+class _TakesNoFiles:
+    inline_file_limit_bytes = None
+
+    def is_configured(self) -> bool:
+        return True
+
+
+def _bare(**kw) -> Settings:
+    kw.setdefault("PUBLIC_BLOB_BASE_URL", None)
+    kw.setdefault("PUBLIC_BLOB_SIGNING_KEY", None)
+    return Settings(**kw)
+
+
+def test_both_settings_are_named_because_either_alone_delivers_nothing():
+    assert public_blobs.missing_settings(_bare()) == [
+        "PUBLIC_BLOB_BASE_URL", "PUBLIC_BLOB_SIGNING_KEY"
+    ]
+    half = _bare(PUBLIC_BLOB_BASE_URL="https://blob.example.org")
+    assert public_blobs.missing_settings(half) == ["PUBLIC_BLOB_SIGNING_KEY"]
+    # And a half-configured installation still issues no link at all.
+    assert public_blobs.make_url(half, "abc.png") is None
+    assert public_blobs.missing_settings(_settings()) == []
+
+
+def test_a_provider_that_takes_files_by_link_is_warned_about():
+    warning = public_blobs.provider_warning(_bare(), _TakesFilesByLink())
+    assert "256 КБ" in warning
+    assert "PUBLIC_BLOB_BASE_URL" in warning and "PUBLIC_BLOB_SIGNING_KEY" in warning
+
+
+def test_nothing_is_said_when_there_is_nothing_to_say():
+    """Three ways this is not a problem, and a warning in any of them is noise."""
+    # Configured properly.
+    assert public_blobs.provider_warning(_settings(), _TakesFilesByLink()) is None
+    # The provider has no key, so it cannot be called at all — the console
+    # already says «ключа нет» and a second line about files adds nothing.
+    assert public_blobs.provider_warning(_bare(), _TakesFilesByLink(False)) is None
+    # The provider does not take files by link.
+    assert public_blobs.provider_warning(_bare(), _TakesNoFiles()) is None
+
+
+def test_the_installation_roll_up_names_the_provider():
+    warnings = public_blobs.installation_warnings(
+        _bare(), {"replicate": _TakesFilesByLink(), "deepseek": _TakesNoFiles()}
+    )
+    assert len(warnings) == 1
+    assert warnings[0].startswith("replicate: ")
+
+
+def _pretend_replicate_is_configured(core, monkeypatch) -> None:
+    """The real adapter with a token, and no public host. Patching the token
+    rather than substituting a stub: the whole point is that the warning fires
+    for the provider the installation actually carries."""
+    monkeypatch.setattr(core.adapters["replicate"], "_api_token", "r8_test")
+    monkeypatch.setattr(core.settings, "public_blob_base_url", None)
+    monkeypatch.setattr(core.settings, "public_blob_signing_key", None)
+
+
+def test_the_plan_always_carries_the_warnings_field(client):
+    """The console reads it unconditionally; an absent key would be a branch on
+    the server's age."""
+    plan = client.post("/api/v1/plan", json={"task": "image-to-image"}).json()
+    assert plan["warnings"] == []
+
+
+def test_the_work_list_says_it_when_files_cannot_be_delivered(client, monkeypatch):
+    from router_mcp.runtime import get_core
+
+    core = get_core()
+    _pretend_replicate_is_configured(core, monkeypatch)
+    work = client.get("/api/v1/health/summary").json()["work"]
+    assert any("PUBLIC_BLOB_BASE_URL" in item["text"] for item in work)
+
+
+def test_a_provider_carries_its_own_warning_in_capabilities(client, monkeypatch):
+    """Configured and still unable to do what it was added for: the console needs
+    its own word for that, and «настроен» is not it."""
+    from router_mcp.runtime import get_core
+
+    core = get_core()
+    _pretend_replicate_is_configured(core, monkeypatch)
+    caps = client.get("/api/v1/capabilities").json()
+    replicate = next(p for p in caps["providers"] if p["id"] == "replicate")
+    assert replicate["warnings"] and "PUBLIC_BLOB_BASE_URL" in replicate["warnings"][0]
+
+
+def test_the_plan_flags_it_for_a_task_that_carries_a_file(client, monkeypatch):
+    """Через `_plan_warnings` напрямую: план предупреждает про того поставщика,
+    который действительно был бы вызван, и только для задачи с файлом."""
+    from types import SimpleNamespace
+
+    from router_mcp.domain.task import Task
+    from router_mcp.runtime import get_core
+    from router_mcp.web.api import _plan_warnings
+
+    core = get_core()
+    _pretend_replicate_is_configured(core, monkeypatch)
+    fake = SimpleNamespace(
+        adapters=core.adapters, settings=core.settings
+    )
+    plan = {"will_call": {"provider": "replicate", "model_id": "x/y"}}
+    assert "PUBLIC_BLOB_BASE_URL" in _plan_warnings(fake, Task.IMAGE_TO_IMAGE, plan)[0]
+    # Text in, text out: none of this applies and a warning would be noise.
+    assert _plan_warnings(fake, Task.TEXT_TO_TEXT, plan) == []
+    # Nothing would be called: the plan already says so, in its own field.
+    assert _plan_warnings(fake, Task.IMAGE_TO_IMAGE, {"will_call": None}) == []

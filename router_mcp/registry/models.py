@@ -101,6 +101,14 @@ class RegistryModel:
     # half the time. Empty means "bind attachments positionally", which is what
     # every single-image model wants and what the router did before roles.
     input_map: dict[str, str] = field(default_factory=dict)
+    # Parameter names this model accepts on top of the adapter's declared set,
+    # e.g. `("scale",)` for an upscaler or `("category",)` for a try-on model.
+    # An allowlist, per model, written by a human: adding an upscaler used to
+    # mean editing `SUPPORTED_PARAMS` in the adapter, so an operator could add
+    # the model through the console but not reach its own knobs. It is still not
+    # a passthrough — a name the model's schema has no property for is dropped
+    # and reported, exactly like a declared one.
+    extra_params: tuple[str, ...] = ()
     extra: dict = field(default_factory=dict)
 
     # Provenances under which a zero price means "confirmed free" rather than

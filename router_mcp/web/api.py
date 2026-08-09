@@ -16,6 +16,7 @@ import base64
 import csv
 import io
 import json
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -31,6 +32,7 @@ from router_mcp.domain.messages import (
 )
 from router_mcp.domain.modality import Modality
 from router_mcp.domain.task import (
+    Media,
     Task,
     media_of,
     resolve_task,
@@ -44,6 +46,10 @@ from router_mcp.web.views import page, run_from_dispatch, run_from_log
 
 api_router = APIRouter()
 blob_router = APIRouter()
+
+# What a model input property can be called. Deliberately strict: the value is
+# stored in a comma-joined column and ends up as a key in a provider's JSON body.
+_PARAM_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 def parse_fallback(value: Any) -> FallbackPolicy | None:
@@ -207,7 +213,30 @@ async def api_plan(body: PlanBody) -> dict[str, Any]:
         params=body.params or {},
         fallback=parse_fallback(body.fallback),
     )
-    return await get_core().router.explain(request)
+    core = get_core()
+    plan = await core.router.explain(request)
+    plan["warnings"] = _plan_warnings(core, task, plan)
+    return plan
+
+
+def _plan_warnings(core, task: Task, plan: dict[str, Any]) -> list[str]:
+    """What would stop this request that the ladder cannot see.
+
+    The dry run is supposed to answer «сработает ли», and a clean plan for a task
+    whose files cannot be delivered is a confident wrong answer. Scoped to the
+    provider that would actually be called, and only to tasks that carry a file
+    at all — a text prompt needs none of this.
+    """
+    signature = task.signature
+    if not ({Media.IMAGE, Media.AUDIO, Media.VIDEO, Media.FILE}
+            & (signature.requires | signature.optional)):
+        return []
+    provider_id = (plan.get("will_call") or {}).get("provider")
+    adapter = core.adapters.get(provider_id) if provider_id else None
+    if adapter is None:
+        return []
+    warning = public_blobs.provider_warning(core.settings, adapter)
+    return [warning] if warning else []
 
 
 @api_router.get("/health/summary")
@@ -979,6 +1008,10 @@ async def api_registry_tree(
                 # a model rejects a level it does not know with a 400 — so a
                 # pinned model narrows the select to its own levels.
                 "param_options": _model_param_options(m),
+                # Knobs only this model has. The pair-level matrix cannot carry
+                # them — that is the whole point of a per-model allowlist — so
+                # the picker hands them to the form when the model is pinned.
+                "extra_params": list(m.extra_params),
                 # The variant carries its price, because "cheap" as a word tells
                 # an operator nothing they can act on.
                 "label": f"{variant or 'базовая'} · ${(m.prompt_price + m.completion_price) * 1e6:.3f}/1M",
@@ -1039,6 +1072,9 @@ class ModelPatch(BaseModel):
     # is why it is not folded in with the `is not None` fields below: an operator
     # taking a wrong mapping back off a row is a real edit.
     input_map: dict[str, str] | None = None
+    # This model's own knobs, on top of the adapter's declared set. `[]` clears
+    # it, for the same reason `input_map: {}` does.
+    extra_params: list[str] | None = None
     # Optimistic locking: the revision the operator's copy of the row carried.
     revision: int | None = None
     # Drop the local price and take the catalog's again on the next sync.
@@ -1117,6 +1153,19 @@ async def api_patch_model(
             )
         cleaned = {k: str(v).strip() for k, v in body.input_map.items() if str(v).strip()}
         fields["input_map"] = json.dumps(cleaned, ensure_ascii=False)
+
+    if body.extra_params is not None:
+        names = [str(p).strip() for p in body.extra_params]
+        bad = sorted({n for n in names if n and not _PARAM_NAME_RE.fullmatch(n)})
+        if bad:
+            # The column is comma-joined and the name reaches a provider's JSON
+            # body, so anything that is not a plain property name is a mistake
+            # worth stopping here.
+            raise BadRequest(
+                f"Не имена параметров: {', '.join(bad)}. Ожидаются имена входов "
+                f"модели: латиница, цифры и подчёркивание"
+            )
+        fields["extra_params"] = ",".join(dict.fromkeys(n for n in names if n))
 
     if not fields:
         raise BadRequest("Nothing to update")

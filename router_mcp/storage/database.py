@@ -185,10 +185,11 @@ def _model_to_row(m: RegistryModel) -> dict[str, Any]:
         # traffic, and a catalog sync writing this row must not touch it. It is
         # set by `confirm_registry_model` alone.
         #
-        # `input_map` is absent for the same reason, one step further: only a
-        # human knows that `garm_img` is the garment, so a sync writing the empty
-        # default here would erase that knowledge on every catalog refresh. It is
-        # set by `update_registry_model` alone.
+        # `input_map` and `extra_params` are absent for the same reason, one step
+        # further: only a human knows that `garm_img` is the garment or that this
+        # upscaler's `scale` is worth exposing, so a sync writing the empty
+        # defaults here would erase that on every catalog refresh. Both are set
+        # by `update_registry_model` alone.
     }
 
 
@@ -240,6 +241,11 @@ def _row_to_model(row: aiosqlite.Row) -> RegistryModel:
         revision=row["revision"],
         confirmed_at=_col(row, "confirmed_at"),
         input_map=_json_map(_col(row, "input_map")),
+        extra_params=tuple(
+            part.strip()
+            for part in str(_col(row, "extra_params") or "").split(",")
+            if part.strip()
+        ),
     )
 
 
@@ -351,6 +357,10 @@ class Database:
                     -- JSON: attachment role -> this model's own input property.
                     -- Only a human can fill it in; empty means bind positionally.
                     input_map TEXT NOT NULL DEFAULT '{}',
+                    -- Comma-joined parameter names this model accepts on top of
+                    -- the adapter's declared set. An allowlist, never a
+                    -- passthrough; also human-only.
+                    extra_params TEXT NOT NULL DEFAULT '',
                     -- Bumped on every write. The optimistic lock counts on it
                     -- rather than on updated_at: two edits inside the same
                     -- second carry the same timestamp and the lock would pass.
@@ -481,6 +491,9 @@ class Database:
             # Which input property each attachment role binds to. Empty on every
             # existing row, which is exactly the positional behaviour they had.
             "input_map": "TEXT NOT NULL DEFAULT '{}'",
+            # Which of its own knobs this model lets through. Empty everywhere,
+            # which is the adapter-only set every existing row had.
+            "extra_params": "TEXT NOT NULL DEFAULT ''",
         },
         "request_logs": {
             "finish_reason": "TEXT",
@@ -861,6 +874,9 @@ class Database:
             # Same reason, for the input properties: the schema lists
             # `human_img` and `garm_img` and never says which is the garment.
             "input_map",
+            # And for this model's own knobs: `scale` on an upscaler is real and
+            # useful, and reaching it used to require editing the adapter.
+            "extra_params",
         }
     )
 

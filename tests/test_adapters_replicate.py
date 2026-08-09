@@ -70,10 +70,10 @@ def _info(adapter, slug="black-forest-labs/flux-schnell", schema=FLUX_SCHEMA, **
     return info
 
 
-def _model(slug="black-forest-labs/flux-schnell") -> RegistryModel:
+def _model(slug="black-forest-labs/flux-schnell", **kw) -> RegistryModel:
     return RegistryModel(
         service_provider_id="replicate", model_provider="black-forest-labs",
-        model_id=slug, display_name=slug, tasks=(Task.TEXT_TO_IMAGE,),
+        model_id=slug, display_name=slug, tasks=(Task.TEXT_TO_IMAGE,), **kw,
     )
 
 
@@ -332,7 +332,7 @@ async def test_try_on_binds_the_garment_by_the_registry_map_not_by_position():
             ],
         ),
         info,
-        {"image": "human_img", "garment": "garm_img"},
+        _model("cuuupid/idm-vton", input_map={"image": "human_img", "garment": "garm_img"}),
     )
     assert payload["human_img"].endswith(_b64("person"))
     assert payload["garm_img"].endswith(_b64("dress"))
@@ -350,7 +350,7 @@ async def test_the_binding_does_not_depend_on_the_order_they_arrive_in():
             ],
         ),
         info,
-        {"image": "human_img", "garment": "garm_img"},
+        _model("cuuupid/idm-vton", input_map={"image": "human_img", "garment": "garm_img"}),
     )
     assert payload["human_img"].endswith(_b64("person"))
     assert payload["garm_img"].endswith(_b64("dress"))
@@ -447,6 +447,78 @@ async def test_a_named_attachment_keeps_its_property_from_a_loose_one():
     )
     assert payload["mask"].endswith(_b64("m"))
     assert payload["image"].endswith(_b64("pic"))
+
+
+# --- the per-model parameter allowlist -------------------------------------
+UPSCALER_SCHEMA = {
+    "properties": {
+        "image": {"type": "string", "format": "uri"},
+        "scale": {"type": "number", "minimum": 1, "maximum": 10},
+    },
+    "required": ["image"],
+}
+
+
+async def test_a_knob_the_row_allows_reaches_the_model():
+    """Adding an upscaler used to mean editing `_EDIT_PARAMS` in this file."""
+    adapter = _adapter()
+    info = _info(adapter, slug="nightmareai/real-esrgan", schema=UPSCALER_SCHEMA)
+    payload, dropped = await adapter._build_input(
+        RouterRequest(
+            task=Task.IMAGE_TO_IMAGE, external_user_id="u", params={"scale": 4},
+            attachments=[Attachment(kind="image", mime="image/png", data=b"pic")],
+        ),
+        info,
+        _model("nightmareai/real-esrgan", extra_params=("scale",)),
+    )
+    assert payload["scale"] == 4
+    assert dropped == []
+
+
+async def test_an_allowed_knob_is_still_held_against_the_models_own_schema():
+    """An allowlist is not a passthrough: the value is checked here, so a bad one
+    fails with the range in the message instead of costing a round trip."""
+    adapter = _adapter()
+    info = _info(adapter, slug="nightmareai/real-esrgan", schema=UPSCALER_SCHEMA)
+    with pytest.raises(ProviderError, match="maximum"):
+        await adapter._build_input(
+            RouterRequest(
+                task=Task.IMAGE_TO_IMAGE, external_user_id="u", params={"scale": 40},
+                attachments=[Attachment(kind="image", mime="image/png", data=b"pic")],
+            ),
+            info,
+            _model("nightmareai/real-esrgan", extra_params=("scale",)),
+        )
+
+
+async def test_a_knob_the_row_allows_but_the_model_lacks_is_reported():
+    adapter = _adapter()
+    info = _info(adapter, slug="x/plain", schema=REMBG_SCHEMA)
+    payload, dropped = await adapter._build_input(
+        RouterRequest(
+            task=Task.IMAGE_TO_IMAGE, external_user_id="u", params={"scale": 4},
+            attachments=[Attachment(kind="image", mime="image/png", data=b"pic")],
+        ),
+        info,
+        _model("x/plain", extra_params=("scale",)),
+    )
+    assert dropped == ["scale"]
+    assert "scale" not in payload
+
+
+async def test_a_knob_no_row_allows_never_reaches_the_payload():
+    """The gate is still shut for everything else: the allowlist is per model and
+    written by a human, not a free-for-all."""
+    adapter = _adapter()
+    info = _info(adapter, slug="nightmareai/real-esrgan", schema=UPSCALER_SCHEMA)
+    payload, _ = await adapter._build_input(
+        RouterRequest(
+            task=Task.IMAGE_TO_IMAGE, external_user_id="u", params={"scale": 4},
+            attachments=[Attachment(kind="image", mime="image/png", data=b"pic")],
+        ),
+        info,
+    )
+    assert "scale" not in payload
 
 
 def _b64(text: str) -> str:

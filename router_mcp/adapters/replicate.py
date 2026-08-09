@@ -31,7 +31,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from router_mcp.adapters.base import ProviderAdapter, RetryClientMixin
+from router_mcp.adapters.base import ProviderAdapter, RetryClientMixin, merge_params
 from router_mcp.domain import progress
 from router_mcp.domain.errors import (
     AccessDenied,
@@ -137,6 +137,9 @@ class ReplicateAdapter(RetryClientMixin, ProviderAdapter):
         Task.TEXT_TO_VIDEO,
         Task.IMAGE_TO_VIDEO,
     }
+    # Above this, a file has to be a URL Replicate can fetch. Declared so the
+    # console can warn before the first real request instead of after it.
+    inline_file_limit_bytes = DATA_URI_LIMIT
 
     # Declared knobs, filtered per model against its own schema: a name that this
     # model has no property for is dropped and reported, never sent. A wide-open
@@ -223,7 +226,7 @@ class ReplicateAdapter(RetryClientMixin, ProviderAdapter):
         if not self._api_token:
             raise NotConfigured("REPLICATE_API_TOKEN is not set")
         info = await self._model_info(model.model_id)
-        payload, dropped = await self._build_input(request, info, model.input_map)
+        payload, dropped = await self._build_input(request, info, model)
 
         progress.emit(
             "replicate", "создаём предсказание",
@@ -238,7 +241,7 @@ class ReplicateAdapter(RetryClientMixin, ProviderAdapter):
             # breaks silently until the process restarts.
             logger.info("Replicate version for %s is stale, refetching", info.slug)
             info = await self._model_info(info.slug, force=True)
-            payload, dropped = await self._build_input(request, info, model.input_map)
+            payload, dropped = await self._build_input(request, info, model)
             prediction = await self._create(info, payload)
 
         if _status(prediction) not in TERMINAL:
@@ -520,15 +523,19 @@ class ReplicateAdapter(RetryClientMixin, ProviderAdapter):
         self,
         request: RouterRequest,
         info: ModelInfo,
-        input_map: dict[str, str] | None = None,
+        row: RegistryModel | None = None,
     ) -> tuple[dict[str, Any], list[str]]:
         """Normalized fields onto this model's own property names, plus the
         declared knobs its schema actually has.
 
-        `input_map` is the registry row's attachment-role map; empty (the default,
-        and what a caller with no row means) binds attachments positionally.
+        Two things come off the registry row and nothing else does: `input_map`,
+        which says what each attachment role binds to, and `extra_params`, the
+        per-model allowlist of knobs on top of the adapter's own. Without a row
+        (the tests, and any caller that has none) attachments bind positionally
+        and only the adapter's declared parameters are read.
         """
         props = info.properties
+        input_map = row.input_map if row else {}
         payload: dict[str, Any] = {}
         dropped: list[str] = []
 
@@ -569,7 +576,7 @@ class ReplicateAdapter(RetryClientMixin, ProviderAdapter):
         roled = [att for att in request.attachments if att.role]
         loose = [att for att in request.attachments if not att.role]
         for att in roled:
-            key = _role_key(att.role or "", props, input_map or {}, taken=set(payload))
+            key = _role_key(att.role or "", props, input_map, taken=set(payload))
             if key is None:
                 raise ProviderError(
                     f"Replicate model {info.slug} has no input for attachment role "
@@ -585,7 +592,12 @@ class ReplicateAdapter(RetryClientMixin, ProviderAdapter):
                 continue
             payload[key] = await self._file_reference(att, info)
 
-        declared = self.SUPPORTED_PARAMS.get(request.task, ())
+        # The adapter's declared knobs plus this row's allowlist. Widening the
+        # set does not widen the gate: a name lands in the payload only if the
+        # model's own schema has a property for it, and only after `_checked`
+        # has held the value against that property's enum and range. And the
+        # payload is `input` — a model property, never an API control.
+        declared = merge_params(self.SUPPORTED_PARAMS.get(request.task, ()), row)
         for key in declared:
             if key not in request.params:
                 continue

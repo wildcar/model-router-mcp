@@ -4,6 +4,13 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-08-09 · свои параметры модели и громкий отказ без публичной выдачи
+- What: у строки реестра появился `extra_params` — список имён, который складывается с `SUPPORTED_PARAMS` адаптера только для этой модели (значение по-прежнему проверяется по схеме, в `ignored_params` не попадает, поле рисуется формой из `/registry/tree`); адаптер объявляет `inline_file_limit_bytes`, и незаданные `PUBLIC_BLOB_BASE_URL`/`PUBLIC_BLOB_SIGNING_KEY` теперь видны в `/capabilities`, `/health/summary` и `/plan`.
+- Why: задачи 3 и 4 от ИИшной: апскейлер нельзя было завести без правки адаптера, а без публичной выдачи молча падал любой запрос с фотографией — сообщение адаптера появлялось только на первом настоящем прогоне, когда ключ и модель уже оплачены.
+- Files: router_mcp/registry/models.py, router_mcp/storage/database.py, router_mcp/adapters/base.py, router_mcp/adapters/replicate.py, router_mcp/routing/router.py, router_mcp/web/api.py, router_mcp/web/public_blobs.py, router_mcp/web/health.py, router_mcp/web/capabilities.py, router_mcp/web/static/js/*, deploy/DEPLOY.md, .env.example, tests/*
+- Verified: pytest 393 прошёл, node-харнесс зелёный; прод-`.env` не трогал.
+- Next: после выката посмотреть список дел на «Обзоре» — он сам скажет, заданы ли PUBLIC_BLOB_* на проде.
+
 ## 2026-08-09 · роли вложений и `image-to-image` без промпта
 - What: у `image-to-image` текст стал необязательным, а модель без prompt-свойства кладёт лишний текст в `ignored_params` вместо отказа (задача, которой текст обязателен, отказывает как раньше); у вложения появилась роль (`image`/`mask`/`face`/`garment`/`reference`/`style`), строка реестра — карта `input_map`, роли привязываются раньше позиционных, нераспознанная роль это ошибка с перечнем входов модели.
 - Why: задачи 1 и 2 от ИИшной: удаление фона и апскейл были недоступны с обеих сторон, а примерочная, замена лица и инпейнт получали картинки по порядку кортежа, то есть какая из двух фотографий одежда решалось подбрасыванием монеты; маску больше 256 КБ доставить было нечем.

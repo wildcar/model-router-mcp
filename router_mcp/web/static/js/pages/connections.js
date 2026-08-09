@@ -31,6 +31,15 @@ function stateCell(provider) {
       title: 'Диспетчер откажет: у адаптера нет ключа или бинарника',
     });
   }
+  // Key present, and still unable to do what it was added for. Its own word,
+  // because «рабочий» here is how an operator finds out only from the first
+  // failed request that files never had a way to reach the provider.
+  if (provider.warnings?.length) {
+    return el('td', 'настроен наполовину', {
+      className: 'warn',
+      title: provider.warnings.join('\n'),
+    });
+  }
   return el('td', 'рабочий', { className: 'ok' });
 }
 

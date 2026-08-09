@@ -21,8 +21,54 @@ from __future__ import annotations
 import hashlib
 import hmac
 import time
+from typing import Any
 
 from router_mcp.config import Settings
+
+
+def missing_settings(settings: Settings) -> list[str]:
+    """Environment variables still needed before any public link can be issued.
+
+    Both, not one: a base URL without a signing key issues nothing (fail closed,
+    see `make_url`), so naming only the URL would send an operator to set half of
+    it and watch the same failure again.
+    """
+    missing = []
+    if not (settings.public_blob_base_url or "").strip():
+        missing.append("PUBLIC_BLOB_BASE_URL")
+    if not (settings.public_blob_signing_key or "").strip():
+        missing.append("PUBLIC_BLOB_SIGNING_KEY")
+    return missing
+
+
+def provider_warning(settings: Settings, adapter: object) -> str | None:
+    """What is wrong for this provider, in the operator's words, or None.
+
+    The failure it prevents is entirely silent until money has been spent: the
+    adapter's message is clear, but it only appears on the first real request
+    from a phone, long after the key was entered and the model was adopted.
+    """
+    limit = getattr(adapter, "inline_file_limit_bytes", None)
+    if limit is None or not adapter.is_configured():  # type: ignore[attr-defined]
+        return None
+    missing = missing_settings(settings)
+    if not missing:
+        return None
+    return (
+        f"Файлы больше {limit // 1024} КБ этот поставщик принимает только ссылкой, "
+        f"а публичная выдача не настроена: не задано {', '.join(missing)}. "
+        f"Снимок с телефона — это 2–5 МБ, то есть не уйдёт ни один."
+    )
+
+
+def installation_warnings(settings: Settings, adapters: dict[str, Any]) -> list[str]:
+    """The same warning, once per affected provider, for the whole installation."""
+    out = []
+    for provider_id in sorted(adapters):
+        warning = provider_warning(settings, adapters[provider_id])
+        if warning:
+            out.append(f"{provider_id}: {warning}")
+    return out
 
 
 def sign(ref: str, expires_at: int, key: str) -> str:

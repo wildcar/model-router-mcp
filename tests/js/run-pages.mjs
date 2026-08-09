@@ -255,6 +255,9 @@ await runPage('models', 'models', async (doc, calls, settleNow) => {
   check('модели: сохранённая привязка подставлена в поле',
     doc.getElementById('edit-role-garment').value === 'garm_img',
     doc.getElementById('edit-role-garment').value);
+  check('модели: свои параметры модели подставлены строкой',
+    doc.getElementById('edit-extra-params').value === 'category, garment_des',
+    doc.getElementById('edit-extra-params').value);
   doc.querySelector('#models tbody').children[0].dispatch('click');
 
   // «Спросить поставщика»: the live list, and adopting from it.
@@ -286,6 +289,10 @@ await runPage('connections', 'connections', async (doc, _calls, settleNow) => {
     body.textContent.includes('_API_KEY') || body.textContent.includes('_COMMAND'));
   check('подключения: значение ключа не показано', !body.textContent.includes('sk-'));
   check('подключения: колонка пробы ключа есть', body.textContent.includes('Проверить'));
+  // Key present and still unable to do the job: its own word, because «рабочий»
+  // here is how an operator learns from a failed run instead of from the screen.
+  check('подключения: поставщик без публичной выдачи назван настроенным наполовину',
+    body.textContent.includes('настроен наполовину'));
 
   doc.getElementById('tab-mcp').dispatch('click');
   await settleNow();
@@ -357,6 +364,11 @@ await runPage('run', 'run', async (doc, calls, settleNow) => {
   check('выбор: единственный вариант семьи заполняет model_id сам',
     doc.getElementById('model-id').value === 'deepseek-v4-flash',
     `model-id="${doc.getElementById('model-id').value}"`);
+  // A knob only this model has, allowed on its registry row: the pair-level
+  // matrix cannot carry it, so the form takes it from the picker.
+  check('прогон: свой параметр закреплённой модели показан полем',
+    doc.getElementById('params').textContent.includes('logprobs'),
+    doc.getElementById('params').textContent.slice(0, 200));
   // And walking away from the pick does not silently pin the old id.
   doc.getElementById('sel-family').value = '';
   doc.getElementById('sel-family').dispatch('change');
@@ -366,6 +378,12 @@ await runPage('run', 'run', async (doc, calls, settleNow) => {
     `model-id="${doc.getElementById('model-id').value}"`);
 
   doc.getElementById('show-plan').dispatch('click');
+  await settleNow();
+  // A clean plan for a request whose file cannot be delivered is a confident
+  // wrong answer, and «сработает ли» is the question this screen answers.
+  check('план: предупреждение о недоставляемых файлах показано',
+    text(doc, 'plan').includes('PUBLIC_BLOB_BASE_URL'),
+    text(doc, 'plan').slice(0, 200));
 
   // Multi-model mode: chips in, one run per chip, one table row per run.
   doc.getElementById('mode-multi').dispatch('click');

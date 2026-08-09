@@ -33,7 +33,8 @@
       "revision": 0,
       "tasks": [
         "text-to-text"
-      ]
+      ],
+      "extra_params": []
     },
     {
       "service_provider": "anthropic-api",
@@ -68,7 +69,8 @@
       "revision": 0,
       "tasks": [
         "text-to-text"
-      ]
+      ],
+      "extra_params": []
     },
     {
       "service_provider": "anthropic-api",
@@ -103,7 +105,8 @@
       "revision": 0,
       "tasks": [
         "text-to-text"
-      ]
+      ],
+      "extra_params": []
     },
     {
       "service_provider": "claude-cli",
@@ -138,7 +141,8 @@
       "revision": 0,
       "tasks": [
         "cli"
-      ]
+      ],
+      "extra_params": []
     },
     {
       "service_provider": "codex-cli",
@@ -173,7 +177,8 @@
       "revision": 0,
       "tasks": [
         "cli"
-      ]
+      ],
+      "extra_params": []
     },
     {
       "service_provider": "codex-oauth",
@@ -208,7 +213,8 @@
       "revision": 0,
       "tasks": [
         "text-to-image"
-      ]
+      ],
+      "extra_params": []
     },
     {
       "service_provider": "replicate",
@@ -247,7 +253,11 @@
       "input_map": {
         "image": "human_img",
         "garment": "garm_img"
-      }
+      },
+      "extra_params": [
+        "category",
+        "garment_des"
+      ]
     }
   ],
   "total": 7,

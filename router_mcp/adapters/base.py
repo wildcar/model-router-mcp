@@ -145,8 +145,29 @@ def truncated_error(
     )
 
 
+def merge_params(
+    declared: tuple[str, ...], model: RegistryModel | None
+) -> tuple[str, ...]:
+    """The adapter's declared parameter names plus this row's own allowlist.
+
+    Order matters and duplicates do not: the adapter's names come first because
+    that is the order the console draws them in, and a row repeating one of them
+    must not make the field appear twice.
+    """
+    if model is None or not model.extra_params:
+        return tuple(declared)
+    out = list(declared)
+    for name in model.extra_params:
+        if name not in out:
+            out.append(name)
+    return tuple(out)
+
+
 def ignored_params(
-    adapter: "ProviderAdapter", task: Task, params: dict[str, Any] | None
+    adapter: "ProviderAdapter",
+    task: Task,
+    params: dict[str, Any] | None,
+    model: RegistryModel | None = None,
 ) -> list[str]:
     """Params the caller sent that this adapter will not read.
 
@@ -154,13 +175,18 @@ def ignored_params(
     so a caller can spend money on a request that quietly ignored half of it.
     Naming the difference is the whole point; when an adapter has not declared
     its parameters we stay silent rather than invent a warning.
+
+    The row's `extra_params` counts as declared here — otherwise a knob an
+    operator deliberately allowed through would be reported as ignored on the
+    very run that honoured it.
     """
     if not params or adapter.SUPPORTED_PARAMS is None:
         return []
     supported = adapter.SUPPORTED_PARAMS.get(task)
     if supported is None:
         return []
-    return sorted(key for key in params if key not in supported)
+    allowed = merge_params(supported, model)
+    return sorted(key for key in params if key not in allowed)
 
 
 class ProviderAdapter(abc.ABC):
@@ -185,6 +211,13 @@ class ProviderAdapter(abc.ABC):
     # `size` and `quality` belong to generating an image, `strength` and `mask`
     # to editing one, and both are billed the same way.
     SUPPORTED_PARAMS: dict[Task, tuple[str, ...]] | None = None
+
+    # The largest file this provider accepts inline; anything above it has to be
+    # handed over as a URL it can fetch, which needs `PUBLIC_BLOB_BASE_URL` and a
+    # signing key. `None` means the provider does not take files by link at all,
+    # and so has nothing to warn about. Declared here rather than checked in
+    # `web/` so the warning names the real number instead of a copy of it.
+    inline_file_limit_bytes: int | None = None
 
     @property
     def supported_modalities(self) -> set[Modality]:

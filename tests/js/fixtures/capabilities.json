@@ -16,7 +16,8 @@
       ],
       "modalities": [
         "chat"
-      ]
+      ],
+      "warnings": []
     },
     {
       "id": "claude-cli",
@@ -31,7 +32,8 @@
       ],
       "modalities": [
         "cli"
-      ]
+      ],
+      "warnings": []
     },
     {
       "id": "codex-cli",
@@ -46,7 +48,8 @@
       ],
       "modalities": [
         "cli"
-      ]
+      ],
+      "warnings": []
     },
     {
       "id": "codex-oauth",
@@ -64,7 +67,8 @@
       "modalities": [
         "chat",
         "image"
-      ]
+      ],
+      "warnings": []
     },
     {
       "id": "deepgram",
@@ -79,7 +83,8 @@
       ],
       "modalities": [
         "stt"
-      ]
+      ],
+      "warnings": []
     },
     {
       "id": "deepseek",
@@ -94,7 +99,8 @@
       ],
       "modalities": [
         "chat"
-      ]
+      ],
+      "warnings": []
     },
     {
       "id": "elevenlabs",
@@ -109,7 +115,8 @@
       ],
       "modalities": [
         "tts"
-      ]
+      ],
+      "warnings": []
     },
     {
       "id": "openrouter",
@@ -127,14 +134,15 @@
       "modalities": [
         "chat",
         "image"
-      ]
+      ],
+      "warnings": []
     },
     {
       "id": "replicate",
       "display_name": "Replicate",
       "adapter": "replicate",
-      "enabled": false,
-      "configured": false,
+      "enabled": true,
+      "configured": true,
       "env_var": "REPLICATE_API_TOKEN",
       "pricing_url": "https://replicate.com/pricing",
       "tasks": [
@@ -155,6 +163,9 @@
         "stt",
         "tts",
         "video"
+      ],
+      "warnings": [
+        "Файлы больше 256 КБ этот поставщик принимает только ссылкой, а публичная выдача не настроена: не задано PUBLIC_BLOB_BASE_URL, PUBLIC_BLOB_SIGNING_KEY. Снимок с телефона — это 2–5 МБ, то есть не уйдёт ни один."
       ]
     }
   ],

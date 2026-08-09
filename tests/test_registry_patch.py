@@ -215,6 +215,76 @@ def test_api_patch_rejects_a_role_outside_the_vocabulary(client):
     assert "hat" in r.json()["error"]["message"]
 
 
+def test_api_patch_writes_the_per_model_parameter_allowlist(client):
+    """Adding an upscaler must not mean editing the adapter."""
+    client.post(
+        "/api/v1/registry/models",
+        json={
+            "service_provider_id": "openrouter",
+            "model_id": "nightmareai/real-esrgan",
+            "tasks": ["image-to-image"],
+        },
+    )
+    patched = client.patch(
+        "/api/v1/registry/models/openrouter/nightmareai/real-esrgan",
+        json={"extra_params": ["scale", "face_enhance", "scale"]},
+    )
+    assert patched.status_code == 200, patched.text
+    # Order kept, repeat dropped: the console draws these in the order given.
+    assert patched.json()["extra_params"] == ["scale", "face_enhance"]
+
+    cleared = client.patch(
+        "/api/v1/registry/models/openrouter/nightmareai/real-esrgan",
+        json={"extra_params": []},
+    )
+    assert cleared.json()["extra_params"] == []
+
+
+def test_api_patch_rejects_something_that_is_not_a_parameter_name(client):
+    """The column is comma-joined and the name ends up as a key in a provider's
+    JSON body, so a comma or a quote in it is a mistake to stop here."""
+    client.post(
+        "/api/v1/registry/models",
+        json={
+            "service_provider_id": "openrouter",
+            "model_id": "demo/knobs",
+            "tasks": ["image-to-image"],
+        },
+    )
+    r = client.patch(
+        "/api/v1/registry/models/openrouter/demo/knobs",
+        json={"extra_params": ["scale, category"]},
+    )
+    assert r.status_code == 400
+
+
+def test_the_picker_hands_a_models_own_knobs_to_the_form(client):
+    """The pair-level matrix cannot carry them — `scale` belongs to one upscaler,
+    not to every model the provider hosts."""
+    client.post(
+        "/api/v1/registry/models",
+        json={
+            "service_provider_id": "openrouter",
+            "model_id": "demo/upscaler",
+            "tasks": ["image-to-image"],
+        },
+    )
+    client.patch(
+        "/api/v1/registry/models/openrouter/demo/upscaler",
+        json={"extra_params": ["scale"]},
+    )
+    tree = client.get("/api/v1/registry/tree?task=image-to-image").json()
+    variants = [
+        v
+        for provider in tree["children"]
+        for vendor in provider["children"]
+        for family in vendor["children"]
+        for v in family["children"]
+    ]
+    upscaler = next(v for v in variants if v["value"] == "demo/upscaler")
+    assert upscaler["extra_params"] == ["scale"]
+
+
 @pytest.mark.asyncio
 async def test_a_sync_never_erases_a_hand_written_role_map(db):
     """The same rule as the price, one step harder: only a human knows that

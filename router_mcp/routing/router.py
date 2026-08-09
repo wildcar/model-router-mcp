@@ -937,7 +937,12 @@ class ModelRouter:
             provider_request_id=rec.provider_request_id,
             finish_reason=rec.finish_reason,
             steps=steps,
-            ignored_params=ignored_params(used_adapter, request.task, request.params),
+            # The row, not just the adapter: a knob an operator allowed through
+            # `extra_params` must not be reported as ignored on the run that
+            # honoured it.
+            ignored_params=ignored_params(
+                used_adapter, request.task, request.params, model
+            ),
             finished_at=finished_at,
             request_ref=request_ref,
             request_snapshot=request_json or {},

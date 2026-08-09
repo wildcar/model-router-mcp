@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from router_mcp.domain.errors import AccessDenied, NotFound, RouterError
+from router_mcp.web import public_blobs
 
 # How long a probe result is trusted. Long enough that opening the screen
 # repeatedly costs nothing, short enough that a revoked key surfaces the same
@@ -188,6 +189,12 @@ async def summary(core, started_at: float) -> dict[str, Any]:
                     + (f" — переменная {p['env_var']} не задана" if p["env_var"] else ""),
             "href": "/connections",
         })
+    # A key that is present and a provider that still cannot be sent a photograph
+    # are different states, and only the first one had a line here. Without the
+    # public-link settings, every image request from a phone fails at the adapter
+    # — and only on the first real one, after the key, the model and the money.
+    for warning in public_blobs.installation_warnings(core.settings, core.adapters):
+        work.append({"text": warning, "href": "/connections"})
     if blob_bytes > 500 * 1024 * 1024:
         work.append({
             "text": f"файлы ответов занимают {blob_bytes // (1024 * 1024)} МБ, "

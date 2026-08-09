@@ -21,7 +21,7 @@ from router_mcp.adapters.base import ProviderAdapter
 from router_mcp.config import Settings
 from router_mcp.domain.modality import Modality
 from router_mcp.domain.task import TASKS, Task, tasks_for
-from router_mcp.web import labels
+from router_mcp.web import labels, public_blobs
 
 # The envelope shape the console is written against. The browser sends it back,
 # so a page loaded before a restart cannot keep reading a newer API as if it
@@ -366,6 +366,15 @@ def build(
             "modalities": sorted(
                 m.value for m in adapters[p.id].supported_modalities
             ) if p.id in adapters else [],
+            # Configured, enabled, and still unable to do the thing it was added
+            # for. `configured` answers "is the key there" and says nothing about
+            # the settings a *file* needs to reach the provider.
+            "warnings": [
+                w for w in [
+                    public_blobs.provider_warning(settings, adapters[p.id])
+                    if p.id in adapters else None
+                ] if w
+            ],
         }
         for p in providers
     ]

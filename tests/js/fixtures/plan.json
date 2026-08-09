@@ -67,5 +67,8 @@
       "reason": null
     }
   ],
-  "task": "text-to-text"
+  "task": "text-to-text",
+  "warnings": [
+    "Файлы больше 256 КБ этот поставщик принимает только ссылкой, а публичная выдача не настроена: не задано PUBLIC_BLOB_BASE_URL."
+  ]
 }

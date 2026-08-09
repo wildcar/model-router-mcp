@@ -50,6 +50,8 @@ def model_to_dict(m: RegistryModel) -> dict[str, Any]:
         # Which of this model's input properties each attachment role binds to.
         # Empty means positional binding, which is every single-image model.
         "input_map": dict(m.input_map),
+        # Knobs this model accepts beyond the adapter's declared set.
+        "extra_params": list(m.extra_params),
         # Sent back on an edit as an optimistic lock: a second-resolution
         # timestamp cannot tell two edits in the same second apart.
         "revision": m.revision,

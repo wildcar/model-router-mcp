@@ -9,9 +9,10 @@ back from the answer to the code (§5 of docs/UI_CONCEPT_v2.md).
 
 from __future__ import annotations
 
-from router_mcp.adapters.base import ProviderAdapter, ignored_params
+from router_mcp.adapters.base import ProviderAdapter, ignored_params, merge_params
 from router_mcp.domain.modality import Modality
 from router_mcp.domain.task import Task
+from router_mcp.registry.models import RegistryModel
 from router_mcp.runtime import get_core
 from router_mcp.web import capabilities
 
@@ -133,3 +134,35 @@ def test_ignored_params_stays_quiet_when_nothing_was_declared():
     """Better silent than inventing a warning about an adapter we know nothing
     about."""
     assert ignored_params(_Undeclared(), Task.TEXT_TO_TEXT, {"seed": 1}) == []
+
+
+class _Declared(_Undeclared):
+    SUPPORTED_PARAMS = {Task.TEXT_TO_TEXT: ("temperature",)}
+
+
+def _row(**kw) -> RegistryModel:
+    return RegistryModel(
+        service_provider_id="x", model_provider="x", model_id="x/y",
+        display_name="x/y", tasks=(Task.TEXT_TO_TEXT,), **kw,
+    )
+
+
+def test_a_knob_the_row_allows_is_not_reported_as_ignored():
+    """Otherwise the run that honoured the operator's own allowlist would warn
+    that it ignored it."""
+    params = {"temperature": 0.2, "scale": 4}
+    assert ignored_params(_Declared(), Task.TEXT_TO_TEXT, params) == ["scale"]
+    assert ignored_params(
+        _Declared(), Task.TEXT_TO_TEXT, params, _row(extra_params=("scale",))
+    ) == []
+
+
+def test_a_knob_outside_the_allowlist_is_still_reported():
+    assert ignored_params(
+        _Declared(), Task.TEXT_TO_TEXT, {"webhook": "x"}, _row(extra_params=("scale",))
+    ) == ["webhook"]
+
+
+def test_merge_params_keeps_order_and_drops_repeats():
+    assert merge_params(("a", "b"), _row(extra_params=("b", "c"))) == ("a", "b", "c")
+    assert merge_params(("a",), None) == ("a",)

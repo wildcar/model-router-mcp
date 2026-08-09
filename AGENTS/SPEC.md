@@ -444,6 +444,29 @@ Blobs render inline only for `image/*` and `audio/*`; everything else is
 immutable long cache (the ref is generated per payload) and byte-range support
 so an audio player can seek.
 
+### Request files a provider has to fetch (required config)
+
+An adapter declares `inline_file_limit_bytes` when it takes file inputs by URL
+above some inline cap — Replicate's is 256 KB (`DATA_URI_LIMIT`). Above it the
+file must be reachable from outside, which needs **both** `PUBLIC_BLOB_BASE_URL`
+and `PUBLIC_BLOB_SIGNING_KEY`: no key, no link is ever issued, so a base URL on
+its own delivers nothing.
+
+Unset, this is silent until the first real request from a phone (2–5 MB), long
+after the key and the model are in place. So the installation says so itself,
+in the three places an operator is already looking:
+
+- `GET /api/v1/capabilities` — the provider's own `warnings[]`, and «Подключения»
+  reads «настроен наполовину» rather than «рабочий»;
+- `GET /api/v1/health/summary` — one line in `work`, per affected provider;
+- `POST /api/v1/plan` — `warnings[]`, for the provider that would actually be
+  called and only for a task whose signature carries a file. A clean plan for a
+  request that cannot deliver its file is a confident wrong answer, and the dry
+  run exists to say «сработает ли».
+
+`deploy/DEPLOY.md` and `.env.example` state both variables as required whenever
+Replicate is enabled.
+
 ## Console contract (21–23)
 
 Wave 1 of `docs/UI_CONCEPT_v2.md`.
@@ -481,10 +504,22 @@ the catalog dates. Prices arrive as USD per million and are stored per token.
 Concurrency is guarded by a `revision` counter, not by `updated_at`: a
 second-resolution timestamp cannot tell two edits inside one second apart.
 
-`input_map` is patchable and, like `confirmed_at`, is never written by a catalog
-sync: only a human knows that `garm_img` is the garment, and the empty default
-would erase that on every refresh. The model card draws one field per role for
-rows that declare an `image-to-*` task, and `{}` clears the map.
+`input_map` and `extra_params` are patchable and, like `confirmed_at`, are never
+written by a catalog sync: only a human knows that `garm_img` is the garment or
+that this upscaler's `scale` is worth exposing, and the empty defaults would
+erase that on every refresh. The model card draws one field per role for rows
+that declare an `image-to-*` task and one text field for the parameter
+allowlist; `{}` and `[]` clear them.
+
+`extra_params` is a per-model allowlist of parameter names, merged with the
+adapter's `SUPPORTED_PARAMS` for that row alone (`adapters/base.merge_params`).
+It is not a passthrough and does not widen the gate: a name the model's own
+schema has no property for is still dropped and reported, and the value is still
+held against that property's enum and range before anything is sent. It counts
+as declared for `ignored_params`, so the run that honoured it does not also warn
+that it ignored it, and `GET /api/v1/registry/tree` carries it on the variant so
+the «Прогон» form can draw a field the pair-level matrix cannot know about.
+Adding an upscaler is then a registry edit, not an adapter change.
 
 Price protection is keyed on the origin of the **price**, not of the row. A
 number a human vouched for (`price_source_kind` of `manual` or `page`) survives

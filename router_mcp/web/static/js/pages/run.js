@@ -81,16 +81,14 @@ function paramSpecs() {
 // says so. The pair-level list is a union across the provider's models, and a
 // model answers 400 for a value it does not know — so a chosen model narrows the
 // select to its own values. Nothing pinned: null, and the union stands.
-function modelOptions(name) {
+function pinnedVariant() {
   const id = currentModelId();
   if (!id || !tree) return null;
   for (const provider of tree.children) {
     for (const vendor of provider.children) {
       for (const family of vendor.children) {
         for (const variant of family.children) {
-          if (variant.value !== id) continue;
-          const options = variant.param_options?.[name];
-          return options && options.length ? options : null;
+          if (variant.value === id) return variant;
         }
       }
     }
@@ -98,8 +96,29 @@ function modelOptions(name) {
   return null;
 }
 
+function modelOptions(name) {
+  const options = pinnedVariant()?.param_options?.[name];
+  return options && options.length ? options : null;
+}
+
+// Knobs only this model has, allowed through on its registry row. The pair-level
+// matrix cannot carry them: `scale` belongs to one upscaler, not to every model
+// the provider hosts. Free-form text, because nobody has described them —
+// the value is still held against the model's own schema before it is sent.
+function modelExtraSpecs(shown) {
+  return (pinnedVariant()?.extra_params || [])
+    .filter((name) => !shown.has(name))
+    .map((name) => ({
+      name,
+      type: 'text',
+      label: name,
+      help: 'Собственный параметр этой модели, разрешён в её строке реестра',
+    }));
+}
+
 function renderParams() {
-  const specs = paramSpecs();
+  const declared = paramSpecs();
+  const specs = [...declared, ...modelExtraSpecs(new Set(declared.map((s) => s.name)))];
   const host = $('params');
   clear(host);
   $('params-empty').hidden = specs.length > 0;
@@ -387,6 +406,12 @@ function renderPlan(plan) {
     if (plan.blocked) verdict.appendChild(el('div', plan.blocked, { className: 'muted' }));
   }
   host.appendChild(verdict);
+
+  // A clean plan for a request whose file cannot be delivered is a confident
+  // wrong answer, and this screen exists to say «сработает ли».
+  for (const warning of plan.warnings || []) {
+    host.appendChild(el('p', `⚠ ${warning}`, { className: 'hint warn' }));
+  }
 
   if (plan.estimate.assumption) {
     host.appendChild(el('p', `Прикидка: ${plan.estimate.assumption}`, { className: 'hint' }));

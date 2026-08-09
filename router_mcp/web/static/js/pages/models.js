@@ -267,6 +267,32 @@ function inputMapFields(model) {
   return box;
 }
 
+// This model's own knobs. One text field rather than six: the names come from
+// the model's page at the provider and there is no list to offer.
+function extraParamsField(model) {
+  const box = el('div', undefined, { className: 'input-map' });
+  box.appendChild(el('h3', 'Свои параметры модели'));
+  box.appendChild(el('p',
+    'Имена входов модели через запятую, например scale, category. Разрешает то, '
+    + 'что адаптер не объявил: апскейлер добавляется без правки кода. Имя, '
+    + 'которого нет в схеме модели, всё равно не уйдёт и попадёт в '
+    + '«проигнорировано».',
+    { className: 'hint' }));
+  const wrap = el('label', undefined, { className: 'price-field' });
+  const input = el('input', undefined, { id: 'edit-extra-params' });
+  input.value = (model.extra_params || []).join(', ');
+  input.placeholder = 'scale, category';
+  wrap.appendChild(input);
+  box.appendChild(wrap);
+  return box;
+}
+
+function readExtraParams() {
+  const field = $('edit-extra-params');
+  if (!field) return null;
+  return field.value.split(',').map((s) => s.trim()).filter(Boolean);
+}
+
 function readInputMap() {
   const map = {};
   for (const [role] of ROLES) {
@@ -343,6 +369,7 @@ function select(model) {
   }
 
   if (takesImages(model)) card.appendChild(inputMapFields(model));
+  card.appendChild(extraParamsField(model));
 
   const origin = caps.labels.price_source_kinds[model.price_source_kind];
   card.appendChild(el('p', `Откуда: ${origin?.label || model.price_source_kind}`,
@@ -527,6 +554,7 @@ async function save(model) {
   const computeField = $('edit-compute');
   const compute = computeField && computeField.value !== ''
     ? Number(computeField.value) : null;
+  const extra = readExtraParams();
   if (!confirmJump('Промпт', model.prompt_price * 1e6, prompt)) return;
   if (!confirmJump('Ответ', model.completion_price * 1e6, completion)) return;
   const updated = await api(
@@ -540,8 +568,9 @@ async function save(model) {
       // mapping back off the row — and sending it from a chat card would clear
       // a map the operator never saw.
       ...($('edit-role-image') ? { input_map: readInputMap() } : {}),
+      ...(extra === null ? {} : { extra_params: extra }),
       revision: model.revision } });
-  toast('Цена сохранена');
+  toast('Строка сохранена');
   replace(updated);
 }
 
