@@ -20,6 +20,7 @@ import time
 import urllib.error
 import urllib.request
 from contextlib import closing
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -92,6 +93,18 @@ def live_server(tmp_path_factory):
         process.kill()
 
 
+def _stamp(minutes_ago: int) -> str:
+    """A created_at near «now», in the stored format.
+
+    The seed used to carry the literal date it was written on, and the suite
+    rotted on a timer: the MCP clients table reads the last 24 hours, so
+    test_mcp_tab_lists_tools_with_schemas started failing the very next day,
+    and the spend tab (30-day period) would have followed a month later.
+    """
+    stamp = datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)
+    return stamp.isoformat(timespec="seconds")
+
+
 def _seed(db_path: str) -> None:
     """Rows covering the cases the acceptance list asks about."""
     steps = (
@@ -123,7 +136,7 @@ def _seed(db_path: str) -> None:
              "deepseek-v4-pro", "deepseek-v4-pro failed: RateLimited: HTTP 429",
              "ok", "ui", 1042, 318, 1360, 890, 0.000412, "estimated", 8420, 3,
              "req-77f0", "length", "Ответ модели", steps,
-             "2026-07-26T09:22:07+00:00"),
+             _stamp(10)),
         )
         # An error naming the environment variable behind it.
         conn.execute(
@@ -136,7 +149,7 @@ def _seed(db_path: str) -> None:
             ("bot-77", "tts", "elevenlabs", None, "error",
              "NotConfigured: Provider 'elevenlabs' is not configured "
              "[code=not_configured env_var=ELEVENLABS_API_KEY]",
-             "mcp", "computed", "2026-07-26T09:20:03+00:00"),
+             "mcp", "computed", _stamp(12)),
         )
         # A stored XSS attempt as a user label — §20.12.
         conn.execute(
@@ -148,7 +161,7 @@ def _seed(db_path: str) -> None:
             """,
             ('<img src=x onerror="window.__pwned=1">', "chat", "m", "ok", "api",
              0.0, "unpriced", '<script>window.__pwned=1</script>',
-             "2026-07-26T09:10:00+00:00"),
+             _stamp(15)),
         )
     conn.close()
 
@@ -378,7 +391,7 @@ def test_a_run_in_flight_reads_as_running_not_as_an_error(page, live_server):
             ) VALUES (5001,?,?,?,?,?,?,?,?,?)
             """,
             ("live-user", "cli", "codex-cli", "codex", "running", "ui",
-             "cost_unknown", "разбери репозиторий", "2026-07-26T10:00:00+00:00"),
+             "cost_unknown", "разбери репозиторий", _stamp(1)),
         )
     conn.close()
 
