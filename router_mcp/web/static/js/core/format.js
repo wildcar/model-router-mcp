@@ -43,6 +43,13 @@ export function costCell(value, source, labels = null) {
   return node;
 }
 
+// A count with digit grouping: 12 345, not 12345. Locale-formatted here and
+// nowhere else, so every screen groups the same way.
+export function count(value) {
+  if (value === null || value === undefined) return '—';
+  return Number(value).toLocaleString('ru-RU');
+}
+
 // Tokens as a breakdown, not one number: with Anthropic reporting cache reads
 // outside input_tokens and DeepSeek billing a cache hit an order of magnitude
 // cheaper, a single figure misleads by multiples.
@@ -50,13 +57,15 @@ export function tokens(usage) {
   if (!usage) return '—';
   const parts = [];
   if (usage.prompt != null) {
-    parts.push(usage.cache_read ? `${usage.prompt} (из кэша ${usage.cache_read})` : String(usage.prompt));
+    parts.push(usage.cache_read
+      ? `${count(usage.prompt)} (из кэша ${count(usage.cache_read)})` : count(usage.prompt));
   }
   if (usage.completion != null) {
-    parts.push(usage.reasoning ? `${usage.completion} (рассуждение ${usage.reasoning})` : String(usage.completion));
+    parts.push(usage.reasoning
+      ? `${count(usage.completion)} (рассуждение ${count(usage.reasoning)})` : count(usage.completion));
   }
   if (!parts.length && usage.audio_seconds != null) return `${usage.audio_seconds} с`;
-  if (!parts.length && usage.characters != null) return `${usage.characters} симв.`;
+  if (!parts.length && usage.characters != null) return `${count(usage.characters)} симв.`;
   if (!parts.length && usage.images != null) return `${usage.images} изобр.`;
   return parts.join(' / ') || '—';
 }

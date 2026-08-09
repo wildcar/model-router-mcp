@@ -8,7 +8,7 @@
 
 import { api, query } from '../core/api.js';
 import { el, row, clear, fill } from '../core/dom.js';
-import { money } from '../core/format.js';
+import { count as groupDigits, money } from '../core/format.js';
 
 const $ = (id) => document.getElementById(id);
 const BUCKET_HEADS = {
@@ -108,13 +108,13 @@ function renderRows(items) {
     // kinds each get their own column — a combined cell hid which kind of
     // token the money went to.
     const count = (v) => ({
-      text: (v || 0).toLocaleString('ru-RU'),
+      text: groupDigits(v || 0),
       className: v ? 'num' : 'num muted',
     });
     return row([
       { text: item.bucket ?? '—', className: 'mono' },
       { text: item.requests, className: 'num' },
-      { text: item.total_tokens.toLocaleString('ru-RU'), className: 'num' },
+      { text: groupDigits(item.total_tokens), className: 'num' },
       count(item.prompt_tokens),
       count(item.cache_read_tokens),
       count(item.completion_tokens),

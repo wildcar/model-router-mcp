@@ -181,9 +181,11 @@ await runPage('logs', 'logs', async (doc, _calls, settleNow) => {
   check('журнал: обрезанный JSON тоже отдаёт слова',
     cutRow.textContent.includes('Заголовок: почем') && !cutRow.textContent.includes('"role"'),
     cutRow.textContent.slice(-80));
-  check('журнал: счётчики токенов по своим колонкам',
-    okRow.textContent.includes('1200') && okRow.textContent.includes('900')
-      && okRow.textContent.includes('340') && okRow.textContent.includes('64'));
+  // ru-RU groups digits with a non-breaking space: 1200 renders as «1 200».
+  const okDigits = okRow.textContent.replace(/ /g, ' ');
+  check('журнал: счётчики токенов по своим колонкам, с разрядами',
+    okDigits.includes('1 200') && okDigits.includes('900')
+      && okDigits.includes('340') && okDigits.includes('64'), okDigits.slice(0, 160));
 
   // Opening an entry has to answer «что спросили», not only «что ответили»:
   // before the «Запрос» tab the request was nowhere on this screen.

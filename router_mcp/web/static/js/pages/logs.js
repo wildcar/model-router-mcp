@@ -6,7 +6,7 @@
 
 import { api, ApiError, query } from '../core/api.js';
 import { el, row, clear, toast } from '../core/dom.js';
-import { costCell, localTime, money, timeZoneLabel, tokens, duration } from '../core/format.js';
+import { costCell, count, localTime, money, timeZoneLabel, tokens, duration } from '../core/format.js';
 import { idempotencyKey, start, watch } from '../core/runs.js';
 import { readParams, writeParams } from '../core/state.js';
 import { inspector } from '../components/inspector.js';
@@ -114,7 +114,10 @@ function errorRow(r, columns) {
 // money went to. A row billed by seconds, characters or images has no token to
 // show, so its measure takes the first cell instead of four dashes lying zero.
 function tokenCells(r) {
-  const num = (v) => ({ text: v ?? '—', className: v ? 'num' : 'num muted' });
+  const num = (v) => ({
+    text: v === null || v === undefined ? '—' : count(v),
+    className: v ? 'num' : 'num muted',
+  });
   const counted = [r.prompt_tokens, r.completion_tokens, r.cache_read_tokens, r.reasoning_tokens]
     .some((v) => v !== null && v !== undefined);
   if (!counted) {
