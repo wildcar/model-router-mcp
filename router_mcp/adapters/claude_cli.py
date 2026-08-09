@@ -29,7 +29,7 @@ class ClaudeCliAdapter(ProviderAdapter):
     name = "claude-cli"
     env_var = "CLAUDE_COMMAND"
     supported_tasks = {Task.CLI}
-    SUPPORTED_PARAMS = {Task.CLI: ("cwd", "timeout_sec", "model")}
+    SUPPORTED_PARAMS = {Task.CLI: ("cwd", "timeout_sec", "model", "web_search")}
 
     def __init__(
         self,
@@ -59,7 +59,38 @@ class ClaudeCliAdapter(ProviderAdapter):
             raise ProviderError("run_cli requires a non-empty `prompt`")
         cwd = validate_cwd(request.params.get("cwd"), self._allowed_roots, self._default_cwd)
         timeout = int(request.params.get("timeout_sec", self._timeout))
+        command = self._build_command(request, prompt, cwd)
+        requested_model = request.params.get("model")
 
+        result = await run_subprocess(
+            command, cwd=cwd, timeout_sec=timeout, on_line=self._report
+        )
+        data = self._parse_stdout(result.stdout, result.return_code, result.stderr)
+
+        text = data.get("result")
+        if not isinstance(text, str) or not text.strip():
+            raise ProviderError("claude CLI returned no result text")
+        usage = self._usage(data.get("usage"))
+        cost = data.get("total_cost_usd")
+        raw_meta: dict[str, Any] = {
+            "return_code": result.return_code,
+            "engine": "claude",
+            "session_id": data.get("session_id"),
+        }
+        if request.params.get("web_search"):
+            raw_meta["web_search"] = True
+        return RouterResponse(
+            task=Task.CLI,
+            provider=self.name,
+            model_id=str(requested_model or model.model_id),
+            usage=usage,
+            text=text.strip(),
+            cost_override_usd=float(cost) if isinstance(cost, (int, float)) else None,
+            cost_is_notional=self._subscription,
+            raw_meta=raw_meta,
+        )
+
+    def _build_command(self, request: RouterRequest, prompt: str, cwd: str) -> list[str]:
         exe = resolve_executable(self._argv[0]) or self._argv[0]
         # `stream-json` rather than `json`: the same final object arrives, but it
         # is preceded by one line per turn, which is what makes a long run
@@ -73,31 +104,14 @@ class ClaudeCliAdapter(ProviderAdapter):
             command += ["--model", str(requested_model)]
         if request.params.get("cwd"):
             command += ["--add-dir", cwd]
-
-        result = await run_subprocess(
-            command, cwd=cwd, timeout_sec=timeout, on_line=self._report
-        )
-        data = self._parse_stdout(result.stdout, result.return_code, result.stderr)
-
-        text = data.get("result")
-        if not isinstance(text, str) or not text.strip():
-            raise ProviderError("claude CLI returned no result text")
-        usage = self._usage(data.get("usage"))
-        cost = data.get("total_cost_usd")
-        return RouterResponse(
-            task=Task.CLI,
-            provider=self.name,
-            model_id=str(requested_model or model.model_id),
-            usage=usage,
-            text=text.strip(),
-            cost_override_usd=float(cost) if isinstance(cost, (int, float)) else None,
-            cost_is_notional=self._subscription,
-            raw_meta={
-                "return_code": result.return_code,
-                "engine": "claude",
-                "session_id": data.get("session_id"),
-            },
-        )
+        if request.params.get("web_search"):
+            # Explicitly whitelisted, not merely un-forbidden: today the
+            # skip-permissions flag already lets WebSearch run, but the
+            # whitelist keeps working the day that flag is tightened. An
+            # unchecked box stays out of the call — it does not forbid the
+            # model to search on its own.
+            command += ["--allowedTools", "WebSearch"]
+        return command
 
     @staticmethod
     def _report(line: str) -> None:

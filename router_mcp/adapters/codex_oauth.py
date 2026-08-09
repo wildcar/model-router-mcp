@@ -37,6 +37,7 @@ from typing import Any
 import httpx
 
 from router_mcp.adapters.base import ProviderAdapter
+from router_mcp.domain import progress
 from router_mcp.domain.errors import AccessDenied, NotConfigured, ProviderError, ProviderUnavailable
 from router_mcp.domain.messages import Attachment, RouterRequest, RouterResponse, Usage
 from router_mcp.domain.task import Task
@@ -63,7 +64,10 @@ class CodexOAuthAdapter(ProviderAdapter):
     # No `image-to-image`: this backend cannot change a picture it is given, and
     # that absence is the whole point of declaring tasks rather than media.
     supported_tasks = {Task.TEXT_TO_TEXT, Task.IMAGE_TO_TEXT, Task.TEXT_TO_IMAGE}
-    _TEXT_PARAMS = ("instructions", "reasoning_effort")
+    # `web_search` asks for the native Responses search tool — the same thing
+    # `codex exec --search` turns on. No plugin ladder here (that is OpenRouter
+    # mechanics): either the backend runs the tool or the request fails loudly.
+    _TEXT_PARAMS = ("instructions", "reasoning_effort", "web_search")
     SUPPORTED_PARAMS = {
         Task.TEXT_TO_TEXT: _TEXT_PARAMS,
         Task.IMAGE_TO_TEXT: _TEXT_PARAMS,
@@ -117,13 +121,21 @@ class CodexOAuthAdapter(ProviderAdapter):
             raise ProviderError(
                 f"Codex model {model.model_id or self._main_model} returned no text"
             )
+        raw_meta: dict[str, Any] = {
+            "provider_request_id": (usage_raw or {}).get("response_id")
+        }
+        if request.params.get("web_search"):
+            # Same contract as OpenRouter: what was asked for and what ran. Here
+            # there is only one mode — the server-side tool.
+            raw_meta["web_search"] = True
+            raw_meta["web_search_mode"] = "server_tool"
         return RouterResponse(
             task=request.task,
             provider=self.name,
             model_id=model.model_id or self._main_model,
             usage=self._parse_usage(usage_raw),
             text=text,
-            raw_meta={"provider_request_id": (usage_raw or {}).get("response_id")},
+            raw_meta=raw_meta,
         )
 
     def _text_payload(self, request: RouterRequest, model: RegistryModel) -> dict[str, Any]:
@@ -156,6 +168,8 @@ class CodexOAuthAdapter(ProviderAdapter):
         effort = request.params.get("reasoning_effort")
         if effort:
             payload["reasoning"] = {"effort": str(effort)}
+        if request.params.get("web_search"):
+            payload["tools"] = [{"type": "web_search"}]
         return payload
 
     @staticmethod
@@ -211,6 +225,10 @@ class CodexOAuthAdapter(ProviderAdapter):
                 delta = event.get("delta")
                 if isinstance(delta, str):
                     chunks.append(delta)
+            elif isinstance(kind, str) and "web_search_call" in kind:
+                # The timeline says the search actually ran; an answer that
+                # cites nothing is not how the operator should learn it did not.
+                progress.emit("web_search", f"веб-поиск: {kind.rsplit('.', 1)[-1]}")
             elif kind in ("response.completed", "response.incomplete"):
                 payload = event.get("response") or {}
                 final = {

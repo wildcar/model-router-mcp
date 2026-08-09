@@ -397,6 +397,19 @@ search rate is marked `estimated` — priced by tokens alone it is understated,
 and it must read that way. The plugin mode is billed per *result* and reports
 no count; there the provider-reported cost remains the only complete figure.
 
+Three more providers honour the same flag, none with a ladder — either the
+switch works or the request fails loudly. codex-oauth (text tasks) puts the
+native Responses tool `{"type": "web_search"}` into the payload — the same
+tool `codex exec` turns on — reports `web_search_mode: "server_tool"`, and
+each `response.web_search_call.*` stream event becomes a timeline step.
+codex-cli appends `-c tools.web_search=true` (the `--search` flag lives on
+the root command only; `exec` rejects it with exit 2 — checked live).
+claude-cli appends `--allowedTools WebSearch` — explicit whitelisting: today
+`--dangerously-skip-permissions` already admits the tool, and an unchecked
+box stays out of the call rather than forbidding the model to search. The
+subscription backends publish no search rate, so no accounting term is added
+there: codex-oauth/CLI costs stay estimated or notional as before.
+
 ### Response files
 
 Blobs render inline only for `image/*` and `audio/*`; everything else is

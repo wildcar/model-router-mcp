@@ -29,7 +29,7 @@ class CodexCliAdapter(ProviderAdapter):
     name = "codex-cli"
     env_var = "CODEX_COMMAND"
     supported_tasks = {Task.CLI}
-    SUPPORTED_PARAMS = {Task.CLI: ("cwd", "timeout_sec")}
+    SUPPORTED_PARAMS = {Task.CLI: ("cwd", "timeout_sec", "web_search")}
 
     def __init__(
         self,
@@ -52,7 +52,8 @@ class CodexCliAdapter(ProviderAdapter):
             raise ProviderError("run_cli requires a non-empty `prompt`")
         cwd = validate_cwd(request.params.get("cwd"), self._allowed_roots, self._default_cwd)
         timeout = int(request.params.get("timeout_sec", self._timeout))
-        command = self._build_command(prompt, cwd)
+        web_search = bool(request.params.get("web_search"))
+        command = self._build_command(prompt, cwd, web_search=web_search)
 
         result = await run_subprocess(
             command, cwd=cwd, timeout_sec=timeout, on_line=self._report
@@ -63,16 +64,19 @@ class CodexCliAdapter(ProviderAdapter):
                 f"codex exited with code {result.return_code}: {result.stderr[:500]}"
             )
         usage = self._usage_from_token_info(token_info)
+        raw_meta: dict[str, Any] = {"return_code": result.return_code, "engine": "codex"}
+        if web_search:
+            raw_meta["web_search"] = True
         return RouterResponse(
             task=Task.CLI,
             provider=self.name,
             model_id=model.model_id,
             usage=usage,
             text=text or None,
-            raw_meta={"return_code": result.return_code, "engine": "codex"},
+            raw_meta=raw_meta,
         )
 
-    def _build_command(self, prompt: str, cwd: str) -> list[str]:
+    def _build_command(self, prompt: str, cwd: str, web_search: bool = False) -> list[str]:
         exe = resolve_executable(self._argv[0]) or self._argv[0]
         base = [exe, *self._argv[1:]]
         if Path(self._argv[0]).name == "codex":
@@ -81,6 +85,12 @@ class CodexCliAdapter(ProviderAdapter):
                 base = [*base[:5], "--skip-git-repo-check", *base[5:]]
         if "--json" not in base:
             base.append("--json")
+        if web_search:
+            # The config override, not `--search`: the flag lives on the root
+            # `codex` command only, and `exec` answers it with exit 2 (checked
+            # live). The key turns on the same native Responses `web_search`
+            # tool that codex-oauth asks for as a `tools` entry.
+            base += ["-c", "tools.web_search=true"]
         return [*base, "--", prompt]
 
     @staticmethod

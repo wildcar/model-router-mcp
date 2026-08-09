@@ -273,3 +273,86 @@ async def test_the_journal_keeps_the_flag_and_the_mode_that_actually_ran(tmp_pat
         assert any(t == "веб-поиск: плагин web" for t in titles), titles
     finally:
         await db.close()
+
+
+# --- the other three providers that can search --------------------------------
+# codex-oauth asks the /responses backend for the native `web_search` tool;
+# the two CLI engines get their own switches. No ladder anywhere: only
+# OpenRouter has a plugin to fall back to.
+
+def test_codex_oauth_declares_web_search_on_text_tasks():
+    from router_mcp.adapters.codex_oauth import CodexOAuthAdapter
+
+    adapter = CodexOAuthAdapter(
+        auth_path=None, base_url="https://codex.test", main_model="gpt-5.4",
+        image_model="gpt-image-2", size="1024x1024", quality="medium",
+    )
+    assert ignored_params(adapter, Task.TEXT_TO_TEXT, {"web_search": True}) == []
+    assert ignored_params(adapter, Task.IMAGE_TO_TEXT, {"web_search": True}) == []
+    assert ignored_params(adapter, Task.TEXT_TO_IMAGE, {"web_search": True}) == ["web_search"]
+
+
+def test_codex_oauth_payload_carries_the_tool_only_when_asked():
+    from router_mcp.adapters.codex_oauth import CodexOAuthAdapter
+
+    adapter = CodexOAuthAdapter(
+        auth_path=None, base_url="https://codex.test", main_model="gpt-5.4",
+        image_model="gpt-image-2", size="1024x1024", quality="medium",
+    )
+    model = RegistryModel(
+        service_provider_id="codex-oauth", model_provider="openai",
+        model_id="gpt-5.4", display_name="gpt-5.4", modalities=(Modality.CHAT,),
+    )
+    plain = adapter._text_payload(
+        RouterRequest(task=Task.TEXT_TO_TEXT, external_user_id="u", text="привет"),
+        model,
+    )
+    assert "tools" not in plain
+    searching = adapter._text_payload(
+        RouterRequest(
+            task=Task.TEXT_TO_TEXT, external_user_id="u", text="что нового?",
+            params={"web_search": True},
+        ),
+        model,
+    )
+    assert searching["tools"] == [{"type": "web_search"}]
+
+
+def test_codex_cli_command_gets_the_search_flag():
+    from router_mcp.adapters.codex_cli import CodexCliAdapter
+
+    adapter = CodexCliAdapter(
+        command="codex exec", timeout_sec=60, allowed_cwd_roots=["/tmp"],
+        default_cwd="/tmp",
+    )
+    plain = adapter._build_command("вопрос", "/tmp")
+    assert "tools.web_search=true" not in plain
+    searching = adapter._build_command("вопрос", "/tmp", web_search=True)
+    # The config override sits among the exec flags, before the prompt
+    # separator — `--search` exists on the root command only and exec
+    # rejects it with exit 2.
+    flag = searching.index("tools.web_search=true")
+    assert searching[flag - 1] == "-c"
+    assert flag < searching.index("--")
+
+
+def test_claude_cli_command_whitelists_the_websearch_tool():
+    from router_mcp.adapters.claude_cli import ClaudeCliAdapter
+
+    adapter = ClaudeCliAdapter(
+        command="claude", timeout_sec=60, allowed_cwd_roots=["/tmp"],
+        default_cwd="/tmp",
+    )
+    plain = adapter._build_command(
+        RouterRequest(task=Task.CLI, external_user_id="u", text="вопрос"),
+        "вопрос", "/tmp",
+    )
+    assert "--allowedTools" not in plain
+    searching = adapter._build_command(
+        RouterRequest(
+            task=Task.CLI, external_user_id="u", text="вопрос",
+            params={"web_search": True},
+        ),
+        "вопрос", "/tmp",
+    )
+    assert searching[searching.index("--allowedTools") + 1] == "WebSearch"

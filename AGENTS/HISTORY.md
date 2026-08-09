@@ -4,6 +4,15 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-08-09 · web_search у codex-oauth и обоих CLI-движков
+- What: тот же нормализованный `params.web_search` теперь читают codex-oauth (`tools: [{"type": "web_search"}]` в /responses, режим `server_tool`, шаги `web_search_call` в таймлайне), codex-cli (`-c tools.web_search=true`) и claude-cli (`--allowedTools WebSearch`); лесенки нет — либо работает, либо падает вслух.
+- Why: пользователь попросил прокинуть параметр во все движки, где поиск есть; у OpenRouter он уже был.
+- Files: router_mcp/adapters/{codex_oauth,codex_cli,claude_cli}.py, tests/test_web_search.py, AGENTS/SPEC.md
+- Verified: живьём на dev — codex-oauth и codex-cli назвали день недели и свежую новость со ссылкой (строки 1 и 3 dev-журнала); `codex exec --search` не существует — exit 2, заменено конфиг-ключом; claude-cli на dev упёрся в протухший OAuth кипера (наша команда собралась, 401 от API) — проверка на проде после выката.
+- Next: контрольный прогон claude-cli с web_search на проде.
+
+---
+
 ## 2026-08-09 · Разделение разрядов у счётчиков токенов
 - What: `format.count()` — единый локализованный счётчик (ru-RU, 12 345); четыре колонки токенов журнала, разбивка «Расхода» и сводка инспектора считают разряды через него.
 - Why: пользователь: «цифры в запросах сделай разделение разрядов» — пятизначные счётчики токенов без группировки не читаются.
