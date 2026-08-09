@@ -100,6 +100,22 @@ class McpBearerAuthMiddleware:
 STATIC_DIR = Path(__file__).resolve().parent / "web" / "static"
 
 
+class RevalidatedStaticFiles(StaticFiles):
+    """Static files the browser re-checks on every use.
+
+    `?v=` on the template links busts only the entry module; the imports inside
+    it (`../core/api.js`) carry no version, and heuristic caching let browsers
+    run month-old halves of the client against a fresh other half. `no-cache`
+    means revalidate, not refetch: an unchanged file is one conditional request
+    answering 304.
+    """
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 async def catalog_sync_loop(core, interval_seconds: int) -> None:
     """Re-read every provider's model list on a timer.
 
@@ -211,6 +227,6 @@ def build_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(api_router, prefix="/api", include_in_schema=False)
     app.include_router(blob_router)
     app.include_router(pages_router)
-    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    app.mount("/static", RevalidatedStaticFiles(directory=str(STATIC_DIR)), name="static")
 
     return app

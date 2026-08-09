@@ -97,12 +97,17 @@
     <button id="reload" type="button">Обновить</button>
   </div>
   <div class="row">
-    {# One day of the log, pageable: ◀ и ▶ листают по дням, пустая дата — все дни. #}
+    {# One day of the log, pageable: ◀ и ▶ листают по дням, пустая дата — все
+       дни. The controls sit in their own horizontal group: a label lays its
+       children out as a column, and four stacked full-width buttons is what
+       that looks like. #}
     <label>День
-      <button id="f-day-prev" type="button" title="Предыдущий день">◀</button>
-      <input id="f-date" type="date">
-      <button id="f-day-next" type="button" title="Следующий день">▶</button>
-      <button id="f-day-clear" type="button" title="Все дни">×</button>
+      <span class="day-nav">
+        <button id="f-day-prev" type="button" title="Предыдущий день">◀</button>
+        <input id="f-date" type="date">
+        <button id="f-day-next" type="button" title="Следующий день">▶</button>
+        <button id="f-day-clear" type="button" title="Все дни">×</button>
+      </span>
     </label>
     <label><input id="f-fallback" type="checkbox"> с подстановкой</label>
     <label><input id="f-retries" type="checkbox"> были повторы</label>

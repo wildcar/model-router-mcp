@@ -10,6 +10,7 @@ The old paths (`/registry`, `/`) still resolve: `/` is now «Прогон», and
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from fastapi import APIRouter, Request
@@ -23,6 +24,12 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 pages_router = APIRouter()
 
+# The bare package version was the bug: it reads 0.1.0 across every deploy, so
+# `?v=` never changed and browsers kept running month-old page modules against
+# a new API (found live: the journal drew 11 old cells under 15 new headers).
+# The boot stamp changes on every restart, and every deploy restarts.
+STATIC_VERSION = f"{__version__}.{int(time.time())}"
+
 
 def _page(request: Request, template: str, active: str, script: str) -> HTMLResponse:
     # `version` busts the static cache: after a deploy the browser must not keep
@@ -30,7 +37,7 @@ def _page(request: Request, template: str, active: str, script: str) -> HTMLResp
     return templates.TemplateResponse(
         request,
         template,
-        {"active": active, "page_script": script, "version": __version__},
+        {"active": active, "page_script": script, "version": STATIC_VERSION},
     )
 
 

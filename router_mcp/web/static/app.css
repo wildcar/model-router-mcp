@@ -15,6 +15,10 @@ main { padding:24px; max-width:1100px; margin:0 auto; }
 .row { display:flex; gap:14px; flex-wrap:wrap; align-items:flex-end; margin-bottom:12px; }
 label { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted); }
 label.grow { flex:1; min-width:220px; }
+/* A group of controls under one caption — the day pager. Inside a label the
+   column layout stacks every button full-width; this keeps them in one line. */
+.day-nav { display:flex; gap:4px; align-items:center; }
+.day-nav button { padding:8px 10px; }
 input, select, textarea { background:#11141a; color:var(--fg); border:1px solid var(--border); border-radius:6px; padding:8px; font:inherit; }
 textarea { width:100%; resize:vertical; }
 button { background:#262b34; color:var(--fg); border:1px solid var(--border); border-radius:6px; padding:8px 14px; cursor:pointer; }
