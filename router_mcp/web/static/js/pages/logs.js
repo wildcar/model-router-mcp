@@ -139,9 +139,37 @@ function requestCell(r) {
       const parsed = JSON.parse(raw);
       title = JSON.stringify(parsed, null, 2);
       text = messagesText(parsed) || raw;
-    } catch (_) { /* truncated JSON: show it as it is */ }
+    } catch (_) {
+      // The column is cut at 4000 characters, so a long history arrives as
+      // JSON with its tail missing. The words are still in there — pull them
+      // out by shape instead of showing the punctuation.
+      text = salvagedText(raw) || raw;
+    }
   }
   return { text: text.slice(0, 60), className: 'trunc', title };
+}
+
+// `"role": "…", "content": "…"` pairs scanned straight off a JSON string that
+// does not parse. The last user message wins; failing that, the last message
+// with any words at all (a cut can leave only the system prompt).
+function salvagedText(raw) {
+  const re = /"role"\s*:\s*"(\w+)"\s*,\s*"content"\s*:\s*"((?:[^"\\]|\\.)*)/g;
+  let lastUser = '';
+  let lastAny = '';
+  for (let m = re.exec(raw); m !== null; m = re.exec(raw)) {
+    const words = unescapeJson(m[2]);
+    if (!words) continue;
+    lastAny = words;
+    if (m[1] === 'user') lastUser = words;
+  }
+  return lastUser || lastAny;
+}
+
+function unescapeJson(s) {
+  return s
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/\\[nt]/g, ' ')     // one-line cell: newlines and tabs read as spaces
+    .replace(/\\(.)/g, '$1');
 }
 
 // The words the operator typed: the last user message, or failing that the

@@ -20,6 +20,9 @@ label.grow { flex:1; min-width:220px; }
 .day-nav { display:flex; gap:4px; align-items:center; }
 .day-nav button { padding:8px 10px; }
 input, select, textarea { background:#11141a; color:var(--fg); border:1px solid var(--border); border-radius:6px; padding:8px; font:inherit; }
+/* The console is dark; without this the browser paints its own parts of a
+   native control for a light page — a black calendar icon on a black field. */
+input[type="date"] { color-scheme: dark; }
 textarea { width:100%; resize:vertical; }
 button { background:#262b34; color:var(--fg); border:1px solid var(--border); border-radius:6px; padding:8px 14px; cursor:pointer; }
 button:hover { border-color:var(--accent); }

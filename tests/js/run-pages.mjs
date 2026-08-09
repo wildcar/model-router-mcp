@@ -175,6 +175,12 @@ await runPage('logs', 'logs', async (doc, _calls, settleNow) => {
   const requestCell = okRow.children[okRow.children.length - 1];
   check('журнал: JSON запроса остался в тултипе',
     String(requestCell.title || '').includes('"role"'));
+  // Row 3 carries a history cut mid-message at the 4000-character column
+  // limit: broken JSON must still surface as words, not punctuation.
+  const cutRow = body.children[3];
+  check('журнал: обрезанный JSON тоже отдаёт слова',
+    cutRow.textContent.includes('Заголовок: почем') && !cutRow.textContent.includes('"role"'),
+    cutRow.textContent.slice(-80));
   check('журнал: счётчики токенов по своим колонкам',
     okRow.textContent.includes('1200') && okRow.textContent.includes('900')
       && okRow.textContent.includes('340') && okRow.textContent.includes('64'));
