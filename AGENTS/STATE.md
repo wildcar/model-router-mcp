@@ -381,6 +381,19 @@ it as a managed service on this host.
      процесса, `/static` отдаётся с `Cache-Control: no-cache` (ревалидация
      чинит и незверсованные относительные import'ы внутри модулей); кнопки
      листания дня собраны в горизонтальный `.day-nav`.
+
+- ✅ `params.web_search` на всех движках с поиском (2026-08-09): к OpenRouter
+  добавились codex-oauth (родной инструмент `{"type": "web_search"}` в
+  /responses — тот же, что включает `codex exec`; `web_search_mode:
+  server_tool`; события `response.web_search_call.*` — шаги таймлайна),
+  codex-cli (`-c tools.web_search=true`: флаг `--search` есть только у корневой
+  команды, exec отвечает exit 2 — поймано живой проверкой) и claude-cli
+  (`--allowedTools WebSearch`, явный вайтлист поверх skip-permissions).
+  Лесенки нет — плагинная деградация специфична для OpenRouter. Подписки
+  ставок поиска не публикуют, слагаемого в расходе не прибавилось. Живьём:
+  codex-oauth и codex-cli на dev, claude-cli на проде (строка 10423,
+  «инструмент: WebSearch» в таймлайне) — все назвали текущий день недели и
+  свежую новость со ссылкой.
   Тесты: pytest 351 прошёл; `test_acceptance.py::test_mcp_tab_lists_tools_with_schemas`
   падает и на чистом `main` до правок — это существовавшая проблема, вынесена
   отдельной задачей. Node-харнесс зелёный целиком.

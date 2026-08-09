@@ -8,8 +8,8 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 - What: тот же нормализованный `params.web_search` теперь читают codex-oauth (`tools: [{"type": "web_search"}]` в /responses, режим `server_tool`, шаги `web_search_call` в таймлайне), codex-cli (`-c tools.web_search=true`) и claude-cli (`--allowedTools WebSearch`); лесенки нет — либо работает, либо падает вслух.
 - Why: пользователь попросил прокинуть параметр во все движки, где поиск есть; у OpenRouter он уже был.
 - Files: router_mcp/adapters/{codex_oauth,codex_cli,claude_cli}.py, tests/test_web_search.py, AGENTS/SPEC.md
-- Verified: живьём на dev — codex-oauth и codex-cli назвали день недели и свежую новость со ссылкой (строки 1 и 3 dev-журнала); `codex exec --search` не существует — exit 2, заменено конфиг-ключом; claude-cli на dev упёрся в протухший OAuth кипера (наша команда собралась, 401 от API) — проверка на проде после выката.
-- Next: контрольный прогон claude-cli с web_search на проде.
+- Verified: живьём все три — codex-oauth и codex-cli на dev (строки 1 и 3), claude-cli на проде после выката (строка 10423: «инструмент: WebSearch» в таймлайне, флаг в request_json, стоимость provider_notional); `codex exec --search` не существует — exit 2, заменено конфиг-ключом; dev-логин claude у кипера протух (401) — к обвязке отношения не имеет.
+- Next: —
 
 ---
 
