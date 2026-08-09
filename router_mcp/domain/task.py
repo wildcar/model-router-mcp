@@ -136,11 +136,19 @@ TASKS: dict[Task, TaskSignature] = {
     # Text is optional: "what is in this picture" has a default question.
     Task.IMAGE_TO_TEXT: _sig([Media.IMAGE], [Media.TEXT], Modality.CHAT, [Media.TEXT]),
     Task.TEXT_TO_IMAGE: _sig([Media.TEXT], [Media.IMAGE], Modality.IMAGE),
-    # Both an image and an instruction are required. A mask is a second image,
-    # which a *set* of media cannot express — so it stays a parameter (`mask` in
-    # the adapter's SUPPORTED_PARAMS), where its per-provider support belongs
-    # anyway. A signature answers "what must the caller send", not "how many".
-    Task.IMAGE_TO_IMAGE: _sig([Media.IMAGE, Media.TEXT], [Media.IMAGE], Modality.IMAGE),
+    # The image is the subject; the instruction is not always one. Background
+    # removers and upscalers take a picture and nothing else — demanding a prompt
+    # made them unreachable, and the prompt they were handed to satisfy the check
+    # had nowhere to go on the model either.
+    #
+    # How *many* images a task takes is still outside a set of media: a mask, a
+    # garment, a face are second images, and which property each lands on is the
+    # attachment's `role` (`Attachment.role`, bound through the registry row's
+    # `input_map`). A signature answers "what must the caller send", not "how
+    # many" and not "as what".
+    Task.IMAGE_TO_IMAGE: _sig(
+        [Media.IMAGE], [Media.IMAGE], Modality.IMAGE, [Media.TEXT]
+    ),
     # Optional text is the prompt/vocabulary hint every STT provider accepts.
     Task.SPEECH_TO_TEXT: _sig([Media.AUDIO], [Media.TEXT], Modality.STT, [Media.TEXT]),
     Task.TEXT_TO_SPEECH: _sig([Media.TEXT], [Media.AUDIO], Modality.TTS),

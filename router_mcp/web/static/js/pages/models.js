@@ -233,6 +233,54 @@ function priceField(id, label, perMillion) {
   return wrap;
 }
 
+// Attachment roles, in the order they are worth filling in, with the word an
+// operator recognises. The vocabulary is closed server-side; this is its label
+// table, not a second source of truth.
+const ROLES = [
+  ['image', 'Основное изображение'],
+  ['mask', 'Маска'],
+  ['face', 'Лицо'],
+  ['garment', 'Одежда'],
+  ['reference', 'Референс'],
+  ['style', 'Стиль'],
+];
+
+// Which of this model's own inputs each role lands on. Only shown where a second
+// image is possible: on a chat row it would be six empty fields teaching the
+// operator to scroll past the card.
+function inputMapFields(model) {
+  const box = el('div', undefined, { className: 'input-map' });
+  box.appendChild(el('h3', 'Роли вложений'));
+  box.appendChild(el('p',
+    'Схема модели публикует имена вроде human_img и garm_img и не говорит, где что. '
+    + 'Пустое поле — вложение подставляется по порядку, как раньше.',
+    { className: 'hint' }));
+  for (const [role, label] of ROLES) {
+    const wrap = el('label', undefined, { className: 'price-field' });
+    wrap.appendChild(document.createTextNode(label));
+    const input = el('input', undefined, { id: `edit-role-${role}` });
+    input.value = (model.input_map || {})[role] || '';
+    input.placeholder = 'имя входа модели';
+    wrap.appendChild(input);
+    box.appendChild(wrap);
+  }
+  return box;
+}
+
+function readInputMap() {
+  const map = {};
+  for (const [role] of ROLES) {
+    const field = $(`edit-role-${role}`);
+    const value = field ? field.value.trim() : '';
+    if (value) map[role] = value;
+  }
+  return map;
+}
+
+function takesImages(model) {
+  return (model.tasks || []).some((t) => t.startsWith('image-to-'));
+}
+
 function select(model) {
   selected = model;
   writeParams({ ...readParams(), model: model.model_id, provider: model.service_provider });
@@ -293,6 +341,8 @@ function select(model) {
         { className: 'hint warn' }));
     }
   }
+
+  if (takesImages(model)) card.appendChild(inputMapFields(model));
 
   const origin = caps.labels.price_source_kinds[model.price_source_kind];
   card.appendChild(el('p', `Откуда: ${origin?.label || model.price_source_kind}`,
@@ -486,6 +536,10 @@ async function save(model) {
       completion_price: completion,
       cache_read_price: cacheRead,
       ...(compute === null ? {} : { compute_price_per_second: compute }),
+      // Only when the fields were drawn: `{}` is a real edit — it takes a wrong
+      // mapping back off the row — and sending it from a chat card would clear
+      // a map the operator never saw.
+      ...($('edit-role-image') ? { input_map: readInputMap() } : {}),
       revision: model.revision } });
   toast('Цена сохранена');
   replace(updated);

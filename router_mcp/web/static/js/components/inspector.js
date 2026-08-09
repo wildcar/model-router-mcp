@@ -162,7 +162,10 @@ function requestTab(run, labels) {
   // opened a week later is unreadable without the audio.
   for (const att of req.attachments || []) {
     const size = att.bytes ? `, ${Math.round(att.bytes / 1024)} КБ` : '';
-    const link = el('a', `Скачать вложение (${att.mime || att.kind || 'файл'}${size})`, {
+    // The role, when there was one: two images of the same mime otherwise read
+    // as two identical rows, and «какая из них одежда» is the question.
+    const role = att.role ? `${att.role}: ` : '';
+    const link = el('a', `${role}Скачать вложение (${att.mime || att.kind || 'файл'}${size})`, {
       href: att.download_url,
     });
     if ((att.mime || '').startsWith('audio/')) {

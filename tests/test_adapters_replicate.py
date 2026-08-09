@@ -240,6 +240,221 @@ async def test_a_big_file_goes_by_public_link_when_one_is_configured():
     assert payload["input_image"] == "https://blob.example.org/p/r1.png"
 
 
+# --- models that take no prompt --------------------------------------------
+# A background remover and an upscaler: a picture in, a picture out, and nowhere
+# to put an instruction. Both were unreachable — the task demanded a prompt and
+# the adapter refused to send one.
+REMBG_SCHEMA = {
+    "properties": {"image": {"type": "string", "format": "uri"}},
+    "required": ["image"],
+}
+
+
+async def test_a_promptless_editor_runs_on_the_image_alone():
+    adapter = _adapter()
+    info = _info(adapter, slug="851-labs/background-remover", schema=REMBG_SCHEMA)
+    payload, dropped = await adapter._build_input(
+        RouterRequest(
+            task=Task.IMAGE_TO_IMAGE, external_user_id="u",
+            attachments=[Attachment(kind="image", mime="image/png", data=b"\x89PNG")],
+        ),
+        info,
+    )
+    assert payload["image"].startswith("data:image/png;base64,")
+    assert dropped == []
+
+
+async def test_a_prompt_a_promptless_editor_cannot_use_is_reported_not_refused():
+    """«Убери фон» is not an instruction a background remover needs, and failing
+    the run over it turns a working model into a 500."""
+    adapter = _adapter()
+    info = _info(adapter, slug="851-labs/background-remover", schema=REMBG_SCHEMA)
+    payload, dropped = await adapter._build_input(
+        RouterRequest(
+            task=Task.IMAGE_TO_IMAGE, external_user_id="u", text="убери фон",
+            attachments=[Attachment(kind="image", mime="image/png", data=b"\x89PNG")],
+        ),
+        info,
+    )
+    assert dropped == ["prompt"]
+    assert "убери фон" not in str(payload)
+    assert payload["image"].startswith("data:image/png;base64,")
+
+
+async def test_a_generator_with_no_prompt_property_still_refuses():
+    """The other half of the same rule: text-to-image *requires* text, so a model
+    with nowhere to put it cannot produce what was asked for."""
+    adapter = _adapter()
+    info = _info(adapter, schema=REMBG_SCHEMA)
+    with pytest.raises(ProviderError, match="no prompt-like input"):
+        await adapter._build_input(
+            RouterRequest(task=Task.TEXT_TO_IMAGE, external_user_id="u", text="кот"), info
+        )
+
+
+# --- attachment roles ------------------------------------------------------
+VTON_SCHEMA = {
+    "properties": {
+        "human_img": {"type": "string", "format": "uri"},
+        "garm_img": {"type": "string", "format": "uri"},
+        "garment_des": {"type": "string"},
+    },
+    "required": ["human_img", "garm_img"],
+}
+FACE_SWAP_SCHEMA = {
+    "properties": {
+        "input_image": {"type": "string", "format": "uri"},
+        "swap_image": {"type": "string", "format": "uri"},
+    },
+    "required": ["input_image", "swap_image"],
+}
+INPAINT_SCHEMA = {
+    "properties": {
+        "prompt": {"type": "string"},
+        "image": {"type": "string", "format": "uri"},
+        "mask": {"type": "string", "format": "uri"},
+    },
+    "required": ["prompt", "image"],
+}
+
+
+async def test_try_on_binds_the_garment_by_the_registry_map_not_by_position():
+    """Two images with different meanings. Positionally, which photograph is the
+    garment is a coin flip; the map is the only thing that knows."""
+    adapter = _adapter()
+    info = _info(adapter, slug="cuuupid/idm-vton", schema=VTON_SCHEMA)
+    payload, _ = await adapter._build_input(
+        RouterRequest(
+            task=Task.IMAGE_TO_IMAGE, external_user_id="u",
+            attachments=[
+                Attachment(kind="image", mime="image/png", data=b"person", role="image"),
+                Attachment(kind="image", mime="image/png", data=b"dress", role="garment"),
+            ],
+        ),
+        info,
+        {"image": "human_img", "garment": "garm_img"},
+    )
+    assert payload["human_img"].endswith(_b64("person"))
+    assert payload["garm_img"].endswith(_b64("dress"))
+
+
+async def test_the_binding_does_not_depend_on_the_order_they_arrive_in():
+    adapter = _adapter()
+    info = _info(adapter, slug="cuuupid/idm-vton", schema=VTON_SCHEMA)
+    payload, _ = await adapter._build_input(
+        RouterRequest(
+            task=Task.IMAGE_TO_IMAGE, external_user_id="u",
+            attachments=[
+                Attachment(kind="image", mime="image/png", data=b"dress", role="garment"),
+                Attachment(kind="image", mime="image/png", data=b"person", role="image"),
+            ],
+        ),
+        info,
+        {"image": "human_img", "garment": "garm_img"},
+    )
+    assert payload["human_img"].endswith(_b64("person"))
+    assert payload["garm_img"].endswith(_b64("dress"))
+
+
+async def test_face_swap_binds_without_a_map_because_the_names_are_unambiguous():
+    """`swap_image` can only be the face, so the narrow guess table covers it and
+    an operator has nothing to fill in."""
+    adapter = _adapter()
+    info = _info(adapter, slug="cdingram/face-swap", schema=FACE_SWAP_SCHEMA)
+    payload, _ = await adapter._build_input(
+        RouterRequest(
+            task=Task.IMAGE_TO_IMAGE, external_user_id="u",
+            attachments=[
+                Attachment(kind="image", mime="image/png", data=b"target", role="image"),
+                Attachment(kind="image", mime="image/png", data=b"myface", role="face"),
+            ],
+        ),
+        info,
+    )
+    assert payload["input_image"].endswith(_b64("target"))
+    assert payload["swap_image"].endswith(_b64("myface"))
+
+
+async def test_a_mask_too_big_for_a_data_uri_goes_by_signed_link():
+    """The reason a mask cannot stay a plain string parameter: nothing resolves a
+    blob ref to a URL for params, so a real mask could not be delivered at all."""
+    adapter = _adapter(public_blob_url=lambda ref: f"https://blob.example.org/p/{ref}")
+    info = _info(adapter, slug="black-forest-labs/flux-fill-pro", schema=INPAINT_SCHEMA)
+    payload, _ = await adapter._build_input(
+        RouterRequest(
+            task=Task.IMAGE_TO_IMAGE, external_user_id="u", text="замени вывеску",
+            attachments=[
+                Attachment(kind="image", mime="image/png", data=b"pic", role="image"),
+                Attachment(
+                    kind="image", mime="image/png",
+                    data=b"m" * (300 * 1024), ref="mask1.png", role="mask",
+                ),
+            ],
+        ),
+        info,
+    )
+    assert payload["prompt"] == "замени вывеску"
+    assert payload["image"].endswith(_b64("pic"))
+    assert payload["mask"] == "https://blob.example.org/p/mask1.png"
+
+
+async def test_an_attachment_with_no_role_binds_exactly_as_before():
+    """The regression that matters most: every caller that predates roles."""
+    adapter = _adapter()
+    info = _info(adapter, slug="black-forest-labs/flux-kontext-pro", schema=KONTEXT_SCHEMA)
+    payload, _ = await adapter._build_input(
+        RouterRequest(
+            task=Task.IMAGE_TO_IMAGE, external_user_id="u", text="сделай небо красным",
+            attachments=[Attachment(kind="image", mime="image/png", data=b"\x89PNG")],
+        ),
+        info,
+    )
+    assert payload["input_image"].startswith("data:image/png;base64,")
+
+
+async def test_a_role_this_model_has_no_property_for_says_so():
+    """Better than binding the garment to `input_image` quietly, which is the
+    whole defect roles exist to remove. The message names the real properties and
+    where to map them, because that is an operator's next move."""
+    adapter = _adapter()
+    info = _info(adapter, slug="black-forest-labs/flux-kontext-pro", schema=KONTEXT_SCHEMA)
+    with pytest.raises(ProviderError, match="garment.*input_map"):
+        await adapter._build_input(
+            RouterRequest(
+                task=Task.IMAGE_TO_IMAGE, external_user_id="u", text="надень это",
+                attachments=[
+                    Attachment(kind="image", mime="image/png", data=b"x", role="garment")
+                ],
+            ),
+            info,
+        )
+
+
+async def test_a_named_attachment_keeps_its_property_from_a_loose_one():
+    """Both passes walk the same schema, and a positional image would otherwise
+    take `image` first and leave the mask nowhere to go — or the reverse."""
+    adapter = _adapter()
+    info = _info(adapter, slug="x/inpaint", schema=INPAINT_SCHEMA)
+    payload, _ = await adapter._build_input(
+        RouterRequest(
+            task=Task.IMAGE_TO_IMAGE, external_user_id="u", text="правь",
+            attachments=[
+                Attachment(kind="image", mime="image/png", data=b"m", role="mask"),
+                Attachment(kind="image", mime="image/png", data=b"pic"),
+            ],
+        ),
+        info,
+    )
+    assert payload["mask"].endswith(_b64("m"))
+    assert payload["image"].endswith(_b64("pic"))
+
+
+def _b64(text: str) -> str:
+    import base64
+
+    return base64.b64encode(text.encode()).decode()
+
+
 # --- the call --------------------------------------------------------------
 def _succeeded(output, **kw):
     return {

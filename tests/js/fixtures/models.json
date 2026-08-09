@@ -209,9 +209,48 @@
       "tasks": [
         "text-to-image"
       ]
+    },
+    {
+      "service_provider": "replicate",
+      "model_provider": "cuuupid",
+      "model_id": "cuuupid/idm-vton",
+      "display_name": "IDM-VTON",
+      "modalities": [
+        "image"
+      ],
+      "capabilities": [],
+      "tier": "expensive",
+      "prompt_price": 0.0,
+      "completion_price": 0.0,
+      "image_price": 0.0,
+      "audio_price_per_second": 0.0,
+      "character_price": 0.0,
+      "cache_read_price": 0.0,
+      "cache_write_price": 0.0,
+      "context_length": 0,
+      "source": "catalog",
+      "pricing_mode": "per_request",
+      "is_active": true,
+      "last_seen_at": null,
+      "deprecated_at": null,
+      "replaced_by": null,
+      "price_source": "page:https://replicate.com/cuuupid/idm-vton",
+      "price_source_kind": "unknown",
+      "price_checked_at": null,
+      "price_is_verified": false,
+      "price_is_unknown": true,
+      "updated_at": "2026-07-26T12:41:56+00:00",
+      "revision": 0,
+      "tasks": [
+        "image-to-image"
+      ],
+      "input_map": {
+        "image": "human_img",
+        "garment": "garm_img"
+      }
     }
   ],
-  "total": 6,
+  "total": 7,
   "next_cursor": null,
   "facets": {
     "modality": {

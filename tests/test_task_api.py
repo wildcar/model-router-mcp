@@ -44,6 +44,64 @@ def test_a_task_that_needs_a_file_says_which_medium_is_missing(client):
     assert "/api/v1/blobs" in message
 
 
+def test_editing_an_image_no_longer_demands_an_instruction(client):
+    """Background removers and upscalers take a picture and nothing else. The
+    request has to get past validation; what happens at the provider afterwards
+    is a different question."""
+    ref = client.post(
+        "/api/v1/blobs", files={"file": ("p.png", b"\x89PNG fake", "image/png")}
+    ).json()["ref"]
+    r = client.post(
+        "/api/v1/runs",
+        json={
+            "task": "image-to-image",
+            "external_user_id": "i2i-no-prompt",
+            "attachments": [{"ref": ref, "kind": "image"}],
+        },
+    )
+    assert r.status_code == 202, r.text
+
+
+def test_an_unknown_attachment_role_is_the_callers_mistake(client):
+    """Caught here, with the vocabulary in the message, rather than three layers
+    down with a provider's name on it."""
+    ref = client.post(
+        "/api/v1/blobs", files={"file": ("p.png", b"\x89PNG fake", "image/png")}
+    ).json()["ref"]
+    r = client.post(
+        "/api/v1/runs",
+        json={
+            "task": "image-to-image",
+            "attachments": [{"ref": ref, "kind": "image", "role": "hat"}],
+        },
+    )
+    assert r.status_code == 400
+    message = r.json()["error"]["message"]
+    assert "hat" in message and "garment" in message
+
+
+def test_an_attachment_role_reaches_the_log(client):
+    """A two-image run reads as two identical rows otherwise, and the log cannot
+    answer which photograph the model was told was the garment."""
+    ref = client.post(
+        "/api/v1/blobs", files={"file": ("p.png", b"\x89PNG fake", "image/png")}
+    ).json()["ref"]
+    run = client.post(
+        "/api/v1/runs",
+        json={
+            "task": "image-to-image",
+            "external_user_id": "i2i-roles",
+            "attachments": [{"ref": ref, "kind": "image", "role": "mask"}],
+        },
+    ).json()
+    for _ in range(50):
+        state = client.get(f"/api/v1/runs/{run['run_id']}").json()
+        if state["status"] in ("ok", "error"):
+            break
+    row = client.get(f"/api/v1/logs/{state['log_id']}").json()
+    assert [a["role"] for a in row["request"]["attachments"]] == ["mask"]
+
+
 def test_transcription_still_reports_its_missing_file(client):
     r = client.post("/api/v1/runs", json={"task": "speech-to-text"})
     assert r.status_code == 400
@@ -54,7 +112,10 @@ def test_capabilities_describes_every_task(client):
     caps = client.get("/api/v1/capabilities").json()
     assert caps["schema_version"] == 2
     image_to_image = caps["tasks"]["image-to-image"]
-    assert image_to_image["requires"] == ["image", "text"]
+    assert image_to_image["requires"] == ["image"]
+    # The instruction is offered, not demanded: a background remover has nowhere
+    # to put one, and the console draws the prompt field from this.
+    assert image_to_image["optional"] == ["text"]
     assert image_to_image["produces"] == ["image"]
     assert image_to_image["billing_group"] == "image"
 

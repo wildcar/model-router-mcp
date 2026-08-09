@@ -108,9 +108,10 @@ def test_validation_names_the_missing_medium():
         validate_task_inputs(Task.IMAGE_TO_IMAGE, has_text=True, media=set())
     with pytest.raises(ValueError, match="requires audio"):
         validate_task_inputs(Task.SPEECH_TO_TEXT, has_text=False, media=set())
-    # Text alone is not enough for editing, and an image alone is not either.
-    with pytest.raises(ValueError, match="requires text"):
-        validate_task_inputs(Task.IMAGE_TO_IMAGE, has_text=False, media={Media.IMAGE})
+    # Text alone is not enough for editing. An image alone is: a background
+    # remover and an upscaler take a picture and nothing else, and demanding an
+    # instruction they have nowhere to put made them unreachable.
+    validate_task_inputs(Task.IMAGE_TO_IMAGE, has_text=False, media={Media.IMAGE})
     validate_task_inputs(Task.IMAGE_TO_IMAGE, has_text=True, media={Media.IMAGE})
     validate_task_inputs(Task.IMAGE_TO_TEXT, has_text=False, media={Media.IMAGE})
 

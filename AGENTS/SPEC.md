@@ -102,7 +102,7 @@ and belongs to exactly one billing group:
 | `text-to-text` | text | | text | `chat` |
 | `image-to-text` | image | text | text | `chat` |
 | `text-to-image` | text | | image | `image` |
-| `image-to-image` | image, text | | image | `image` |
+| `image-to-image` | image | text | image | `image` |
 | `speech-to-text` | audio | text | text | `stt` |
 | `text-to-speech` | text | | audio | `tts` |
 | `text-to-audio` | text | | audio | `audio` |
@@ -112,6 +112,33 @@ and belongs to exactly one billing group:
 
 `domain/task.py` owns the table. `validate_task_inputs()` is the single check that
 a request carries what its task needs, and it names the missing medium.
+
+The instruction is optional for `image-to-image` because background removers and
+upscalers take a picture and nothing else. A model with no prompt-like property
+receiving text the task only *offered* reports it in `ignored_params` and runs;
+one whose task **requires** text still refuses, because a generator with nowhere
+to put a prompt cannot produce what was asked for.
+
+### Attachment roles
+
+A signature says what media a task needs, never how many of each or as what. Two
+images with different meanings — a person and a garment, a picture and a mask, a
+target and a face — are told apart by `Attachment.role`, out of the closed
+vocabulary in `domain/messages.ATTACHMENT_ROLES`: `image`, `mask`, `face`,
+`garment`, `reference`, `style`. `POST /api/v1/runs` takes it per attachment
+(`attachments[].role`); an unknown role is a 400 with the vocabulary in it.
+
+A role binds to the model's own input property through the registry row's
+`input_map` (`{"image": "human_img", "garment": "garm_img"}`), which only a human
+can write: a schema publishes `human_img` and `garm_img` and never says which is
+which. Falling back, the adapter tries the role as a property name and then a
+narrow per-role guess table; a role it cannot resolve is an error naming the
+model's real inputs, never a positional guess. An attachment with no role binds
+positionally, exactly as before roles existed. Roles bind first, so a positional
+attachment cannot take the property a named one was headed for. Every role is
+delivered through the same file path as the primary image, so a mask above
+`DATA_URI_LIMIT` travels as a signed `PUBLIC_BLOB_BASE_URL` link. The role is
+kept in the request snapshot and shown in the log inspector.
 
 **`Modality`** is the billing group and the endpoint name. Tasks outnumber groups
 because `text-to-image` and `image-to-image` bill identically. `accounting/`
@@ -453,6 +480,11 @@ is given, out of a closed set that excludes the pair, `source`, `is_active` and
 the catalog dates. Prices arrive as USD per million and are stored per token.
 Concurrency is guarded by a `revision` counter, not by `updated_at`: a
 second-resolution timestamp cannot tell two edits inside one second apart.
+
+`input_map` is patchable and, like `confirmed_at`, is never written by a catalog
+sync: only a human knows that `garm_img` is the garment, and the empty default
+would erase that on every refresh. The model card draws one field per role for
+rows that declare an `image-to-*` task, and `{}` clears the map.
 
 Price protection is keyed on the origin of the **price**, not of the row. A
 number a human vouched for (`price_source_kind` of `manual` or `page`) survives

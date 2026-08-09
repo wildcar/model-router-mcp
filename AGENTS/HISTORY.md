@@ -4,6 +4,13 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-08-09 · роли вложений и `image-to-image` без промпта
+- What: у `image-to-image` текст стал необязательным, а модель без prompt-свойства кладёт лишний текст в `ignored_params` вместо отказа (задача, которой текст обязателен, отказывает как раньше); у вложения появилась роль (`image`/`mask`/`face`/`garment`/`reference`/`style`), строка реестра — карта `input_map`, роли привязываются раньше позиционных, нераспознанная роль это ошибка с перечнем входов модели.
+- Why: задачи 1 и 2 от ИИшной: удаление фона и апскейл были недоступны с обеих сторон, а примерочная, замена лица и инпейнт получали картинки по порядку кортежа, то есть какая из двух фотографий одежда решалось подбрасыванием монеты; маску больше 256 КБ доставить было нечем.
+- Files: router_mcp/domain/task.py, router_mcp/domain/messages.py, router_mcp/adapters/replicate.py, router_mcp/registry/models.py, router_mcp/storage/database.py, router_mcp/web/api.py, router_mcp/routing/router.py, router_mcp/web/views.py, router_mcp/mcp_server/serialize.py, router_mcp/web/static/js/pages/models.js, tests/*
+- Verified: pytest 375 прошёл, node-харнесс зелёный; живого прогона с двумя картинками не было — на проде нет такой модели.
+- Next: завести на проде примерочную или инпейнт, заполнить `input_map` и прогнать две картинки; форма «Прогон» роли пока не отправляет.
+
 ## 2026-08-09 · codex-oauth принимает запрос из одних `messages`
 - What: адаптер codex-oauth больше не требует `text` — последний пользовательский ход поднимается из истории в содержимое запроса `/responses`, остальное остаётся историей; с `text` поведение прежнее.
 - Why: контракт `chat` разрешает «либо `text`, либо `messages`», deepseek так и отвечает, а codex-oauth падал с «Request carries neither text nor an image»; на этом сломалась «Картина дня» posinus, переведённая на gpt-5.5 с веб-поиском.

@@ -176,6 +176,7 @@ def _request(
         attachments.append(
             {
                 "kind": att.get("kind"),
+                "role": att.get("role"),
                 "mime": att.get("mime"),
                 "bytes": att.get("bytes"),
                 "url": att.get("url"),
@@ -189,6 +190,7 @@ def _request(
         attachments.append(
             {
                 "kind": "file",
+                "role": None,
                 "mime": None,
                 "bytes": None,
                 "url": None,

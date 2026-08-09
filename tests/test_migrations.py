@@ -158,6 +158,7 @@ async def test_the_new_columns_arrive(migrated):
         ("registry_models", "tasks"),
         ("registry_models", "compute_price_per_second"),
         ("registry_models", "web_search_price"),
+        ("registry_models", "input_map"),
         ("request_logs", "task"),
         ("request_logs", "compute_seconds"),
         ("request_logs", "provider_cost_usd"),
@@ -218,6 +219,8 @@ async def test_a_migrated_registry_row_loads_and_still_prices(migrated):
     assert llama.tasks == (Task.TEXT_TO_TEXT,)
     assert llama.modalities == (Modality.CHAT,)
     assert llama.compute_price_per_second == 0.0
+    # No role map, which is the positional binding every existing row had.
+    assert llama.input_map == {}
     assert llama.supports(Task.TEXT_TO_TEXT)
     assert not llama.supports(Task.IMAGE_TO_IMAGE)
 

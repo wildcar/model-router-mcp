@@ -43,7 +43,7 @@ from router_mcp.domain.errors import (
     RateLimited,
 )
 from router_mcp.domain.messages import Attachment, RouterRequest, RouterResponse, Usage
-from router_mcp.domain.task import Task
+from router_mcp.domain.task import Media, Task
 from router_mcp.registry.models import RegistryModel
 
 logger = logging.getLogger(__name__)
@@ -70,6 +70,20 @@ IMAGE_KEYS = (
 )
 AUDIO_KEYS = ("audio", "audio_file", "audio_input", "audio_url", "speech")
 SYSTEM_KEYS = ("system_prompt", "system")
+
+# The property an attachment `role` lands on when the registry row does not say.
+# A guess, and a narrow one: only names that can mean nothing else for that role.
+# `RegistryModel.input_map` overrides it, and an unresolved role is an error
+# rather than a positional guess — binding a garment to `human_img` is the bug
+# roles exist to remove, and doing it silently is worse than saying so.
+ROLE_KEYS: dict[str, tuple[str, ...]] = {
+    "image": IMAGE_KEYS,
+    "mask": ("mask", "mask_image", "image_mask"),
+    "face": ("swap_image", "face_image"),
+    "garment": ("garm_img", "garment_image", "garment", "cloth_image"),
+    "reference": ("reference_image", "ref_image"),
+    "style": ("style_image", "style_reference_image"),
+}
 
 # Data URIs are the only inline form the prediction call takes, and only up to
 # this size. Anything bigger has to be a URL — see `PUBLIC_BLOB_BASE_URL`.
@@ -209,7 +223,7 @@ class ReplicateAdapter(RetryClientMixin, ProviderAdapter):
         if not self._api_token:
             raise NotConfigured("REPLICATE_API_TOKEN is not set")
         info = await self._model_info(model.model_id)
-        payload, dropped = await self._build_input(request, info)
+        payload, dropped = await self._build_input(request, info, model.input_map)
 
         progress.emit(
             "replicate", "создаём предсказание",
@@ -224,7 +238,7 @@ class ReplicateAdapter(RetryClientMixin, ProviderAdapter):
             # breaks silently until the process restarts.
             logger.info("Replicate version for %s is stale, refetching", info.slug)
             info = await self._model_info(info.slug, force=True)
-            payload, dropped = await self._build_input(request, info)
+            payload, dropped = await self._build_input(request, info, model.input_map)
             prediction = await self._create(info, payload)
 
         if _status(prediction) not in TERMINAL:
@@ -503,12 +517,20 @@ class ReplicateAdapter(RetryClientMixin, ProviderAdapter):
 
     # --- input ------------------------------------------------------------
     async def _build_input(
-        self, request: RouterRequest, info: ModelInfo
+        self,
+        request: RouterRequest,
+        info: ModelInfo,
+        input_map: dict[str, str] | None = None,
     ) -> tuple[dict[str, Any], list[str]]:
         """Normalized fields onto this model's own property names, plus the
-        declared knobs its schema actually has."""
+        declared knobs its schema actually has.
+
+        `input_map` is the registry row's attachment-role map; empty (the default,
+        and what a caller with no row means) binds attachments positionally.
+        """
         props = info.properties
         payload: dict[str, Any] = {}
+        dropped: list[str] = []
 
         text = (request.text or "").strip()
         if not text and request.messages:
@@ -516,13 +538,22 @@ class ReplicateAdapter(RetryClientMixin, ProviderAdapter):
         prompt_key = _first_present(PROMPT_KEYS, props)
         if text:
             if prompt_key is None:
-                # Naming the model's real properties is the reason the schema is
-                # read at all: the alternative is a 422 the operator cannot act on.
-                raise ProviderError(
-                    f"Replicate model {info.slug} takes no prompt-like input "
-                    f"(its inputs are: {', '.join(sorted(props)) or 'none'})"
-                )
-            payload[prompt_key] = text
+                if Media.TEXT in request.task.signature.requires:
+                    # The caller cannot get what they asked for: a generator with
+                    # no prompt property cannot generate *this*. Naming the real
+                    # properties is the reason the schema is read at all — the
+                    # alternative is a 422 the operator cannot act on.
+                    raise ProviderError(
+                        f"Replicate model {info.slug} takes no prompt-like input "
+                        f"(its inputs are: {', '.join(sorted(props)) or 'none'})"
+                    )
+                # Text the task only ever offered, on a model with nowhere to put
+                # it. "Убери фон" is not an instruction a background remover
+                # needs; refusing the run over it turns a working model into a
+                # 500. Reported like any other knob this model does not have.
+                dropped.append("prompt")
+            else:
+                payload[prompt_key] = text
         elif prompt_key and prompt_key in info.required:
             raise ProviderError(f"Replicate model {info.slug} requires a prompt")
 
@@ -532,7 +563,22 @@ class ReplicateAdapter(RetryClientMixin, ProviderAdapter):
             if system:
                 payload[system_key] = system
 
-        for att in request.attachments:
+        # Roles first: a role names the property it must land on, and a
+        # positionally bound attachment walking the same list would otherwise
+        # take it first and leave the named one with nowhere to go.
+        roled = [att for att in request.attachments if att.role]
+        loose = [att for att in request.attachments if not att.role]
+        for att in roled:
+            key = _role_key(att.role or "", props, input_map or {}, taken=set(payload))
+            if key is None:
+                raise ProviderError(
+                    f"Replicate model {info.slug} has no input for attachment role "
+                    f"{att.role!r} (its inputs are: "
+                    f"{', '.join(sorted(props)) or 'none'}). Map the role onto one "
+                    f"of them in the model's input_map."
+                )
+            payload[key] = await self._file_reference(att, info)
+        for att in loose:
             keys = IMAGE_KEYS if att.kind == "image" else AUDIO_KEYS
             key = _first_present(keys, props, taken=set(payload))
             if key is None:
@@ -540,7 +586,6 @@ class ReplicateAdapter(RetryClientMixin, ProviderAdapter):
             payload[key] = await self._file_reference(att, info)
 
         declared = self.SUPPORTED_PARAMS.get(request.task, ())
-        dropped: list[str] = []
         for key in declared:
             if key not in request.params:
                 continue
@@ -708,6 +753,23 @@ def _first_present(
         if key in props and key not in (taken or ()):
             return key
     return None
+
+
+def _role_key(
+    role: str, props: dict[str, Any], input_map: dict[str, str], taken: set[str]
+) -> str | None:
+    """The property an attachment role binds to, or None if this model has none.
+
+    Three sources, most specific first: what an operator wrote on the registry
+    row, the role used as a property name outright (`mask` really is called
+    `mask` on most inpainting models), then the narrow guess table. An operator's
+    mapping is not second-guessed — a name they chose that this model does not
+    have is their typo to see, not something to quietly paper over with a guess.
+    """
+    mapped = input_map.get(role)
+    if mapped:
+        return mapped if mapped in props else None
+    return _first_present((role, *ROLE_KEYS.get(role, ())), props, taken=taken)
 
 
 def _checked(name: str, value: Any, spec: dict[str, Any], slug: str) -> Any:

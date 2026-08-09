@@ -243,6 +243,19 @@ await runPage('models', 'models', async (doc, calls, settleNow) => {
   check('модели: прежнее значение показано', card.textContent.includes('было'));
   check('модели: карточка говорит, подтверждена ли модель ответом',
     card.textContent.includes('Подтверждена ответом'));
+  // Roles belong to models that take a second image, and nowhere else: on a chat
+  // row six empty fields would teach the operator to scroll past the card.
+  check('модели: у текстовой модели ролей вложений нет',
+    doc.getElementById('edit-role-image') === null);
+  const vton = [...doc.querySelectorAll('#models tbody tr')].find(
+    (tr) => tr.textContent.includes('idm-vton'));
+  vton.dispatch('click');
+  check('модели: роли вложений показаны у image-to-image',
+    doc.getElementById('edit-role-image') !== null);
+  check('модели: сохранённая привязка подставлена в поле',
+    doc.getElementById('edit-role-garment').value === 'garm_img',
+    doc.getElementById('edit-role-garment').value);
+  doc.querySelector('#models tbody').children[0].dispatch('click');
 
   // «Спросить поставщика»: the live list, and adopting from it.
   const ask = doc.getElementById('ask-provider');

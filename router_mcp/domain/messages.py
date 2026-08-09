@@ -20,6 +20,15 @@ from router_mcp.domain.modality import Modality
 from router_mcp.domain.task import Task
 
 
+# What a second image *is* to the model that receives it. A try-on model takes a
+# person and a garment, a face swap takes a target and a face, an inpainting model
+# takes a picture and a mask — three pairs of images that a list can only order,
+# never explain. Position is not meaning: bound by tuple order, which photograph
+# is the garment is a coin flip. The vocabulary is closed on purpose, because a
+# free-form label would have to be guessed at by every adapter.
+ATTACHMENT_ROLES = ("image", "mask", "face", "garment", "reference", "style")
+
+
 @dataclass(slots=True)
 class Attachment:
     """A binary or referenced payload attached to a request or response.
@@ -33,6 +42,10 @@ class Attachment:
     data: bytes | None = None  # inline bytes (STT input, TTS output)
     url: str | None = None  # remote or data: URL (image outputs)
     ref: str | None = None  # blob-store id once persisted to disk
+    # What this payload is *for*, out of `ATTACHMENT_ROLES`. None means "the
+    # obvious one", which is what every caller before roles meant and is still
+    # bound positionally. Adapters that cannot use it ignore it.
+    role: str | None = None
 
 
 @dataclass(slots=True)

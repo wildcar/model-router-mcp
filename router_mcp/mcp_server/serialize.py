@@ -47,6 +47,9 @@ def model_to_dict(m: RegistryModel) -> dict[str, Any]:
         "price_is_verified": m.price_is_verified,
         "price_is_unknown": m.price_is_unknown,
         "updated_at": m.updated_at,
+        # Which of this model's input properties each attachment role binds to.
+        # Empty means positional binding, which is every single-image model.
+        "input_map": dict(m.input_map),
         # Sent back on an edit as an optimistic lock: a second-resolution
         # timestamp cannot tell two edits in the same second apart.
         "revision": m.revision,

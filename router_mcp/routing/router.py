@@ -1026,6 +1026,10 @@ class ModelRouter:
             "attachments": [
                 {
                     "kind": att.kind,
+                    # What it was sent *as*. Without it a two-image run reads as
+                    # two identical rows and the log cannot answer which photo
+                    # the model was told was the garment.
+                    "role": att.role,
                     "mime": att.mime,
                     "bytes": len(att.data) if att.data else None,
                     # A data: URL is megabytes of base64 — name it, don't store it.

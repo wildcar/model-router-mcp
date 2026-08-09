@@ -15,6 +15,7 @@ from __future__ import annotations
 import base64
 import csv
 import io
+import json
 from datetime import datetime, timezone
 from typing import Any
 
@@ -22,7 +23,12 @@ from fastapi import APIRouter, File, Form, Request, Response, UploadFile
 from pydantic import BaseModel
 
 from router_mcp.domain.errors import BadRequest, Conflict, NotFound
-from router_mcp.domain.messages import Attachment, FallbackPolicy, RouterRequest
+from router_mcp.domain.messages import (
+    ATTACHMENT_ROLES,
+    Attachment,
+    FallbackPolicy,
+    RouterRequest,
+)
 from router_mcp.domain.modality import Modality
 from router_mcp.domain.task import (
     Task,
@@ -367,6 +373,10 @@ class Attached(BaseModel):
 
     ref: str
     kind: str = "file"
+    # What the file is *for*, when the model takes more than one of a kind: the
+    # mask, the garment, the face. Omitted means the obvious one, bound in the
+    # order the list gives — which is all a single-image model ever needed.
+    role: str | None = None
 
 
 class RunBody(BaseModel):
@@ -406,15 +416,23 @@ class RunBody(BaseModel):
     batch_id: str | None = None
 
 
-def _attachment_from_ref(ref: str, kind: str) -> Attachment:
+def _attachment_from_ref(ref: str, kind: str, role: str | None = None) -> Attachment:
     core = get_core()
     if not core.blobs.exists(ref):
         raise NotFound(f"Файл {ref} не найден")
+    if role is not None and role not in ATTACHMENT_ROLES:
+        # A typo'd role would otherwise reach the adapter and fail there with a
+        # provider's name on it, for a mistake the caller made in this request.
+        raise BadRequest(
+            f"Неизвестная роль вложения {role!r}; допустимые: "
+            f"{', '.join(ATTACHMENT_ROLES)}"
+        )
     return Attachment(
         kind=kind,
         mime=core.blobs.mime_of(ref),
         data=core.blobs.load(ref),
         ref=ref,
+        role=role,
     )
 
 
@@ -439,10 +457,12 @@ def _router_request(body: RunBody, http_request: Request | None) -> RouterReques
         if body.timeout_sec:
             params["timeout_sec"] = body.timeout_sec
 
-    refs: list[tuple[str, str]] = [(a.ref, a.kind) for a in body.attachments or []]
-    if body.attachment_ref and body.attachment_ref not in {r for r, _ in refs}:
-        refs.append((body.attachment_ref, body.attachment_kind))
-    attachments = [_attachment_from_ref(ref, kind) for ref, kind in refs]
+    refs: list[tuple[str, str, str | None]] = [
+        (a.ref, a.kind, a.role) for a in body.attachments or []
+    ]
+    if body.attachment_ref and body.attachment_ref not in {r for r, _, _ in refs}:
+        refs.append((body.attachment_ref, body.attachment_kind, None))
+    attachments = [_attachment_from_ref(ref, kind, role) for ref, kind, role in refs]
 
     text = body.text if body.text is not None else body.prompt
     # One check for every task, from the task's own signature. The old hard-coded
@@ -1015,6 +1035,10 @@ class ModelPatch(BaseModel):
     price_source_kind: str | None = None
     pricing_mode: str | None = None
     subscription_id: int | None = None
+    # Attachment role -> this model's own input property. `{}` clears it, which
+    # is why it is not folded in with the `is not None` fields below: an operator
+    # taking a wrong mapping back off a row is a real edit.
+    input_map: dict[str, str] | None = None
     # Optimistic locking: the revision the operator's copy of the row carried.
     revision: int | None = None
     # Drop the local price and take the catalog's again on the next sync.
@@ -1080,6 +1104,19 @@ async def api_patch_model(
             )
         elif body.price_source_kind is not None:
             fields["price_source_kind"] = body.price_source_kind
+
+    if body.input_map is not None:
+        # Outside the price branch: which property the garment lands on has
+        # nothing to do with what the model costs, and `revert_price` must not
+        # decide whether an operator can fix a binding.
+        unknown = sorted(set(body.input_map) - set(ATTACHMENT_ROLES))
+        if unknown:
+            raise BadRequest(
+                f"Неизвестные роли вложений: {', '.join(unknown)}; допустимые: "
+                f"{', '.join(ATTACHMENT_ROLES)}"
+            )
+        cleaned = {k: str(v).strip() for k, v in body.input_map.items() if str(v).strip()}
+        fields["input_map"] = json.dumps(cleaned, ensure_ascii=False)
 
     if not fields:
         raise BadRequest("Nothing to update")

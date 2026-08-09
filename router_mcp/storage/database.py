@@ -184,6 +184,11 @@ def _model_to_row(m: RegistryModel) -> dict[str, Any]:
         # `confirmed_at` is deliberately absent: it is a fact about our own
         # traffic, and a catalog sync writing this row must not touch it. It is
         # set by `confirm_registry_model` alone.
+        #
+        # `input_map` is absent for the same reason, one step further: only a
+        # human knows that `garm_img` is the garment, so a sync writing the empty
+        # default here would erase that knowledge on every catalog refresh. It is
+        # set by `update_registry_model` alone.
     }
 
 
@@ -234,7 +239,27 @@ def _row_to_model(row: aiosqlite.Row) -> RegistryModel:
         updated_at=row["updated_at"],
         revision=row["revision"],
         confirmed_at=_col(row, "confirmed_at"),
+        input_map=_json_map(_col(row, "input_map")),
     )
+
+
+def _json_map(raw: Any) -> dict[str, str]:
+    """A JSON object column as `{str: str}`, or empty for anything else.
+
+    Hand-edited text in a TEXT column is the one thing here that can be malformed
+    at rest, and a registry that refuses to load because one row has a stray brace
+    takes every model down with it. Empty means "bind positionally", which is a
+    working answer rather than an outage.
+    """
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    if not isinstance(value, dict):
+        return {}
+    return {str(k): str(v) for k, v in value.items() if k and v}
 
 
 class Database:
@@ -323,6 +348,9 @@ class Database:
                     -- The registry keeps confirmed rows for good; the rest are
                     -- candidates a sweep may retire (ADR-0008).
                     confirmed_at DATETIME,
+                    -- JSON: attachment role -> this model's own input property.
+                    -- Only a human can fill it in; empty means bind positionally.
+                    input_map TEXT NOT NULL DEFAULT '{}',
                     -- Bumped on every write. The optimistic lock counts on it
                     -- rather than on updated_at: two edits inside the same
                     -- second carry the same timestamp and the lock would pass.
@@ -450,6 +478,9 @@ class Database:
             # ADR-0008: the model id a provider actually answered on. Backfilled
             # from the log below, so history counts as confirmation.
             "confirmed_at": "DATETIME",
+            # Which input property each attachment role binds to. Empty on every
+            # existing row, which is exactly the positional behaviour they had.
+            "input_map": "TEXT NOT NULL DEFAULT '{}'",
         },
         "request_logs": {
             "finish_reason": "TEXT",
@@ -827,6 +858,9 @@ class Database:
             # Editable because a model's task set is sometimes only knowable by
             # hand: Replicate publishes an input schema, not a task name.
             "tasks",
+            # Same reason, for the input properties: the schema lists
+            # `human_img` and `garm_img` and never says which is the garment.
+            "input_map",
         }
     )
 

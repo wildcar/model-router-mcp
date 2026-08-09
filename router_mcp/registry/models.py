@@ -94,6 +94,13 @@ class RegistryModel:
     # registry keeps for good are the confirmed ones plus what an admin curated;
     # everything else is a candidate that a sweep may retire (ADR-0008).
     confirmed_at: str | None = None
+    # Attachment role -> this model's own input property, e.g.
+    # `{"image": "human_img", "garment": "garm_img"}` for a try-on model. Only a
+    # human can write it: the schema publishes `human_img` and `garm_img` and
+    # says nothing about which is which, so an adapter that guesses gets it right
+    # half the time. Empty means "bind attachments positionally", which is what
+    # every single-image model wants and what the router did before roles.
+    input_map: dict[str, str] = field(default_factory=dict)
     extra: dict = field(default_factory=dict)
 
     # Provenances under which a zero price means "confirmed free" rather than

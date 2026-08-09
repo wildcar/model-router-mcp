@@ -171,6 +171,76 @@ def test_api_patch_round_trip(client):
     assert stale.json()["error"]["code"] == "conflict"
 
 
+def test_api_patch_writes_the_attachment_role_map(client):
+    """Which property the garment lands on is knowable only by hand: the schema
+    publishes `human_img` and `garm_img` and never says which is which."""
+    client.post(
+        "/api/v1/registry/models",
+        json={
+            "service_provider_id": "openrouter",
+            "model_id": "cuuupid/idm-vton",
+            "tasks": ["image-to-image"],
+        },
+    )
+    patched = client.patch(
+        "/api/v1/registry/models/openrouter/cuuupid/idm-vton",
+        json={"input_map": {"image": "human_img", "garment": "garm_img"}},
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["input_map"] == {"image": "human_img", "garment": "garm_img"}
+
+    # And back off again: a wrong mapping has to be removable.
+    cleared = client.patch(
+        "/api/v1/registry/models/openrouter/cuuupid/idm-vton", json={"input_map": {}}
+    )
+    assert cleared.json()["input_map"] == {}
+
+
+def test_api_patch_rejects_a_role_outside_the_vocabulary(client):
+    """A free-form role would have to be guessed at by every adapter, so the
+    typo is caught here rather than three layers down at the provider."""
+    client.post(
+        "/api/v1/registry/models",
+        json={
+            "service_provider_id": "openrouter",
+            "model_id": "demo/roles",
+            "tasks": ["image-to-image"],
+        },
+    )
+    r = client.patch(
+        "/api/v1/registry/models/openrouter/demo/roles",
+        json={"input_map": {"hat": "hat_img"}},
+    )
+    assert r.status_code == 400
+    assert "hat" in r.json()["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_a_sync_never_erases_a_hand_written_role_map(db):
+    """The same rule as the price, one step harder: only a human knows that
+    `garm_img` is the garment, and a catalog refresh writing the empty default
+    would throw that away every hour."""
+    await db.update_registry_model(
+        "openrouter", "openai/gpt-4o-mini",
+        {"input_map": '{"garment": "garm_img"}'},
+    )
+    await db.upsert_registry_model(_catalog_row(display_name="GPT-4o mini (2026)"))
+    row = await db.get_registry_model("openrouter", "openai/gpt-4o-mini")
+    assert row.input_map == {"garment": "garm_img"}
+    assert row.display_name == "GPT-4o mini (2026)"
+
+
+@pytest.mark.asyncio
+async def test_a_malformed_role_map_loads_as_empty(db):
+    """Hand-edited JSON in a TEXT column is the one thing here that can be broken
+    at rest, and one stray brace must not take the whole registry down."""
+    await db.update_registry_model(
+        "openrouter", "openai/gpt-4o-mini", {"input_map": "{not json"}
+    )
+    row = await db.get_registry_model("openrouter", "openai/gpt-4o-mini")
+    assert row.input_map == {}
+
+
 def test_api_patch_unknown_pair_is_404(client):
     r = client.patch("/api/v1/registry/models/openrouter/nope/nope", json={"tier": "cheap"})
     assert r.status_code == 404
