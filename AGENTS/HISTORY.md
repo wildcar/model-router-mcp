@@ -4,6 +4,15 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-08-09 · codex-oauth принимает запрос из одних `messages`
+- What: адаптер codex-oauth больше не требует `text` — последний пользовательский ход поднимается из истории в содержимое запроса `/responses`, остальное остаётся историей; с `text` поведение прежнее.
+- Why: контракт `chat` разрешает «либо `text`, либо `messages`», deepseek так и отвечает, а codex-oauth падал с «Request carries neither text nor an image»; на этом сломалась «Картина дня» posinus, переведённая на gpt-5.5 с веб-поиском.
+- Files: router_mcp/adapters/codex_oauth.py, tests/test_adapters_parse.py
+- Verified: pytest весь зелёный (358); живьём — вызов posinus daypic на gpt-5.5 (medium, поиск) после выката.
+- Next: —
+
+---
+
 ## 2026-08-09 · web_search у codex-oauth и обоих CLI-движков
 - What: тот же нормализованный `params.web_search` теперь читают codex-oauth (`tools: [{"type": "web_search"}]` в /responses, режим `server_tool`, шаги `web_search_call` в таймлайне), codex-cli (`-c tools.web_search=true`) и claude-cli (`--allowedTools WebSearch`); лесенки нет — либо работает, либо падает вслух.
 - Why: пользователь попросил прокинуть параметр во все движки, где поиск есть; у OpenRouter он уже был.

@@ -214,6 +214,51 @@ def test_codex_text_payload_carries_the_prompt_and_no_tools():
     assert payload["input"][-1]["content"] == [{"type": "input_text", "text": "привет"}]
 
 
+def test_codex_takes_a_messages_only_request():
+    """`messages` without `text` is a valid chat call — deepseek answers it, and
+    /responses needs the last user turn moved out of the history."""
+    from router_mcp.registry.models import RegistryModel
+
+    adapter = _codex()
+    model = RegistryModel(
+        service_provider_id="codex-oauth", model_provider="openai",
+        model_id="gpt-5.5", display_name="gpt-5.5", tasks=(Task.TEXT_TO_TEXT,),
+    )
+    payload = adapter._text_payload(
+        RouterRequest(
+            task=Task.TEXT_TO_TEXT, external_user_id="u",
+            messages=[
+                {"role": "system", "content": "ты помощник"},
+                {"role": "user", "content": "привет"},
+            ],
+        ),
+        model,
+    )
+    assert len(payload["input"]) == 2
+    assert payload["input"][0]["role"] == "system"
+    assert payload["input"][-1]["content"] == [{"type": "input_text", "text": "привет"}]
+
+
+def test_codex_keeps_the_whole_history_when_text_is_given():
+    from router_mcp.registry.models import RegistryModel
+
+    adapter = _codex()
+    model = RegistryModel(
+        service_provider_id="codex-oauth", model_provider="openai",
+        model_id="gpt-5.5", display_name="gpt-5.5", tasks=(Task.TEXT_TO_TEXT,),
+    )
+    payload = adapter._text_payload(
+        RouterRequest(
+            task=Task.TEXT_TO_TEXT, external_user_id="u", text="и ещё раз",
+            messages=[{"role": "user", "content": "привет"}],
+        ),
+        model,
+    )
+    assert len(payload["input"]) == 2
+    assert payload["input"][0]["content"] == [{"type": "input_text", "text": "привет"}]
+    assert payload["input"][-1]["content"] == [{"type": "input_text", "text": "и ещё раз"}]
+
+
 def test_codex_vision_payload_inlines_the_image():
     from router_mcp.domain.messages import Attachment
     from router_mcp.registry.models import RegistryModel

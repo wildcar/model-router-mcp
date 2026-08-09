@@ -139,8 +139,9 @@ class CodexOAuthAdapter(ProviderAdapter):
         )
 
     def _text_payload(self, request: RouterRequest, model: RegistryModel) -> dict[str, Any]:
+        history, trailing = self._history(request)
         content: list[dict[str, Any]] = []
-        prompt = (request.text or "").strip()
+        prompt = (request.text or "").strip() or trailing
         if prompt:
             content.append({"type": "input_text", "text": prompt})
         # Images travel as data URIs, which is the only form `/responses` takes
@@ -158,7 +159,7 @@ class CodexOAuthAdapter(ProviderAdapter):
             "model": model.model_id or self._main_model,
             "store": False,
             "stream": True,
-            "input": self._history(request) + [
+            "input": history + [
                 {"type": "message", "role": "user", "content": content}
             ],
         }
@@ -173,8 +174,15 @@ class CodexOAuthAdapter(ProviderAdapter):
         return payload
 
     @staticmethod
-    def _history(request: RouterRequest) -> list[dict[str, Any]]:
-        """Earlier turns, when the caller sent a history rather than one prompt."""
+    def _history(request: RouterRequest) -> tuple[list[dict[str, Any]], str]:
+        """(earlier turns, the trailing user turn) out of `messages`.
+
+        The chat tool takes either `text` or `messages`, and a caller that sends
+        only a history is entitled to an answer — deepseek gives one. `/responses`
+        wants the final user turn as the request content rather than as history,
+        so it is lifted out here; with `text` present the whole history stays put
+        and the second value is simply unused.
+        """
         out: list[dict[str, Any]] = []
         for message in request.messages or []:
             role = str(message.get("role") or "user")
@@ -185,7 +193,10 @@ class CodexOAuthAdapter(ProviderAdapter):
             out.append(
                 {"type": "message", "role": role, "content": [{"type": kind, "text": text}]}
             )
-        return out
+        trailing = ""
+        if not (request.text or "").strip() and out and out[-1]["role"] == "user":
+            trailing = out.pop()["content"][0]["text"]
+        return out, trailing
 
     @staticmethod
     def _data_uri(att: Attachment) -> str | None:
