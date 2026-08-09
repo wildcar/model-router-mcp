@@ -234,8 +234,10 @@ def test_codex_takes_a_messages_only_request():
         ),
         model,
     )
-    assert len(payload["input"]) == 2
-    assert payload["input"][0]["role"] == "system"
+    # The system turn cannot stay an input item: the backend answers those with
+    # «System messages are not allowed».
+    assert len(payload["input"]) == 1
+    assert payload["instructions"] == "ты помощник"
     assert payload["input"][-1]["content"] == [{"type": "input_text", "text": "привет"}]
 
 

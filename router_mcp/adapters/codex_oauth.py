@@ -139,7 +139,7 @@ class CodexOAuthAdapter(ProviderAdapter):
         )
 
     def _text_payload(self, request: RouterRequest, model: RegistryModel) -> dict[str, Any]:
-        history, trailing = self._history(request)
+        history, trailing, system_text = self._history(request)
         content: list[dict[str, Any]] = []
         prompt = (request.text or "").strip() or trailing
         if prompt:
@@ -163,9 +163,14 @@ class CodexOAuthAdapter(ProviderAdapter):
                 {"type": "message", "role": "user", "content": content}
             ],
         }
-        instructions = request.params.get("instructions")
+        # A system message is the caller's instructions by another name, and the
+        # Codex backend answers a `system` input item with HTTP 400 «System
+        # messages are not allowed». The explicit param leads; a history's own
+        # system turns follow in their order.
+        instructions = [str(request.params["instructions"])] if request.params.get("instructions") else []
+        instructions += system_text
         if instructions:
-            payload["instructions"] = str(instructions)
+            payload["instructions"] = "\n\n".join(instructions)
         effort = request.params.get("reasoning_effort")
         if effort:
             payload["reasoning"] = {"effort": str(effort)}
@@ -174,20 +179,25 @@ class CodexOAuthAdapter(ProviderAdapter):
         return payload
 
     @staticmethod
-    def _history(request: RouterRequest) -> tuple[list[dict[str, Any]], str]:
-        """(earlier turns, the trailing user turn) out of `messages`.
+    def _history(request: RouterRequest) -> tuple[list[dict[str, Any]], str, list[str]]:
+        """(earlier turns, the trailing user turn, the system turns) out of `messages`.
 
         The chat tool takes either `text` or `messages`, and a caller that sends
         only a history is entitled to an answer — deepseek gives one. `/responses`
         wants the final user turn as the request content rather than as history,
-        so it is lifted out here; with `text` present the whole history stays put
-        and the second value is simply unused.
+        so it is lifted out here (with `text` present the whole history stays put
+        and the second value is unused), and it refuses `system` items outright,
+        so those travel as `instructions` instead.
         """
         out: list[dict[str, Any]] = []
+        system: list[str] = []
         for message in request.messages or []:
             role = str(message.get("role") or "user")
             text = message.get("content")
             if not isinstance(text, str) or not text.strip():
+                continue
+            if role == "system":
+                system.append(text)
                 continue
             kind = "output_text" if role == "assistant" else "input_text"
             out.append(
@@ -196,7 +206,7 @@ class CodexOAuthAdapter(ProviderAdapter):
         trailing = ""
         if not (request.text or "").strip() and out and out[-1]["role"] == "user":
             trailing = out.pop()["content"][0]["text"]
-        return out, trailing
+        return out, trailing, system
 
     @staticmethod
     def _data_uri(att: Attachment) -> str | None:
