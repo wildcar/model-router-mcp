@@ -20,7 +20,8 @@
                   "label": "базовая · $4.800/1M",
                   "tier": "expensive",
                   "price_source_kind": "estimate",
-                  "extra_params": []
+                  "extra_params": [],
+                  "roles": []
                 }
               ]
             },
@@ -33,7 +34,8 @@
                   "label": "базовая · $90.000/1M",
                   "tier": "expensive",
                   "price_source_kind": "estimate",
-                  "extra_params": []
+                  "extra_params": [],
+                  "roles": []
                 }
               ]
             }
@@ -62,6 +64,10 @@
                   "price_source_kind": "unknown",
                   "extra_params": [
                     "logprobs"
+                  ],
+                  "roles": [
+                    "garment",
+                    "image"
                   ]
                 }
               ]
@@ -75,7 +81,8 @@
                   "label": "базовая · $0.000/1M",
                   "tier": "cheap",
                   "price_source_kind": "unknown",
-                  "extra_params": []
+                  "extra_params": [],
+                  "roles": []
                 }
               ]
             }

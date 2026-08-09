@@ -140,6 +140,17 @@ delivered through the same file path as the primary image, so a mask above
 `DATA_URI_LIMIT` travels as a signed `PUBLIC_BLOB_BASE_URL` link. The role is
 kept in the request snapshot and shown in the log inspector.
 
+«Прогон» draws one row per chosen file — the name and a role — but only when
+more than one file is chosen and the task takes an image: a single file is the
+obvious one and binds positionally, and six selects on a text prompt are noise.
+The roles offered are the keys of the pinned model's `input_map`
+(`GET /api/v1/registry/tree` carries them on the variant), falling back to the
+whole vocabulary when nothing is pinned. The first file is preselected as
+`image`, which is the subject in every one of these models, and the guess is
+visible rather than implied. The words come from `web/labels.ATTACHMENT_ROLES`,
+which `tests/test_capabilities.py` pins to the domain vocabulary — a label for a
+role the API rejects is a form that cannot be submitted.
+
 **`Modality`** is the billing group and the endpoint name. Tasks outnumber groups
 because `text-to-image` and `image-to-image` bill identically. `accounting/`
 takes only `Modality`; callers pass `task.billing_group`. That is why log rows

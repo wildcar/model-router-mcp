@@ -377,6 +377,36 @@ await runPage('run', 'run', async (doc, calls, settleNow) => {
     doc.getElementById('model-id').value === '',
     `model-id="${doc.getElementById('model-id').value}"`);
 
+  // Roles: a list of files can only order them, and order does not say which
+  // photograph is the garment. One row per file, and only where it matters.
+  doc.getElementById('task').value = 'image-to-image';
+  doc.getElementById('task').dispatch('change');
+  await settleNow();
+  const picker = doc.getElementById('attachments');
+  picker.files = [{ name: 'person.jpg', type: 'image/jpeg' }];
+  picker.dispatch('change');
+  check('роли: одному файлу роль не нужна',
+    doc.getElementById('file-roles').hidden === true);
+  picker.files = [
+    { name: 'person.jpg', type: 'image/jpeg' },
+    { name: 'dress.jpg', type: 'image/jpeg' },
+  ];
+  picker.dispatch('change');
+  const rolesHost = doc.getElementById('file-roles');
+  check('роли: на каждый файл своя строка', rolesHost.hidden === false
+    && !!doc.getElementById('file-role-0') && !!doc.getElementById('file-role-1'));
+  check('роли: имя файла показано', rolesHost.textContent.includes('dress.jpg'));
+  check('роли: первый файл угадан как основное изображение',
+    doc.getElementById('file-role-0').value === 'image',
+    doc.getElementById('file-role-0').value);
+  check('роли: предложены словами из глоссария',
+    rolesHost.textContent.includes('Одежда'), rolesHost.textContent.slice(0, 200));
+  picker.files = [];
+  picker.dispatch('change');
+  doc.getElementById('task').value = 'text-to-text';
+  doc.getElementById('task').dispatch('change');
+  await settleNow();
+
   doc.getElementById('show-plan').dispatch('click');
   await settleNow();
   // A clean plan for a request whose file cannot be delivered is a confident

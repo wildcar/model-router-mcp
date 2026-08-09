@@ -233,17 +233,9 @@ function priceField(id, label, perMillion) {
   return wrap;
 }
 
-// Attachment roles, in the order they are worth filling in, with the word an
-// operator recognises. The vocabulary is closed server-side; this is its label
-// table, not a second source of truth.
-const ROLES = [
-  ['image', 'Основное изображение'],
-  ['mask', 'Маска'],
-  ['face', 'Лицо'],
-  ['garment', 'Одежда'],
-  ['reference', 'Референс'],
-  ['style', 'Стиль'],
-];
+// Attachment roles, from the glossary: one word per concept, in one file. A
+// copy here would drift from «Прогон», which offers the same six.
+const roles = () => caps.labels.attachment_roles || [];
 
 // Which of this model's own inputs each role lands on. Only shown where a second
 // image is possible: on a chat row it would be six empty fields teaching the
@@ -255,8 +247,8 @@ function inputMapFields(model) {
     'Схема модели публикует имена вроде human_img и garm_img и не говорит, где что. '
     + 'Пустое поле — вложение подставляется по порядку, как раньше.',
     { className: 'hint' }));
-  for (const [role, label] of ROLES) {
-    const wrap = el('label', undefined, { className: 'price-field' });
+  for (const { value: role, label, help } of roles()) {
+    const wrap = el('label', undefined, { className: 'price-field', title: help });
     wrap.appendChild(document.createTextNode(label));
     const input = el('input', undefined, { id: `edit-role-${role}` });
     input.value = (model.input_map || {})[role] || '';
@@ -295,7 +287,7 @@ function readExtraParams() {
 
 function readInputMap() {
   const map = {};
-  for (const [role] of ROLES) {
+  for (const { value: role } of roles()) {
     const field = $(`edit-role-${role}`);
     const value = field ? field.value.trim() : '';
     if (value) map[role] = value;

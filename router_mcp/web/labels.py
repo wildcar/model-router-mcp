@@ -214,10 +214,24 @@ FINISH_REASONS: dict[str, dict[str, Any]] = {
 }
 
 
+# What a file is *for*, when a model takes more than one of a kind. The
+# vocabulary is closed in `domain/messages.ATTACHMENT_ROLES`; this is the word an
+# operator sees next to each chosen file, in the order worth offering them.
+ATTACHMENT_ROLES: list[dict[str, Any]] = [
+    {"value": "image", **_t("Основное изображение", "Та картинка, которую правим")},
+    {"value": "mask", **_t("Маска", "Чёрно-белая картинка: белое меняется")},
+    {"value": "face", **_t("Лицо", "Чьё лицо переносим")},
+    {"value": "garment", **_t("Одежда", "Что примеряем")},
+    {"value": "reference", **_t("Референс", "На что ориентироваться по содержанию")},
+    {"value": "style", **_t("Стиль", "На что ориентироваться по манере")},
+]
+
+
 def as_dict() -> dict[str, Any]:
     """Everything the console needs to name things, in one payload."""
     return {
         "fields": FIELDS,
+        "attachment_roles": ATTACHMENT_ROLES,
         "cost_sources": COST_SOURCES,
         "price_source_kinds": PRICE_SOURCE_KINDS,
         "tasks": TASKS,

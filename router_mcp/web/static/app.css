@@ -147,6 +147,11 @@ table.multi td { padding:3px 6px; border-bottom:1px solid var(--border); }
 #models tbody tr { cursor:pointer; }
 #models tbody tr.selected { background:#1f2430; }
 .price-field { margin-bottom:10px; }
+/* One row per chosen file on «Прогон»: the name, then what it is for. */
+.file-roles { margin-top:8px; }
+.file-role { display:flex; align-items:center; gap:8px; margin-bottom:6px; }
+.file-role span { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
 /* Attachment roles: a block of its own, because it is not a price and reading
    it as one is how `garm_img` ends up in a rate field. */
 .input-map { border-top:1px solid var(--border); margin-top:16px; padding-top:8px; }

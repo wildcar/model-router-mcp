@@ -166,3 +166,20 @@ def test_a_knob_outside_the_allowlist_is_still_reported():
 def test_merge_params_keeps_order_and_drops_repeats():
     assert merge_params(("a", "b"), _row(extra_params=("b", "c"))) == ("a", "b", "c")
     assert merge_params(("a",), None) == ("a",)
+
+
+def test_the_role_glossary_matches_the_vocabulary_it_names():
+    """One list, two consumers: `web/labels.py` names what
+    `domain/messages.ATTACHMENT_ROLES` allows. A word here for a role the API
+    rejects is a form that cannot be submitted."""
+    from router_mcp.domain.messages import ATTACHMENT_ROLES
+    from router_mcp.web import labels
+
+    assert [r["value"] for r in labels.ATTACHMENT_ROLES] == list(ATTACHMENT_ROLES)
+    assert all(r["label"] for r in labels.ATTACHMENT_ROLES)
+
+
+def test_capabilities_serves_the_role_glossary(client):
+    caps = client.get("/api/v1/capabilities").json()
+    roles = caps["labels"]["attachment_roles"]
+    assert {r["value"] for r in roles} >= {"image", "mask", "garment"}

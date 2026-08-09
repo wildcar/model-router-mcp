@@ -2227,6 +2227,44 @@
         "scope": "any",
         "label": "подставить похожую у любого поставщика"
       }
+    ],
+    "attachment_roles": [
+      {
+        "value": "image",
+        "label": "Основное изображение",
+        "help": "Та картинка, которую правим",
+        "code": null
+      },
+      {
+        "value": "mask",
+        "label": "Маска",
+        "help": "Чёрно-белая картинка: белое меняется",
+        "code": null
+      },
+      {
+        "value": "face",
+        "label": "Лицо",
+        "help": "Чьё лицо переносим",
+        "code": null
+      },
+      {
+        "value": "garment",
+        "label": "Одежда",
+        "help": "Что примеряем",
+        "code": null
+      },
+      {
+        "value": "reference",
+        "label": "Референс",
+        "help": "На что ориентироваться по содержанию",
+        "code": null
+      },
+      {
+        "value": "style",
+        "label": "Стиль",
+        "help": "На что ориентироваться по манере",
+        "code": null
+      }
     ]
   }
 }

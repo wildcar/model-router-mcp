@@ -122,6 +122,10 @@
         <input id="attachments" type="file" multiple>
         <span class="under" id="file-help"></span>
       </label>
+      <!-- One row per chosen file, with its role, when the model takes more
+           than one picture. A flat list can only order files, and order does not
+           say which photograph is the garment. -->
+      <div id="file-roles" class="file-roles" hidden></div>
     </fieldset>
 
     <details class="block" id="server-block">

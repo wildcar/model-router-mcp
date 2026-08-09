@@ -1012,6 +1012,10 @@ async def api_registry_tree(
                 # them — that is the whole point of a per-model allowlist — so
                 # the picker hands them to the form when the model is pinned.
                 "extra_params": list(m.extra_params),
+                # The roles this model actually binds. Offering exactly these
+                # beats offering all six: a try-on model has no use for a mask,
+                # and a list of everything makes the operator guess.
+                "roles": sorted(m.input_map),
                 # The variant carries its price, because "cheap" as a word tells
                 # an operator nothing they can act on.
                 "label": f"{variant or 'базовая'} · ${(m.prompt_price + m.completion_price) * 1e6:.3f}/1M",

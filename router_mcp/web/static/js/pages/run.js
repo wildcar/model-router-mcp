@@ -491,10 +491,67 @@ function kindOf(file) {
   return 'file';
 }
 
+// --- what each chosen file is for -----------------------------------------
+// A file picker gives a flat list, and a list can only order files. That is
+// enough while a model takes one picture; a try-on model takes a person and a
+// garment, and bound by order which photograph is the garment is a coin flip.
+// So: a row per file with its role, and only where it can matter.
+function rolesOffered() {
+  // Exactly the roles the pinned model binds, when its registry row says so.
+  // Better than all six: a try-on model has no use for a mask, and the full
+  // list makes the operator guess. Nothing pinned, or no map: offer everything.
+  const declared = pinnedVariant()?.roles || [];
+  const all = caps.labels.attachment_roles || [];
+  const narrowed = all.filter((r) => declared.includes(r.value));
+  return narrowed.length ? narrowed : all;
+}
+
+function chosenFiles() {
+  return Array.from($('attachments').files || []);
+}
+
+function renderFileRoles() {
+  const host = $('file-roles');
+  clear(host);
+  const files = chosenFiles();
+  const media = [...signature().requires, ...signature().optional];
+  // One file needs no role: it is the obvious one, and the router binds it
+  // positionally exactly as it always has.
+  const useful = files.length > 1 && media.includes('image');
+  host.hidden = !useful;
+  if (!useful) return;
+
+  host.appendChild(el('p',
+    'Модель берёт несколько картинок. Скажите, что есть что: иначе они уйдут '
+    + 'в том порядке, в каком их выбрали, и это будет угадайка.',
+    { className: 'hint' }));
+  const offered = rolesOffered();
+  files.forEach((file, index) => {
+    const row = el('div', undefined, { className: 'file-role' });
+    row.appendChild(el('span', file.name, { className: 'mono' }));
+    const select = el('select', undefined, { id: `file-role-${index}` });
+    const placeholder = el('option', '— по порядку —');
+    placeholder.value = '';
+    select.appendChild(placeholder);
+    for (const role of offered) {
+      const option = el('option', role.label, { title: role.help });
+      option.value = role.value;
+      select.appendChild(option);
+    }
+    // The first file is the subject in every one of these models, and the
+    // second is the thing being applied to it. Guessing the first saves the
+    // common case a click without hiding what was guessed.
+    select.value = index === 0 && offered.some((r) => r.value === 'image')
+      ? 'image' : '';
+    row.appendChild(select);
+    host.appendChild(row);
+  });
+}
+
 async function attachments(body) {
   const sig = signature();
   const needed = sig.requires.filter((m) => m !== 'text');
-  const files = Array.from($('attachments').files || []);
+  const files = chosenFiles();
   if (!files.length) {
     if (!needed.length) return [];
     toast(`Для этой задачи нужен файл: ${needed.join(', ')}`, true);
@@ -503,7 +560,11 @@ async function attachments(body) {
   // Uploaded once, referenced afterwards: the same file is not re-sent for a
   // repeat, and a JSON run body has no way to carry bytes.
   const stored = await Promise.all(files.map((file) => upload(file)));
-  return stored.map((item, i) => ({ ref: item.ref, kind: kindOf(files[i]) }));
+  return stored.map((item, i) => {
+    const select = $(`file-role-${i}`);
+    const role = select && select.value ? select.value : undefined;
+    return { ref: item.ref, kind: kindOf(files[i]), ...(role ? { role } : {}) };
+  });
 }
 
 async function send() {
@@ -826,6 +887,9 @@ function onTaskChange() {
 
 function onFormChange() {
   renderParams();
+  // The roles on offer come off the pinned model's registry row, so they change
+  // with the model and not only with the chosen files.
+  renderFileRoles();
   saveLocal(`run:draft:${currentTask()}`, $('prompt').value);
   writeParams({
     ...readParams(),
@@ -918,6 +982,7 @@ function fillMultiPick() {
 }
 
 $('task').addEventListener('change', onTaskChange);
+$('attachments').addEventListener('change', renderFileRoles);
 $('mode-auto').addEventListener('click', () => setMode('auto'));
 $('mode-pick').addEventListener('click', () => setMode('pick'));
 $('mode-multi').addEventListener('click', () => setMode('multi'));
