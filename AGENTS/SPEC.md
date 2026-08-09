@@ -498,10 +498,19 @@ than in a tooltip.
 
 `POST /api/v1/plan` returns the requested pair, the problem with it if any, the
 policy in words, the candidate ladder with a verdict and a reason per model, the
-pair that would be called, and a cost estimate that states its assumption. Two
-invariants: it never reaches the network (`RegistryService.get_models` grew
-`allow_sync=False`), and it answers 200 even when nothing can run, because
-"почему запрос не ушёл" is the case the screen exists for.
+pair that would be called, a cost estimate that states its assumption, and
+`warnings[]`. Two invariants: it never reaches the network
+(`RegistryService.get_models` grew `allow_sync=False`), and it answers 200 even
+when nothing can run, because "почему запрос не ушёл" is the case the screen
+exists for.
+
+The estimate applies the same precedence a finished run does
+(`accounting.cost.billing_unit`, shared with `compute_cost`): a per-unit rate for
+the group wins, and `compute_price_per_second` is what is left when the group has
+none. Replicate hosts image models and bills the seconds its hardware ran, so
+reading `image_price` alone made the dry run answer «ставки нет» about a run the
+log then charged for — a screen contradicting the outcome is worse than either
+answer on its own.
 
 ### Registry edits
 

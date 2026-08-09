@@ -21,9 +21,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from router_mcp.accounting.cost import (
-    BILLING_UNITS,
     PER_UNIT_GROUPS,
     CostResult,
+    billing_unit,
     compute_cost,
 )
 from router_mcp.adapters.base import (
@@ -607,8 +607,7 @@ class ModelRouter:
             }
         group = request.modality
         if group in PER_UNIT_GROUPS:
-            spec = BILLING_UNITS[group]
-            per_unit = spec.rate(model)
+            spec, per_unit = billing_unit(model, group)
             if not per_unit:
                 return {
                     "value": None,

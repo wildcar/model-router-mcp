@@ -149,3 +149,50 @@ async def test_estimate_refuses_to_invent_a_zero(core):
     )
     assert plan["estimate"]["value"] is None
     assert plan["estimate"]["source"] == "unpriced"
+
+
+@pytest.mark.asyncio
+async def test_an_image_model_billed_by_compute_is_not_called_unpriced(core):
+    """The dry run and the log must agree. `compute_cost` prices a Replicate
+    image model by the seconds its hardware ran; the estimate read `image_price`
+    alone, so the screen said «ставки нет» about a run the log then charged for.
+    """
+    router, _adapters, db = core
+    await db.upsert_registry_model(
+        RegistryModel(
+            "alpha", "alpha", "alpha/vton", "alpha/vton", (),
+            tasks=(Task.IMAGE_TO_IMAGE,),
+            compute_price_per_second=0.0014,
+            price_source_kind="page",
+        )
+    )
+    plan = await router.explain(
+        RouterRequest(Task.IMAGE_TO_IMAGE, "u", model_id="alpha/vton")
+    )
+    estimate = plan["estimate"]
+    assert estimate["value"] == 0.0014
+    assert estimate["source"] == "computed"
+    # And it says what the rate is *per*, because a per-second figure read as a
+    # per-picture one is wrong by the length of the run.
+    assert "секунду расчёта" in estimate["assumption"]
+    assert "заранее неизвестна" in estimate["assumption"]
+
+
+@pytest.mark.asyncio
+async def test_a_per_unit_rate_still_wins_over_compute(core):
+    """Same precedence as `compute_cost`: a provider that names a price per
+    picture has said how it bills, and compute time is only the fallback."""
+    router, _adapters, db = core
+    await db.upsert_registry_model(
+        RegistryModel(
+            "alpha", "alpha", "alpha/both", "alpha/both", (),
+            tasks=(Task.TEXT_TO_IMAGE,),
+            image_price=0.04, compute_price_per_second=0.0014,
+            price_source_kind="page",
+        )
+    )
+    plan = await router.explain(
+        RouterRequest(Task.TEXT_TO_IMAGE, "u", text="hi", model_id="alpha/both")
+    )
+    assert plan["estimate"]["value"] == 0.04
+    assert "изображение" in plan["estimate"]["assumption"]

@@ -271,3 +271,26 @@ PER_UNIT_GROUPS = (
     Modality.AUDIO,
     Modality.VIDEO,
 )
+
+# The rate a group falls back to when it has none of its own. Replicate hosts an
+# image model and bills the seconds its hardware ran; the image group's rate is
+# per picture, so `BILLING_UNITS[IMAGE]` reads zero and the row looks unpriced.
+_COMPUTE_UNIT = BillingUnitSpec(
+    "за одну секунду расчёта, длительность прогона заранее неизвестна",
+    lambda m: m.compute_price_per_second,
+)
+
+
+def billing_unit(model: RegistryModel, group: Modality) -> tuple[BillingUnitSpec, float]:
+    """The unit this row would actually be billed in for that group, and its rate.
+
+    The same precedence `compute_cost` applies to a finished run: a per-unit rate
+    wins where the row has one, and compute time is what is left when it does
+    not. Shared so the dry run cannot say «ставки нет» about a model the log then
+    prices — the screen contradicting the outcome is worse than either answer.
+    """
+    spec = BILLING_UNITS[group]
+    rate = spec.rate(model)
+    if not rate and model.compute_price_per_second > 0.0:
+        return _COMPUTE_UNIT, model.compute_price_per_second
+    return spec, rate
