@@ -955,10 +955,14 @@ class ModelRouter:
             steps=steps,
             # The row, not just the adapter: a knob an operator allowed through
             # `extra_params` must not be reported as ignored on the run that
-            # honoured it.
-            ignored_params=ignored_params(
-                used_adapter, request.task, request.params, model
-            ),
+            # honoured it. Plus what the adapter itself dropped against the
+            # model's own schema — text sent to a promptless background remover
+            # ends up there, and without this line the caller has no way to see
+            # their instruction went nowhere.
+            ignored_params=list(dict.fromkeys(
+                ignored_params(used_adapter, request.task, request.params, model)
+                + list(meta.get("dropped_params") or [])
+            )),
             finished_at=finished_at,
             request_ref=request_ref,
             request_snapshot=request_json or {},

@@ -51,7 +51,12 @@ class Painter(ProviderAdapter):
             model_id=model.model_id,
             usage=Usage(images=1),
             attachments=[Attachment(kind="image", mime="image/png", data=b"png")],
+            raw_meta=dict(self.raw_meta),
         )
+
+    # What the adapter reports it dropped against the model's own schema; a test
+    # sets it per instance.
+    raw_meta: dict = {}
 
 
 def _model(model_id: str, *tasks: Task, image_price: float = 0.01) -> RegistryModel:
@@ -198,6 +203,21 @@ async def test_the_log_records_both_the_task_and_the_group(core):
     rows = await db.list_request_logs(limit=5)
     assert rows[0]["task"] == "text-to-image"
     assert rows[0]["modality"] == "image"
+
+
+async def test_what_the_adapter_dropped_shows_up_in_ignored_params(core):
+    """Text sent to a promptless model is dropped inside the adapter, against
+    the model's own schema — a fact the parameter matrix cannot know. Without
+    the merge the caller has no way to see their instruction went nowhere."""
+    router, adapter, _ = core
+    adapter.raw_meta = {"dropped_params": ["prompt"]}
+    result = await router.dispatch(
+        RouterRequest(
+            task=Task.TEXT_TO_IMAGE, external_user_id="u", text="убери фон",
+            params={"foobar": 1},
+        )
+    )
+    assert result.ignored_params == ["foobar", "prompt"]
 
 
 async def test_vision_is_routed_to_the_vision_model(core):
