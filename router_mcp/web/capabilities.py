@@ -149,6 +149,12 @@ PARAM_SPECS: dict[str, dict[str, Any]] = {
         "speed", "number", "Скорость речи", "1.0 — как есть, меньше — медленнее",
         min=0.25, max=4.0, step=0.05, default=None,
     ),
+    "emotion": _param(
+        "emotion", "text", "Эмоция голоса",
+        "У SpeechKit: neutral, good или evil — поддержка зависит от голоса. "
+        "Пусто — нейтральная",
+        default=None,
+    ),
     "translate": _param(
         "translate", "text", "Переводить на английский",
         "Расшифровка сразу переводится, вместо расшифровки на языке записи",

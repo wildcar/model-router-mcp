@@ -491,6 +491,16 @@ it as a managed service on this host.
   multilingual_v2 (HTTP 200) — адаптер не трогали. Плата за это: латентность
   ~0.2 с → ~1.1 с на фразу, кредиты ×2 (1 кредит/символ против 0.5); ставка
   за символ в реестре как не была вбита, так и не вбита.
+- ✅ Провайдер Yandex SpeechKit (TTS v1) добавлен (2026-08-11): адаптер
+  `adapters/yandex.py` (form-POST `tts:synthesize`, Api-Key, oggopus; язык
+  ru/kk/en/uz/de/he маппится в локаль, лимит 5000 символов), сид
+  `yandex/speechkit-tts-v1` (unpriced, expensive). Ключа пока нет — провайдер
+  сидится выключенным; после вписывания ключа нужен рестарт + PATCH
+  `/api/registry/providers/yandex {"enabled": true}`. ElevenLabs остаётся
+  дефолтом TTS: при двух беспрайсовых строках сортировка падает до `model_id`,
+  и `eleven…` < `speechkit…` — Yandex зовётся хинтом `provider=yandex`.
+  Голос по умолчанию `marina`; список голосов не сверен с доками (капча),
+  ждём файл-клиппинг от оператора.
 
 ## Next
 

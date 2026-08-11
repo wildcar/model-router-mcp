@@ -20,6 +20,7 @@ from router_mcp.adapters.deepgram import DeepgramAdapter
 from router_mcp.adapters.deepseek import PRICING_PAGE as deepseek_pricing_page
 from router_mcp.adapters.deepseek import DeepSeekAdapter
 from router_mcp.adapters.elevenlabs import ElevenLabsAdapter
+from router_mcp.adapters.yandex import YandexSpeechKitAdapter
 from router_mcp.adapters.openrouter import OpenRouterAdapter
 from router_mcp.adapters.replicate import PRICING_PAGE as replicate_pricing_page
 from router_mcp.adapters.replicate import ReplicateAdapter
@@ -136,7 +137,8 @@ def _chat_seed(
 
 def _build_adapters(settings: Settings) -> list[ProviderSpec]:
     """Construct every adapter we ship. Phase 1 = OpenRouter; Phase 2 adds
-    Codex-image / Deepgram / ElevenLabs; later phases append DeepSeek/Claude/CLI."""
+    Codex-image / Deepgram / ElevenLabs / Yandex SpeechKit; later phases append
+    DeepSeek/Claude/CLI."""
     return [
         ProviderSpec(
             id="openrouter",
@@ -220,6 +222,31 @@ def _build_adapters(settings: Settings) -> list[ProviderSpec]:
                 _seed_model(
                     "elevenlabs", "elevenlabs", settings.elevenlabs_tts_model,
                     "ElevenLabs text-to-speech", Task.TEXT_TO_SPEECH, tier="expensive",
+                )
+            ],
+        ),
+        ProviderSpec(
+            id="yandex",
+            display_name="Yandex SpeechKit (TTS)",
+            adapter_key="yandex",
+            base_url=settings.yandex_tts_base_url,
+            pricing_url="https://yandex.cloud/en/docs/speechkit/pricing",
+            adapter=YandexSpeechKitAdapter(
+                api_key=settings.yandex_api_key,
+                base_url=settings.yandex_tts_base_url,
+                voice=settings.yandex_tts_voice,
+                folder_id=settings.yandex_folder_id,
+                timeout_seconds=settings.http_timeout_seconds,
+                retries=settings.http_retries,
+            ),
+            seed_models=[
+                # model_id must sort after "eleven_multilingual_v2": with two
+                # unpriced TTS rows the sort falls through to model_id, and
+                # ElevenLabs stays the unhinted default (see _candidate_sort_key).
+                _seed_model(
+                    "yandex", "yandex", "speechkit-tts-v1",
+                    "Yandex SpeechKit TTS", Task.TEXT_TO_SPEECH, tier="expensive",
+                    price_source="https://yandex.cloud/en/docs/speechkit/pricing",
                 )
             ],
         ),

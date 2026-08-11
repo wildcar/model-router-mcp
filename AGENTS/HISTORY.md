@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-08-11 · провайдер Yandex SpeechKit (TTS v1)
+- What: адаптер yandex.py (tts:synthesize, Api-Key, oggopus, ru/kk/en/uz/de/he), сид yandex/speechkit-tts-v1, параметр emotion в капабилити, ключи YANDEX_* в конфиге.
+- Why: пробуем SpeechKit ради русских ударений и казахского; ElevenLabs остаётся дефолтом (сортировка по model_id при равных ценах).
+- Files: router_mcp/adapters/yandex.py, bootstrap.py, config.py, web/capabilities.py, tests/test_adapters_yandex.py
+- Next: вписать YANDEX_API_KEY (dev и прод), включить провайдера, живой прогон + сверка голосов с доками.
+
 ## 2026-08-11 · TTS: flash → multilingual v2
 - What: ElevenLabs TTS переключён на `eleven_multilingual_v2` (config.py, адаптер, .env, .env.example); flash-строка депрекирована в реестрах dev и прод с `replaced_by`.
 - Why: качество русской озвучки — flash оптимизирован под латентность; собран A/B на 9 фразах-ловушках для сверки ушами. `language_code` у multilingual_v2 API принимает вопреки докам.

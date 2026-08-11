@@ -31,7 +31,7 @@ MCP client ─┐                         ┌─ adapters/* (one per provider):
             ├─→ FastAPI app ──────────┤    openrouter (chat+image), deepseek &
 Web browser ┘   ├─ /mcp  (FastMCP …)  │    claude_api (chat), codex_oauth (text/vision/image),
                 │                     │    replicate (many tasks, async),
-                │                     │    deepgram (stt), elevenlabs (tts),
+                │                     │    deepgram (stt), elevenlabs & yandex (tts),
                 │                     └    codex_cli & claude_cli (cli)
                 ├─ /api/v1/* (JSON API; also mounted at /api for old pages)
                 ├─ /, /overview, /models, /logs, /connections (Jinja2 frames)
@@ -713,7 +713,7 @@ router_mcp/
                        the ContextVar sink work in flight reports through)
   adapters/            base (ABC + RetryClientMixin), _subprocess (CLI helper),
                        openrouter, replicate, deepseek, claude_api, codex_oauth, deepgram,
-                       elevenlabs, codex_cli, claude_cli
+                       elevenlabs, yandex (SpeechKit TTS v1), codex_cli, claude_cli
   registry/            models (RegistryModel), service (per-provider catalog sync)
   routing/router.py    ModelRouter.resolve + dispatch
   accounting/cost.py   compute_cost

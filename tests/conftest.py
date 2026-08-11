@@ -34,6 +34,7 @@ def client(app_db_path, tmp_path_factory):
         ANTHROPIC_API_KEY=None,
         DEEPGRAM_API_KEY=None,
         ELEVENLABS_API_KEY=None,
+        YANDEX_API_KEY=None,
         REPLICATE_API_TOKEN=None,
         # This one is a path, not a key, so it was missed while codex-oauth could
         # only generate images and no test asked for one. The moment it also

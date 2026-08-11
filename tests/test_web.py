@@ -48,7 +48,8 @@ def test_seed_models_present(client):
     # Fixed-catalog models are seeded regardless of whether keys are set.
     r = client.get("/api/models?modality=tts")
     assert r.status_code == 200
-    assert any(m["service_provider"] == "elevenlabs" for m in r.json()["items"])
+    tts_providers = {m["service_provider"] for m in r.json()["items"]}
+    assert {"elevenlabs", "yandex"} <= tts_providers
     stt = client.get("/api/models?modality=stt").json()["items"]
     assert any(m["service_provider"] == "deepgram" for m in stt)
     cli = client.get("/api/models?modality=cli").json()["items"]
@@ -63,7 +64,7 @@ def test_providers_listed(client):
     assert "openrouter" in ids
     assert all(isinstance(p["configured"], bool) for p in body)
     # Every price in the registry must be traceable to a published source.
-    priced = {"openrouter", "deepseek", "anthropic-api", "deepgram", "elevenlabs"}
+    priced = {"openrouter", "deepseek", "anthropic-api", "deepgram", "elevenlabs", "yandex"}
     assert all(p["pricing_url"] for p in body if p["id"] in priced)
 
 

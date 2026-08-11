@@ -80,6 +80,15 @@ class Settings(BaseSettings):
     elevenlabs_tts_voice_name: str = Field(default="Nadia", alias="ELEVENLABS_TTS_VOICE_NAME")
     elevenlabs_tts_voice_id: str | None = Field(default=None, alias="ELEVENLABS_TTS_VOICE_ID")
 
+    # --- Yandex SpeechKit (text-to-speech) --------------------------------
+    yandex_api_key: str | None = Field(default=None, alias="YANDEX_API_KEY")
+    yandex_tts_base_url: str = Field(
+        default="https://tts.api.cloud.yandex.net", alias="YANDEX_TTS_BASE_URL"
+    )
+    yandex_tts_voice: str = Field(default="marina", alias="YANDEX_TTS_VOICE")
+    # Needed only with IAM-token auth; an Api-Key already carries the folder.
+    yandex_folder_id: str | None = Field(default=None, alias="YANDEX_FOLDER_ID")
+
     # --- Replicate (predictions; mostly billed per second of compute) ----
     replicate_api_token: str | None = Field(default=None, alias="REPLICATE_API_TOKEN")
     replicate_base_url: str = Field(
