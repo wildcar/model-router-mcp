@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-08-11 · SpeechKit включён на проде, ru+kk живьём
+- What: ключ (роль ai.editor) в прод-.env, рестарт, enabled=true через PATCH; живые прогоны /api/tts: marina/ru-RU и amira/kk-KK, 146–363 мс. Только реестр и .env на проде, кода не трогали.
+- Why: проверка роли ключа + обещанный живой прогон; A/B-страница получила колонку SpeechKit и казахскую карточку.
+- Files: — (код не менялся; данные реестра на проде)
+- Next: вбить ставку за символ SpeechKit (страница цен), сверить голоса с клиппингом оператора, вписать ключ в dev-.env.
+
 ## 2026-08-11 · провайдер Yandex SpeechKit (TTS v1)
 - What: адаптер yandex.py (tts:synthesize, Api-Key, oggopus, ru/kk/en/uz/de/he), сид yandex/speechkit-tts-v1, параметр emotion в капабилити, ключи YANDEX_* в конфиге.
 - Why: пробуем SpeechKit ради русских ударений и казахского; ElevenLabs остаётся дефолтом (сортировка по model_id при равных ценах).
