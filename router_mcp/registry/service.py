@@ -7,8 +7,11 @@ timer), then reconciles the answer with `registry_models`:
   * seen upstream        -> refreshed, `last_seen_at` bumped, re-activated;
   * missing upstream     -> `is_active = 0` + `deprecated_at` (never deleted,
                             request logs and cost history point at the row);
-  * manual rows          -> keep their prices, name and pricing mode; the sync
-                            only updates freshness and availability;
+  * manual rows          -> keep their prices, name and pricing mode, and are
+                            never deprecated by a sync: for an allowlist-shaped
+                            catalog (Replicate's `REPLICATE_MODELS`) "not listed"
+                            only means "not allowlisted", and curation is
+                            withdrawn by hand, not by a sweep;
   * catalogs without prices (DeepSeek, Anthropic) never zero an existing price;
   * browsed catalogs (`catalog_scope = "browse"`, i.e. OpenRouter) refresh the
     rows we already hold and insert none: a market of four hundred ids is asked
@@ -182,6 +185,14 @@ class RegistryService:
 
         for model_id, old in existing.items():
             if model_id in seen or not old.is_active:
+                continue
+            if old.source == "manual":
+                # An operator's row, not the catalog's. "Missing upstream" is
+                # only meaningful for a catalog that lists everything the
+                # provider serves — Replicate's is the `REPLICATE_MODELS`
+                # allowlist, so a manual row would be retired six hours after
+                # it was added. Curation ends by hand (deprecate/delete), the
+                # same rule `prune_unconfirmed` already applies.
                 continue
             await self._db.deprecate_registry_model(provider_id, model_id)
             report.deprecated += 1

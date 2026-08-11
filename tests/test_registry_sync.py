@@ -119,6 +119,39 @@ async def test_priceless_catalog_keeps_manual_prices(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_sync_never_deprecates_a_manual_row(tmp_path):
+    """Replicate's catalog is the `REPLICATE_MODELS` allowlist, so a model an
+    operator added by hand is "missing upstream" on every sync. Retiring it
+    would undo the curation six hours after it was written."""
+    db = await _db(tmp_path)
+    try:
+        await db.upsert_registry_model(
+            _model(
+                "851-labs/background-remover",
+                source="manual",
+                image_price=0.0004,
+                price_source_kind="page",
+            )
+        )
+        registry = RegistryService(
+            db, adapters={"vendor": FakeCatalogAdapter([_model("flux-schnell")])}
+        )
+        report = (await registry.sync_all(force=True))[0]
+
+        assert report.deprecated == 0
+        active = {m.model_id for m in await db.list_registry_models()}
+        assert active == {"851-labs/background-remover", "flux-schnell"}
+        # A catalog row really gone upstream is still retired as before.
+        registry2 = RegistryService(db, adapters={"vendor": FakeCatalogAdapter([])})
+        report2 = (await registry2.sync_all(force=True))[0]
+        assert report2.deprecated == 1
+        active = {m.model_id for m in await db.list_registry_models()}
+        assert active == {"851-labs/background-remover"}
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
 async def test_api_priced_catalog_updates_catalog_rows(tmp_path):
     db = await _db(tmp_path)
     try:

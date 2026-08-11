@@ -217,7 +217,10 @@ the provider's stop reason for both successful and failed calls.
 - Reconciliation rules:
   - seen upstream → `last_seen_at = now`, `is_active = 1`, `deprecated_at = NULL`;
   - absent upstream → `is_active = 0`, `deprecated_at = now`. Rows are never
-    deleted: logs and cost history reference them;
+    deleted: logs and cost history reference them. Rows with `source = 'manual'`
+    are exempt: an allowlist-shaped catalog (Replicate's `REPLICATE_MODELS`)
+    lists what is allowlisted, not what the provider serves, so "absent" there
+    says nothing about the operator's row — curation is withdrawn by hand;
   - prices from a catalog that carries pricing (OpenRouter) overwrite rows whose
     `source = 'catalog'`; rows with `source = 'manual'` keep their prices,
     display name and pricing mode;
