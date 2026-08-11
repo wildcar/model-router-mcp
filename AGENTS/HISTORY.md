@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-08-11 · цена SpeechKit вбита со страницы тарифов
+- What: yandex/speechkit-tts-v1 — $0.000011/символ (API v1 $10.99999824/1М без НДС, страница даёт цену в USD сама), tier=cheap; прод через PATCH, dev досеян вместе со строкой провайдера (FK требует provider до модели).
+- Why: оператор принёс клиппинг тарифов (сайт за капчей); прогоны SpeechKit теперь computed, а не unpriced.
+- Files: — (данные реестров dev и прод)
+- Next: при переходе на TTS API v3 пересчитать — там тариф за запрос (250 символов = единица).
+
 ## 2026-08-11 · прод: DEFAULT_TTS_MODEL в .env, flash восстановлен
 - What: оператор вписал DEFAULT_TTS_MODEL и поправил устаревший ELEVENLABS_TTS_MODEL; рестарт, bulk restore flash, живая проверка: без хинтов multilingual, по model_id — flash, обе с computed-ценой.
 - Why: финал включения выбора движков — дефолт держится настройкой, flash доступен явным выбором.
