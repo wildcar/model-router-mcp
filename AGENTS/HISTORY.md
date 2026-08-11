@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-08-11 · SpeechKit: v1 → v3, роли голосов, честный поблочный учёт
+- What: адаптер переписан на utteranceSynthesis (hints voice/role/speed, unsafeMode, сборка чанков); сид speechkit-tts-v3 с ценой $0.0000053311/симв., v1 депрекирован; usage.characters округляется до блока 250; docs/speechkit-voices.md из клиппинга.
+- Why: решение оператора — только v3, без выбора версий: роли и новые голоса (saule/zhanar для kk), дешевле ElevenLabs при любой длине.
+- Files: router_mcp/adapters/yandex.py, bootstrap.py, web/capabilities.py, tests/test_adapters_yandex.py, docs/speechkit-voices.md
+- Next: деплой, депрекация v1 на проде, живой прогон ru+role и kk.
+
 ## 2026-08-11 · цена SpeechKit вбита со страницы тарифов
 - What: yandex/speechkit-tts-v1 — $0.000011/символ (API v1 $10.99999824/1М без НДС, страница даёт цену в USD сама), tier=cheap; прод через PATCH, dev досеян вместе со строкой провайдера (FK требует provider до модели).
 - Why: оператор принёс клиппинг тарифов (сайт за капчей); прогоны SpeechKit теперь computed, а не unpriced.

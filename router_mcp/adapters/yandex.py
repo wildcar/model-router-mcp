@@ -1,16 +1,24 @@
-"""Yandex SpeechKit adapter — text-to-speech.
+"""Yandex SpeechKit adapter — text-to-speech, TTS API v3.
 
-TTS API v1 (`POST /speech/v1/tts:synthesize`): a form-encoded request that
-answers with OGG/Opus bytes. Auth is a service-account Api-Key
-(`YANDEX_API_KEY`); `folderId` is required only for IAM-token auth, so it is
-sent only when configured. SpeechKit bills per character, same shape as
-ElevenLabs: `usage.characters` carries the count, the registry's
-`character_price` is the cost lever.
+`POST /tts/v3/utteranceSynthesis` (REST): a JSON request that answers with a
+stream of newline-delimited JSON chunks, each carrying a base64 audio piece;
+the adapter reassembles them into one OGG/Opus blob. Auth is a service-account
+Api-Key (`YANDEX_API_KEY`).
+
+v3 has no language field: the voice implies the language (`amira` is Kazakh,
+`marina` is Russian — see docs/speechkit-voices.md), and roles replace v1's
+`emotion`. Billing is per request unit of 250 characters (started units count
+in full), so `usage.characters` reports the *billable* count rounded up to a
+whole unit — the actual text length is in `usage.raw["characters"]` — and the
+registry's `character_price` is the unit price divided by 250.
 """
 
 from __future__ import annotations
 
+import base64
+import json
 import logging
+import math
 import re
 from typing import Any
 
@@ -32,25 +40,15 @@ _CLEAN_RE = [
     (re.compile(r"\s+"), " "),
 ]
 
-# Callers say "ru" the way they already do for ElevenLabs; v1 wants the full
-# locale. Anything not listed is passed through as given, so "ru-RU" works too.
-_LANGS = {
-    "ru": "ru-RU",
-    "kk": "kk-KK",
-    "en": "en-US",
-    "uz": "uz-UZ",
-    "de": "de-DE",
-    "he": "he-IL",
-}
-
-_TEXT_LIMIT = 5000  # v1 hard cap per request, in characters
+_TEXT_LIMIT = 5000  # sane cap; v3 itself takes longer texts in unsafe mode
+_BILLING_BLOCK = 250  # v3 bills each started block of 250 characters in full
 
 
 class YandexSpeechKitAdapter(RetryClientMixin, ProviderAdapter):
     name = "yandex"
     env_var = "YANDEX_API_KEY"
     supported_tasks = {Task.TEXT_TO_SPEECH}
-    SUPPORTED_PARAMS = {Task.TEXT_TO_SPEECH: ("voice", "language", "emotion", "speed")}
+    SUPPORTED_PARAMS = {Task.TEXT_TO_SPEECH: ("voice", "role", "speed")}
 
     def __init__(
         self,
@@ -65,10 +63,11 @@ class YandexSpeechKitAdapter(RetryClientMixin, ProviderAdapter):
         self._voice = voice
         self._folder_id = folder_id
         self._retries = retries
+        headers = {"Authorization": f"Api-Key {api_key}"} if api_key else {}
+        if folder_id:
+            headers["x-folder-id"] = folder_id
         self._client = httpx.AsyncClient(
-            base_url=base_url,
-            timeout=timeout_seconds,
-            headers={"Authorization": f"Api-Key {api_key}"} if api_key else {},
+            base_url=base_url, timeout=timeout_seconds, headers=headers
         )
 
     def is_configured(self) -> bool:
@@ -80,41 +79,72 @@ class YandexSpeechKitAdapter(RetryClientMixin, ProviderAdapter):
             raise ProviderError("synthesize_speech requires non-empty `text`")
         if len(text) > _TEXT_LIMIT:
             raise ProviderError(
-                f"SpeechKit v1 takes at most {_TEXT_LIMIT} characters per request, "
-                f"got {len(text)}"
+                f"SpeechKit adapter takes at most {_TEXT_LIMIT} characters per "
+                f"request, got {len(text)}"
             )
-        lang = str(request.params.get("language", "ru"))
         voice = str(request.params.get("voice") or self._voice)
-        data: dict[str, Any] = {
+        hints: list[dict[str, Any]] = [{"voice": voice}]
+        role = request.params.get("role")
+        if role is not None:
+            hints.append({"role": str(role)})
+        speed = request.params.get("speed")
+        if speed is not None:
+            hints.append({"speed": float(speed)})
+
+        body: dict[str, Any] = {
             "text": text,
-            "lang": _LANGS.get(lang.lower(), lang),
-            "voice": voice,
-            "format": "oggopus",
+            "hints": hints,
+            "outputAudioSpec": {"containerAudio": {"containerAudioType": "OGG_OPUS"}},
         }
-        for knob in ("emotion", "speed"):
-            value = request.params.get(knob)
-            if value is not None:
-                data[knob] = str(value)
-        if self._folder_id:
-            data["folderId"] = self._folder_id
+        if len(text) >= _BILLING_BLOCK:
+            # v3 caps a plain request at one billing block; longer texts are
+            # legal only with this flag (billed per started block either way).
+            body["unsafeMode"] = True
 
         response = await self._request_with_retry(
-            "POST", "/speech/v1/tts:synthesize", data=data
+            "POST", "/tts/v3/utteranceSynthesis", json=body
         )
-        if not response.content:
+        audio = self._assemble(response)
+        if not audio:
             raise ProviderError("SpeechKit returned empty audio")
 
+        units = max(1, math.ceil(len(text) / _BILLING_BLOCK))
         return RouterResponse(
             task=Task.TEXT_TO_SPEECH,
             provider=self.name,
             model_id=model.model_id,
-            # Characters, not seconds: SpeechKit bills the text it was given.
+            # Billable characters, not actual ones: v3 charges each started
+            # 250-character unit in full, and the log must count money the way
+            # the provider does. The actual length is in raw.
             usage=Usage(
-                characters=len(text),
-                raw={"characters": len(text), "voice": voice, "lang": data["lang"]},
+                characters=units * _BILLING_BLOCK,
+                raw={
+                    "characters": len(text),
+                    "billing_units": units,
+                    "voice": voice,
+                    "role": role,
+                },
             ),
-            attachments=[Attachment(kind="audio", mime="audio/ogg", data=response.content)],
+            attachments=[Attachment(kind="audio", mime="audio/ogg", data=audio)],
         )
+
+    @staticmethod
+    def _assemble(response: httpx.Response) -> bytes:
+        """Glue the NDJSON chunk stream back into one audio blob."""
+        audio = b""
+        for line in response.text.splitlines():
+            if not line.strip():
+                continue
+            try:
+                payload = json.loads(line)
+            except ValueError as exc:
+                raise ProviderError("SpeechKit returned an invalid chunk") from exc
+            if "error" in payload:
+                raise ProviderError(f"SpeechKit error mid-stream: {payload['error']}")
+            data = payload.get("result", {}).get("audioChunk", {}).get("data")
+            if data:
+                audio += base64.b64decode(data)
+        return audio
 
     @staticmethod
     def _normalize(text: str) -> str:

@@ -713,7 +713,7 @@ router_mcp/
                        the ContextVar sink work in flight reports through)
   adapters/            base (ABC + RetryClientMixin), _subprocess (CLI helper),
                        openrouter, replicate, deepseek, claude_api, codex_oauth, deepgram,
-                       elevenlabs, yandex (SpeechKit TTS v1), codex_cli, claude_cli
+                       elevenlabs, yandex (SpeechKit TTS v3), codex_cli, claude_cli
   registry/            models (RegistryModel), service (per-provider catalog sync)
   routing/router.py    ModelRouter.resolve + dispatch
   accounting/cost.py   compute_cost

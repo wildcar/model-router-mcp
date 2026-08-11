@@ -254,13 +254,20 @@ def _build_adapters(settings: Settings) -> list[ProviderSpec]:
                 retries=settings.http_retries,
             ),
             seed_models=[
-                # model_id must sort after "eleven_multilingual_v2": with two
-                # unpriced TTS rows the sort falls through to model_id, and
-                # ElevenLabs stays the unhinted default (see _candidate_sort_key).
+                # v3 bills per started 250-character unit ($0.0013327867 each,
+                # page price ex-VAT), so the per-character rate here is that
+                # unit divided by 250 — and the adapter rounds usage.characters
+                # up to whole units to match how the provider counts money.
                 _seed_model(
-                    "yandex", "yandex", "speechkit-tts-v1",
-                    "Yandex SpeechKit TTS", Task.TEXT_TO_SPEECH, tier="expensive",
-                    price_source="https://yandex.cloud/en/docs/speechkit/pricing",
+                    "yandex", "yandex", "speechkit-tts-v3",
+                    "Yandex SpeechKit TTS v3", Task.TEXT_TO_SPEECH, tier="cheap",
+                    character_price=0.0000053311,
+                    price_source=(
+                        "https://aistudio.yandex.ru/docs/ru/speechkit/pricing — "
+                        "API v3: $0.0013327867 за запрос-блок 250 символов без НДС "
+                        "-> 0.0000053311 $/символ; блоки округляются вверх "
+                        "(учтено в usage.characters адаптера)"
+                    ),
                 )
             ],
         ),
