@@ -398,6 +398,36 @@ async def test_a_mask_too_big_for_a_data_uri_goes_by_signed_link():
     assert payload["mask"] == "https://blob.example.org/p/mask1.png"
 
 
+MULTI_REFERENCE_SCHEMA = {
+    "properties": {
+        "prompt": {"type": "string"},
+        "image_input": {"type": "array", "items": {"type": "string", "format": "uri"}},
+    },
+    "required": ["prompt"],
+}
+
+
+async def test_an_array_input_takes_a_list_and_collects_every_image():
+    """nano-banana-2 and seedream-4 declare `image_input` as a list of urls; a
+    bare string there is a 422, and a second reference must join the first
+    rather than be dropped for want of another property."""
+    adapter = _adapter()
+    info = _info(adapter, slug="google/nano-banana-2", schema=MULTI_REFERENCE_SCHEMA)
+    payload, _ = await adapter._build_input(
+        RouterRequest(
+            task=Task.IMAGE_TO_IMAGE, external_user_id="u", text="убери солнце с неба",
+            attachments=[
+                Attachment(kind="image", mime="image/png", data=b"first"),
+                Attachment(kind="image", mime="image/png", data=b"second"),
+            ],
+        ),
+        info,
+    )
+    assert isinstance(payload["image_input"], list)
+    assert payload["image_input"][0].endswith(_b64("first"))
+    assert payload["image_input"][1].endswith(_b64("second"))
+
+
 async def test_an_attachment_with_no_role_binds_exactly_as_before():
     """The regression that matters most: every caller that predates roles."""
     adapter = _adapter()

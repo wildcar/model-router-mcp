@@ -570,13 +570,29 @@ class ReplicateAdapter(RetryClientMixin, ProviderAdapter):
             if system:
                 payload[system_key] = system
 
+        def _bind(key: str, ref: str) -> None:
+            # An array-typed property collects every file bound to it: the
+            # multi-reference models (nano-banana-2, seedream-4) declare
+            # `image_input` as a list of urls, and a bare string there is a 422.
+            if (props.get(key) or {}).get("type") == "array":
+                payload.setdefault(key, []).append(ref)
+            else:
+                payload[key] = ref
+
+        def _taken() -> set[str]:
+            # A filled array property stays open, so the second reference joins
+            # the first instead of being dropped for want of another property.
+            return {
+                k for k in payload if (props.get(k) or {}).get("type") != "array"
+            }
+
         # Roles first: a role names the property it must land on, and a
         # positionally bound attachment walking the same list would otherwise
         # take it first and leave the named one with nowhere to go.
         roled = [att for att in request.attachments if att.role]
         loose = [att for att in request.attachments if not att.role]
         for att in roled:
-            key = _role_key(att.role or "", props, input_map, taken=set(payload))
+            key = _role_key(att.role or "", props, input_map, taken=_taken())
             if key is None:
                 raise ProviderError(
                     f"Replicate model {info.slug} has no input for attachment role "
@@ -584,13 +600,13 @@ class ReplicateAdapter(RetryClientMixin, ProviderAdapter):
                     f"{', '.join(sorted(props)) or 'none'}). Map the role onto one "
                     f"of them in the model's input_map."
                 )
-            payload[key] = await self._file_reference(att, info)
+            _bind(key, await self._file_reference(att, info))
         for att in loose:
             keys = IMAGE_KEYS if att.kind == "image" else AUDIO_KEYS
-            key = _first_present(keys, props, taken=set(payload))
+            key = _first_present(keys, props, taken=_taken())
             if key is None:
                 continue
-            payload[key] = await self._file_reference(att, info)
+            _bind(key, await self._file_reference(att, info))
 
         # The adapter's declared knobs plus this row's allowlist. Widening the
         # set does not widen the gate: a name lands in the payload only if the
