@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-08-11 · дефолт TTS — SpeechKit v3
+- What: DEFAULT_TTS_MODEL=speechkit-tts-v3 в dev/.env.example/прод; рестарт, живая проверка: без хинтов speechkit computed, provider=elevenlabs даёт flash (дешёвый ярус), multilingual — по model_id.
+- Why: оператор: SpeechKit читает русский лучше (числительные) и дешевле ElevenLabs при любой длине.
+- Files: .env.example (+ .env dev и прод вне git)
+- Next: понаблюдать расходы в /usage; при жалобах на flash под provider-хинтом — обсудить per-provider дефолт.
+
 ## 2026-08-11 · SpeechKit: v1 → v3, роли голосов, честный поблочный учёт
 - What: адаптер переписан на utteranceSynthesis (hints voice/role/speed, unsafeMode, сборка чанков); сид speechkit-tts-v3 с ценой $0.0000053311/симв., v1 депрекирован; usage.characters округляется до блока 250; docs/speechkit-voices.md из клиппинга.
 - Why: решение оператора — только v3, без выбора версий: роли и новые голоса (saule/zhanar для kk), дешевле ElevenLabs при любой длине.

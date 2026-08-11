@@ -536,6 +536,13 @@ it as a managed service on this host.
   `docs/speechkit-voices.md` (из клиппинга оператора); в v3 языкового
   параметра нет, язык определяется голосом. Параметр `emotion` в консоли
   заменён на `role`.
+- ✅ SpeechKit — дефолт TTS (2026-08-11, решение оператора: читает русский
+  лучше, особенно числительные, и дешевле при любой длине).
+  `DEFAULT_TTS_MODEL=speechkit-tts-v3` в dev/.env.example/прод (прод — рукой
+  оператора). Проверено: без хинтов — speechkit-tts-v3 computed. Нюанс:
+  `provider=elevenlabs` без model_id даёт flash (хинт отключает дефолт, скан
+  предпочитает дешёвый ярус) — качество ElevenLabs только по явному
+  `model_id=eleven_multilingual_v2`.
 
 ## Next
 
