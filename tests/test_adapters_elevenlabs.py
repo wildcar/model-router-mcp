@@ -95,3 +95,24 @@ async def test_an_unknown_voice_name_is_a_provider_error():
 
     with pytest.raises(ProviderError, match="No ElevenLabs voice"):
         await _adapter(handler).generate(_request(voice="Nobody"), _model())
+
+
+async def test_output_format_reaches_the_query_and_the_mime():
+    seen: dict = {}
+    await _adapter(_handler(seen)).generate(
+        _request(voice=NADIA_ID, output_format="mp3_44100_128"), _model()
+    )
+    # The format the client asked for is the format the request carries...
+    response = await _adapter(_handler(seen)).generate(
+        _request(voice=NADIA_ID, output_format="mp3"), _model()
+    )
+    # ...and the bare alias becomes the full ElevenLabs form.
+    assert response.usage.raw["output_format"] == "mp3_44100_128"
+    assert response.attachments[0].mime == "audio/mpeg"
+
+
+async def test_default_format_stays_ogg():
+    seen: dict = {}
+    response = await _adapter(_handler(seen)).generate(_request(voice=NADIA_ID), _model())
+    assert response.usage.raw["output_format"] == "opus_48000_64"
+    assert response.attachments[0].mime == "audio/ogg"

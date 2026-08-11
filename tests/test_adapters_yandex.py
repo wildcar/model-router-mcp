@@ -127,3 +127,29 @@ async def test_empty_text_is_rejected_before_the_wire():
 
     with pytest.raises(ProviderError, match="non-empty"):
         await _adapter(handler).generate(_request(text="   "), MODEL)
+
+
+async def test_output_format_picks_the_container_and_the_mime():
+    seen = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen["body"] = json.loads(req.read())
+        return httpx.Response(200, text=_chunk(b"mp3-bytes"))
+
+    # The ElevenLabs-style string clients already send lands on MP3 by prefix.
+    response = await _adapter(handler).generate(
+        _request(output_format="mp3_44100_128"), MODEL
+    )
+    assert seen["body"]["outputAudioSpec"] == {
+        "containerAudio": {"containerAudioType": "MP3"}
+    }
+    assert response.attachments[0].mime == "audio/mpeg"
+    assert response.usage.raw["container"] == "MP3"
+
+
+async def test_unknown_format_is_refused_before_the_wire():
+    def handler(req: httpx.Request) -> httpx.Response:  # pragma: no cover
+        raise AssertionError("must not be called")
+
+    with pytest.raises(ProviderError, match="supported output_format"):
+        await _adapter(handler).generate(_request(output_format="flac"), MODEL)

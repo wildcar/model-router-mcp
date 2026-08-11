@@ -43,12 +43,34 @@ _CLEAN_RE = [
 _TEXT_LIMIT = 5000  # sane cap; v3 itself takes longer texts in unsafe mode
 _BILLING_BLOCK = 250  # v3 bills each started block of 250 characters in full
 
+# v3 knows exactly three containers. Keyed by prefix so the ElevenLabs-style
+# strings clients already send ("mp3_44100_128") land on the right one.
+_CONTAINERS = [
+    ("mp3", ("MP3", "audio/mpeg")),
+    ("oggopus", ("OGG_OPUS", "audio/ogg")),
+    ("opus", ("OGG_OPUS", "audio/ogg")),
+    ("ogg", ("OGG_OPUS", "audio/ogg")),
+    ("wav", ("WAV", "audio/wav")),
+    ("pcm", ("WAV", "audio/wav")),
+]
+
+
+def _container(fmt: str) -> tuple[str, str]:
+    lowered = fmt.lower()
+    for prefix, found in _CONTAINERS:
+        if lowered.startswith(prefix):
+            return found
+    raise ProviderError(
+        f"SpeechKit cannot produce {fmt!r}; supported output_format values are "
+        "mp3, oggopus and wav"
+    )
+
 
 class YandexSpeechKitAdapter(RetryClientMixin, ProviderAdapter):
     name = "yandex"
     env_var = "YANDEX_API_KEY"
     supported_tasks = {Task.TEXT_TO_SPEECH}
-    SUPPORTED_PARAMS = {Task.TEXT_TO_SPEECH: ("voice", "role", "speed")}
+    SUPPORTED_PARAMS = {Task.TEXT_TO_SPEECH: ("voice", "role", "speed", "output_format")}
 
     def __init__(
         self,
@@ -91,10 +113,11 @@ class YandexSpeechKitAdapter(RetryClientMixin, ProviderAdapter):
         if speed is not None:
             hints.append({"speed": float(speed)})
 
+        container, mime = _container(str(request.params.get("output_format") or "oggopus"))
         body: dict[str, Any] = {
             "text": text,
             "hints": hints,
-            "outputAudioSpec": {"containerAudio": {"containerAudioType": "OGG_OPUS"}},
+            "outputAudioSpec": {"containerAudio": {"containerAudioType": container}},
         }
         if len(text) >= _BILLING_BLOCK:
             # v3 caps a plain request at one billing block; longer texts are
@@ -123,9 +146,10 @@ class YandexSpeechKitAdapter(RetryClientMixin, ProviderAdapter):
                     "billing_units": units,
                     "voice": voice,
                     "role": role,
+                    "container": container,
                 },
             ),
-            attachments=[Attachment(kind="audio", mime="audio/ogg", data=audio)],
+            attachments=[Attachment(kind="audio", mime=mime, data=audio)],
         )
 
     @staticmethod

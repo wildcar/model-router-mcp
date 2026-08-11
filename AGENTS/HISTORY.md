@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-08-11 · issue #5: output_format у обоих TTS-адаптеров
+- What: параметр output_format в elevenlabs (проброс строки, алиасы mp3/opus) и yandex (префикс → контейнер MP3/OGG_OPUS/WAV); mime вложения по формату; дефолты не изменились (ogg/opus).
+- Why: Safari iOS 16 не играет ogg/opus — agentish перекодировал через ffmpeg; он уже шлёт mp3_44100_128, теперь роутер отдаёт mp3 сам.
+- Files: router_mcp/adapters/elevenlabs.py, router_mcp/adapters/yandex.py, тесты обоих
+- Next: закрыть #5, agentish может убрать ffmpeg из деплоя.
+
 ## 2026-08-11 · дефолт TTS — SpeechKit v3
 - What: DEFAULT_TTS_MODEL=speechkit-tts-v3 в dev/.env.example/прод; рестарт, живая проверка: без хинтов speechkit computed, provider=elevenlabs даёт flash (дешёвый ярус), multilingual — по model_id.
 - Why: оператор: SpeechKit читает русский лучше (числительные) и дешевле ElevenLabs при любой длине.

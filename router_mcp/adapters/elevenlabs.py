@@ -33,12 +33,29 @@ _CLEAN_RE = [
 # word. Anything shorter or with spaces is a human name and goes through search.
 _VOICE_ID_RE = re.compile(r"[A-Za-z0-9]{16,40}")
 
+# Callers may say just "mp3"; ElevenLabs wants the full form with rates.
+_FORMAT_ALIASES = {"mp3": "mp3_44100_128", "opus": "opus_48000_64",
+                   "ogg": "opus_48000_64", "oggopus": "opus_48000_64"}
+
+
+def _format_mime(fmt: str) -> str:
+    """Mime by format prefix — mp3 bytes under an ogg label break the player.
+
+    pcm/ulaw/alaw are raw samples without a container, so nothing more
+    specific than octet-stream would be true.
+    """
+    if fmt.startswith("mp3"):
+        return "audio/mpeg"
+    if fmt.startswith("opus"):
+        return "audio/ogg"
+    return "application/octet-stream"
+
 
 class ElevenLabsAdapter(RetryClientMixin, ProviderAdapter):
     name = "elevenlabs"
     env_var = "ELEVENLABS_API_KEY"
     supported_tasks = {Task.TEXT_TO_SPEECH}
-    SUPPORTED_PARAMS = {Task.TEXT_TO_SPEECH: ("voice", "language")}
+    SUPPORTED_PARAMS = {Task.TEXT_TO_SPEECH: ("voice", "language", "output_format")}
 
     def __init__(
         self,
@@ -71,13 +88,16 @@ class ElevenLabsAdapter(RetryClientMixin, ProviderAdapter):
             raise ProviderError("synthesize_speech requires non-empty `text`")
         voice_id = await self._resolve_voice_id(request.params.get("voice"))
         model_id = model.model_id or self._model_id
+        fmt = str(request.params.get("output_format") or "opus_48000_64")
+        fmt = _FORMAT_ALIASES.get(fmt.lower(), fmt)
+        mime = _format_mime(fmt)
 
         response = await self._request_with_retry(
             "POST",
             f"/v1/text-to-speech/{voice_id}",
-            params={"output_format": "opus_48000_64"},
+            params={"output_format": fmt},
             json={"text": text, "model_id": model_id, "language_code": request.params.get("language", "ru")},
-            headers={"Accept": "audio/ogg"},
+            headers={"Accept": mime if mime.startswith("audio/") else "*/*"},
         )
         if not response.content:
             raise ProviderError("ElevenLabs returned empty audio")
@@ -91,9 +111,9 @@ class ElevenLabsAdapter(RetryClientMixin, ProviderAdapter):
             # rate instead.
             usage=Usage(
                 characters=len(text),
-                raw={"characters": len(text), "voice_id": voice_id},
+                raw={"characters": len(text), "voice_id": voice_id, "output_format": fmt},
             ),
-            attachments=[Attachment(kind="audio", mime="audio/ogg", data=response.content)],
+            attachments=[Attachment(kind="audio", mime=mime, data=response.content)],
         )
 
     async def _resolve_voice_id(self, override: str | None) -> str:
