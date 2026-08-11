@@ -521,6 +521,16 @@ answer on its own.
 family → variant, with counts and prices) server-side; splitting `model_id` in
 the browser guesses at a structure the database stores in its own column.
 
+`GET /api/v1/registry/models?task=…&state=active` is also the *client-facing*
+model list, not just the console's: an external caller (agentish) reads it to
+offer per-task model choice to its users, behind the same gate as the rest of
+`/api/v1/*`. The row shape it relies on: `model_provider`, `model_id`,
+`display_name`, `tasks`, `tier`, the price columns plus `price_source_kind` /
+`price_is_unknown`, `extra_params` (the knobs a client may show), and
+`input_map` — whose *keys* are the attachment roles the model expects, which is
+how a client knows to collect a mask or a second photo. Keys of `model_to_dict`
+are therefore a contract; `tests/test_web_views.py` already fails on drift.
+
 `PATCH /api/v1/registry/models/{provider}/{model_id}` writes only the columns it
 is given, out of a closed set that excludes the pair, `source`, `is_active` and
 the catalog dates. Prices arrive as USD per million and are stored per token.

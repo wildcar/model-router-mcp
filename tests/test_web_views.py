@@ -183,3 +183,26 @@ def test_error_envelope_names_the_next_action():
     assert body["hint"]["env_var"] == "ELEVENLABS_API_KEY"
     assert body["retriable"] is False
     assert ProviderUnavailable("x").retriable is True
+
+
+def test_model_row_keys_are_a_client_contract():
+    """`GET /registry/models` is read by external clients (agentish) to offer
+    per-task model choice: `input_map` keys tell it which attachments to
+    collect, `extra_params` which knobs to show. Removing or renaming a key
+    breaks a caller this repo cannot see, so the set is pinned."""
+    from router_mcp.mcp_server.serialize import model_to_dict
+
+    row = model_to_dict(RegistryModel(
+        "stub", "stub", "stub/model", "Stub", (Modality.CHAT,),
+        input_map={"image": "input_image", "mask": "mask"},
+        extra_params=("scale",),
+    ))
+    assert {
+        "service_provider", "model_provider", "model_id", "display_name",
+        "tasks", "tier", "prompt_price", "completion_price", "image_price",
+        "audio_price_per_second", "character_price", "compute_price_per_second",
+        "price_source_kind", "price_is_unknown", "is_active",
+        "input_map", "extra_params",
+    } <= set(row)
+    assert row["input_map"] == {"image": "input_image", "mask": "mask"}
+    assert row["extra_params"] == ["scale"]

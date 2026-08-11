@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-08-11 · модели картинок для agentish: 11 строк Replicate + 3 фикса
+- What: заведены manual-строки §5.2–§5.6 (фон/апскейлы/инпейнт/face-swap/редакторы) с ценами page; синк не депрекирует manual; array-входы image_input; dropped_params → ignored_params; список моделей = GET /registry/models (контракт запинен тестом).
+- Why: agentish ждал строк реестра для удаления фона/апскейла и списка моделей под выбор пользователя.
+- Files: registry/service.py, adapters/replicate.py, routing/router.py, tests×3, AGENTS/SPEC.md
+- Next: easel мёртв — face-swap через cdingram (одно лицо); real-esrgan не берёт 2048px (кап ~1440p) — сказать agentish про даунскейл; nano-banana-2 русский понимает — перевод можно снимать.
+
 ## 2026-08-11 · issue #5: output_format у обоих TTS-адаптеров
 - What: параметр output_format в elevenlabs (проброс строки, алиасы mp3/opus) и yandex (префикс → контейнер MP3/OGG_OPUS/WAV); mime вложения по формату; дефолты не изменились (ogg/opus).
 - Why: Safari iOS 16 не играет ogg/opus — agentish перекодировал через ffmpeg; он уже шлёт mp3_44100_128, теперь роутер отдаёт mp3 сам.

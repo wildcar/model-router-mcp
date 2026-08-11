@@ -544,6 +544,40 @@ it as a managed service on this host.
   предпочитает дешёвый ярус) — качество ElevenLabs только по явному
   `model_id=eleven_multilingual_v2`.
 
+- ✅ Модели картинок для agentish (SPEC agentish §5.2–§5.6) заведены на проде
+  (2026-08-11): 11 manual-строк Replicate, все `image-to-image`, все с ценами
+  (`page`, у bria/eraser — `estimate`: Replicate свою цену не публикует), все
+  подтверждены живыми прогонами через `/api/v1/runs` (фото 1024px PNG >1МБ —
+  путь подписанной ссылки). Обязательные: 851-labs/background-remover
+  (T4 0.000225 $/с; текст → `ignored_params`), recraft-crisp-upscale
+  ($0.004/шт, выход ×4), real-esrgan (T4; `scale=2` проверен, чужой параметр
+  отброшен), clarity-upscaler (0.0011667 $/с), flux-fill-pro ($0.05/шт — за
+  картинку, не за МП; image+mask по ролям), cdingram/face-swap (0.0014 $/с,
+  `input_map` image→input_image, face→swap_image). Опциональные: kontext-max
+  $0.08, nano-banana-2 $0.08 (4K=$0.16, ставка одна — учёт 4K занижен вдвое),
+  seedream-4 $0.03, qwen-image-edit $0.03, bria/eraser (маска без промпта).
+  Все четыре редактора выполнили русские инструкции без перевода («Убери
+  солнце с неба» и др.) — agentish может убирать перевод-костыль минимум для
+  nano-banana-2.
+- Замена по §5.6: easel/advanced-face-swap с Replicate снят (API 404, в
+  коллекции face-swap его нет; у easel остался только ai-avatars) —
+  cdingram/face-swap: одно лицо, `hair_source`/второго лица нет.
+- Ограничение real-esrgan: вход капится ~2.1М пикселей (≈1448×1448) — фото
+  agentish, нормализованные до 2048px, не пролезают (проверено: 4096-вход дал
+  ProviderError с внятным текстом). Клиенту нужен даунскейл до ≤1440p перед
+  этой моделью; crisp/clarity берут 1024–2048 нормально.
+- Три сопутствующих фикса кодом: (1) синк каталога больше не депрекирует
+  manual-строки (иначе allowlist-каталог Replicate снимал их через 6 часов;
+  проверено принудительным `refresh` на проде — 11 строк живы); (2) массивные
+  файловые входы: `image_input` (nano-banana-2, seedream-4) — список URL, а не
+  строка; (3) `raw_meta.dropped_params` адаптера вливается в `ignored_params`
+  конверта — клиент видит, что текст к безпромптовой модели не дошёл.
+- Список моделей для клиента (agentish, выбор модели по задаче):
+  `GET /api/v1/registry/models?task=image-to-image&state=active` объявлен
+  клиентским контрактом (SPEC «Registry edits», ключи `model_to_dict` запинены
+  тестом): роли вложений клиент читает ключами `input_map`, разрешённые ручки —
+  `extra_params`.
+
 ## Next
 
 - ✅ Развёрнуто на прод (2026-07-26 22:3x UTC, `f8a94a2`) и проверено живьём;
