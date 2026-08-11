@@ -40,7 +40,7 @@ class ElevenLabsAdapter(RetryClientMixin, ProviderAdapter):
         self,
         api_key: str | None,
         base_url: str,
-        model_id: str = "eleven_flash_v2_5",
+        model_id: str = "eleven_multilingual_v2",
         voice_name: str = "Nadia",
         voice_id: str | None = None,
         timeout_seconds: float = 60.0,

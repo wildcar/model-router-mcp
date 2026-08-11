@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-08-11 · TTS: flash → multilingual v2
+- What: ElevenLabs TTS переключён на `eleven_multilingual_v2` (config.py, адаптер, .env, .env.example); flash-строка депрекирована в реестрах dev и прод с `replaced_by`.
+- Why: качество русской озвучки — flash оптимизирован под латентность; собран A/B на 9 фразах-ловушках для сверки ушами. `language_code` у multilingual_v2 API принимает вопреки докам.
+- Files: router_mcp/config.py, router_mcp/adapters/elevenlabs.py, .env.example, AGENTS/STATE.md
+- Next: вбить ставку за символ (кредиты ×2 против flash), оценить A/B ушами.
+
 ## 2026-08-09 · у всех моделей Replicate появилась цена
 - What: flux-schnell 0.003 за картинку ($3 за 1000), flux-kontext-pro 0.04 за картинку, musicgen 0.0014 $/с ($0.065 / 47 с, A100 80GB), примерочная 0.0014 $/с — происхождение `page`, арифметика в `price_source`. Только данные реестра на проде, кода не трогали.
 - Why: API Replicate цен не публикует, строки приходили с `price_source_kind=unknown`, и расход по провайдеру в отчётах был занижен и помечен нижней границей.

@@ -75,7 +75,7 @@ class Settings(BaseSettings):
         default="https://api.elevenlabs.io", alias="ELEVENLABS_BASE_URL"
     )
     elevenlabs_tts_model: str = Field(
-        default="eleven_flash_v2_5", alias="ELEVENLABS_TTS_MODEL"
+        default="eleven_multilingual_v2", alias="ELEVENLABS_TTS_MODEL"
     )
     elevenlabs_tts_voice_name: str = Field(default="Nadia", alias="ELEVENLABS_TTS_VOICE_NAME")
     elevenlabs_tts_voice_id: str | None = Field(default=None, alias="ELEVENLABS_TTS_VOICE_ID")
