@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-08-11 · прод: DEFAULT_TTS_MODEL в .env, flash восстановлен
+- What: оператор вписал DEFAULT_TTS_MODEL и поправил устаревший ELEVENLABS_TTS_MODEL; рестарт, bulk restore flash, живая проверка: без хинтов multilingual, по model_id — flash, обе с computed-ценой.
+- Why: финал включения выбора движков — дефолт держится настройкой, flash доступен явным выбором.
+- Files: — (только .env на проде и данные реестра)
+- Next: у /api/tts нет поля tier — добавить при надобности; SpeechKit unpriced до появления тарифа.
+
 ## 2026-08-11 · голоса и движки TTS — через API, дефолт — через настройку
 - What: voice у ElevenLabs принимает имя или id (кэш резолва); оба движка — активные строки (flash cheap 0.00018, multilingual expensive 0.00036 $/символ, происхождение page); DEFAULT_*_MODEL теперь побеждает скан при запросе без хинтов.
 - Why: выбор голоса/движка per-request вместо зашивки в настройках; дефолт группы держится настройкой, а не алфавитом model_id.
