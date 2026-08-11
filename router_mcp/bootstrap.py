@@ -218,11 +218,25 @@ def _build_adapters(settings: Settings) -> list[ProviderSpec]:
                 timeout_seconds=settings.http_timeout_seconds,
                 retries=settings.http_retries,
             ),
+            # Both engines are fixed catalog: a caller picks one per request via
+            # model_id, the unhinted default is DEFAULT_TTS_MODEL. The named
+            # seeds go first so they claim their display names; the settings
+            # row only inserts anything when the env points somewhere else.
             seed_models=[
+                _seed_model(
+                    "elevenlabs", "elevenlabs", "eleven_multilingual_v2",
+                    "ElevenLabs TTS (multilingual v2)", Task.TEXT_TO_SPEECH,
+                    tier="expensive",
+                ),
+                _seed_model(
+                    "elevenlabs", "elevenlabs", "eleven_flash_v2_5",
+                    "ElevenLabs TTS (flash v2.5)", Task.TEXT_TO_SPEECH,
+                    tier="cheap",
+                ),
                 _seed_model(
                     "elevenlabs", "elevenlabs", settings.elevenlabs_tts_model,
                     "ElevenLabs text-to-speech", Task.TEXT_TO_SPEECH, tier="expensive",
-                )
+                ),
             ],
         ),
         ProviderSpec(

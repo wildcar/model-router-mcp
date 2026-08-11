@@ -54,7 +54,7 @@ on it; adapters never touch storage/mcp directly.
 1. ✅ Normalized provider-adapter interface (`generate(request, model)`), task-aware.
 2. ✅ Model registry with 3-level mapping, cost tiers (free/cheap/expensive), manual + catalog rows.
 3. ✅ OpenRouter live catalog merge into the registry (TTL-cached).
-4. ✅ Routing: explicit `model_id`, or task + tier/provider hints, or a per-billing-group default.
+4. ✅ Routing: explicit `model_id`, or task + tier/provider hints, or a per-billing-group default. A configured `DEFAULT_*_MODEL` outranks the price scan when the request carries no hints at all (any hint returns the request to the scan; a default that cannot do the task is ignored).
 5. ✅ Per-request/response logging by `external_user_id` with token usage and cost.
 6. ✅ Cost computation from registry prices; amortized-subscription hook (table + field).
 7. ✅ MCP tools over Streamable HTTP: `list_models`, `chat`, `generate_image`, `transcribe`, `synthesize_speech`, `run_cli`, `get_usage`.

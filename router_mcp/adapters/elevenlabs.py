@@ -29,6 +29,10 @@ _CLEAN_RE = [
     (re.compile(r"\s+"), " "),
 ]
 
+# What a voice_id looks like (e.g. gedzfqL7OGdPbwm0ynTP): one long alphanumeric
+# word. Anything shorter or with spaces is a human name and goes through search.
+_VOICE_ID_RE = re.compile(r"[A-Za-z0-9]{16,40}")
+
 
 class ElevenLabsAdapter(RetryClientMixin, ProviderAdapter):
     name = "elevenlabs"
@@ -50,6 +54,7 @@ class ElevenLabsAdapter(RetryClientMixin, ProviderAdapter):
         self._model_id = model_id
         self._voice_name = voice_name
         self._voice_id = voice_id
+        self._voice_cache: dict[str, str] = {}  # searched name -> voice_id
         self._retries = retries
         self._client = httpx.AsyncClient(
             base_url=base_url,
@@ -92,12 +97,24 @@ class ElevenLabsAdapter(RetryClientMixin, ProviderAdapter):
         )
 
     async def _resolve_voice_id(self, override: str | None) -> str:
+        # A caller may send either form: a voice_id is used as-is, a human name
+        # ("Nadia") is looked up — ids never contain spaces and names are never
+        # twenty characters of base58, so the shape decides.
         if override:
-            return override
+            if _VOICE_ID_RE.fullmatch(override):
+                return override
+            return await self._voice_by_name(override)
         if self._voice_id:
             return self._voice_id
+        self._voice_id = await self._voice_by_name(self._voice_name)
+        return self._voice_id
+
+    async def _voice_by_name(self, name: str) -> str:
+        cached = self._voice_cache.get(name.casefold())
+        if cached:
+            return cached
         response = await self._request_with_retry(
-            "GET", "/v2/voices", params={"search": self._voice_name, "page_size": 25}
+            "GET", "/v2/voices", params={"search": name, "page_size": 25}
         )
         try:
             payload = response.json()
@@ -108,7 +125,7 @@ class ElevenLabsAdapter(RetryClientMixin, ProviderAdapter):
             (
                 v for v in voices
                 if isinstance(v, dict)
-                and str(v.get("name", "")).strip().casefold() == self._voice_name.casefold()
+                and str(v.get("name", "")).strip().casefold() == name.casefold()
                 and v.get("voice_id")
             ),
             None,
@@ -116,10 +133,11 @@ class ElevenLabsAdapter(RetryClientMixin, ProviderAdapter):
         fallback = next((v for v in voices if isinstance(v, dict) and v.get("voice_id")), None)
         voice = exact or fallback
         if voice is None:
-            raise ProviderError(f"No ElevenLabs voice named {self._voice_name!r}")
-        self._voice_id = str(voice["voice_id"])
-        logger.info("Resolved ElevenLabs voice %s -> %s", self._voice_name, self._voice_id)
-        return self._voice_id
+            raise ProviderError(f"No ElevenLabs voice named {name!r}")
+        voice_id = str(voice["voice_id"])
+        self._voice_cache[name.casefold()] = voice_id
+        logger.info("Resolved ElevenLabs voice %s -> %s", name, voice_id)
+        return voice_id
 
     @staticmethod
     def _normalize(text: str) -> str:

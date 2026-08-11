@@ -21,6 +21,7 @@ from router_mcp.domain.messages import (
     RouterResponse,
     Usage,
 )
+from router_mcp.domain.modality import Modality
 from router_mcp.domain.task import Task
 from router_mcp.registry.models import RegistryModel
 from router_mcp.registry.service import RegistryService
@@ -276,3 +277,49 @@ async def test_the_dry_run_names_the_task_not_the_group(core):
         )
     )
     assert plan["problem"] == "модель 'gen-only' не умеет image-to-image"
+
+
+# --- configured per-group defaults (DEFAULT_*_MODEL) ------------------------
+def _default_router(db, adapter, tmp_path, defaults):
+    """The same wiring as `core`, plus an explicit per-group default."""
+    registry = RegistryService(db=db, adapters={"vendor": adapter}, ttl_seconds=3600)
+    return ModelRouter(
+        db=db, registry=registry, adapters={"vendor": adapter},
+        blobs=BlobStore(str(tmp_path / "blobs-default")), defaults=defaults,
+    )
+
+
+async def test_an_unhinted_request_honours_the_configured_default(core, tmp_path):
+    """The unhinted scan lands on `both` (same tier, same zero token price —
+    the model_id sort decides). The configured default names `gen-only`, and
+    that is what must run: the setting exists to beat that accident."""
+    _, adapter, db = core
+    router = _default_router(db, adapter, tmp_path, {Modality.IMAGE: "gen-only"})
+    await router.dispatch(
+        RouterRequest(task=Task.TEXT_TO_IMAGE, external_user_id="u", text="a cat")
+    )
+    assert adapter.calls[-1] == ("text-to-image", "gen-only")
+
+
+async def test_any_hint_sends_the_request_back_to_the_scan(core, tmp_path):
+    """A hint is a choice; the default only covers the caller who made none."""
+    _, adapter, db = core
+    router = _default_router(db, adapter, tmp_path, {Modality.IMAGE: "gen-only"})
+    await router.dispatch(
+        RouterRequest(
+            task=Task.TEXT_TO_IMAGE, external_user_id="u", text="a cat",
+            provider_hint="vendor",
+        )
+    )
+    assert adapter.calls[-1] == ("text-to-image", "both")
+
+
+async def test_a_default_that_cannot_do_the_task_is_ignored(core, tmp_path):
+    """DEFAULT_TTS_MODEL naming a vision row must not hijack image generation:
+    the guard is the task set, same as everywhere else in routing."""
+    _, adapter, db = core
+    router = _default_router(db, adapter, tmp_path, {Modality.IMAGE: "vision-only"})
+    await router.dispatch(
+        RouterRequest(task=Task.TEXT_TO_IMAGE, external_user_id="u", text="a cat")
+    )
+    assert adapter.calls[-1] == ("text-to-image", "both")

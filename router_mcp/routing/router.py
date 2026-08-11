@@ -298,6 +298,23 @@ class ModelRouter:
         self, request: RouterRequest, enabled: set[str], *, allow_sync: bool = True
     ) -> RegistryModel | None:
         """Task (+ tier/provider hints) selection, then the per-group default."""
+        # A configured per-group default (DEFAULT_*_MODEL) outranks the price
+        # scan — but only when the caller expressed no preference at all: any
+        # hint means they are choosing, and the scan is how choices are
+        # honoured. Without this, which of two same-tier unpriced rows answers
+        # an unhinted request is decided by their model_id sort — an accident,
+        # not a setting.
+        if not request.tier and not request.provider_hint:
+            default_id = self._defaults.get(request.modality)
+            if default_id:
+                model = await self._db.get_registry_model_by_id(default_id)
+                if (
+                    model is not None
+                    and request.task in model.tasks
+                    and self._problem_with(model, default_id, enabled) is None
+                ):
+                    return model
+
         candidates = await self._registry.get_models(
             task=request.task.value,
             tier=request.tier,

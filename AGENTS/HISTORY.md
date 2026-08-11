@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-08-11 · голоса и движки TTS — через API, дефолт — через настройку
+- What: voice у ElevenLabs принимает имя или id (кэш резолва); оба движка — активные строки (flash cheap 0.00018, multilingual expensive 0.00036 $/символ, происхождение page); DEFAULT_*_MODEL теперь побеждает скан при запросе без хинтов.
+- Why: выбор голоса/движка per-request вместо зашивки в настройках; дефолт группы держится настройкой, а не алфавитом model_id.
+- Files: routing/router.py, adapters/elevenlabs.py, bootstrap.py, tests/test_task_routing.py, tests/test_adapters_elevenlabs.py, AGENTS/SPEC.md
+- Next: прод — DEFAULT_TTS_MODEL в .env (оператор), затем restore flash + цены; SpeechKit unpriced.
+
 ## 2026-08-11 · SpeechKit включён на проде, ru+kk живьём
 - What: ключ (роль ai.editor) в прод-.env, рестарт, enabled=true через PATCH; живые прогоны /api/tts: marina/ru-RU и amira/kk-KK, 146–363 мс. Только реестр и .env на проде, кода не трогали.
 - Why: проверка роли ключа + обещанный живой прогон; A/B-страница получила колонку SpeechKit и казахскую карточку.
