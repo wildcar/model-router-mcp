@@ -24,7 +24,7 @@ import aiosqlite
 
 from router_mcp.domain.modality import Modality
 from router_mcp.domain.task import Task
-from router_mcp.registry.models import RegistryModel
+from router_mcp.registry.models import PriceSchedule, RegistryModel
 
 
 def _now() -> str:
@@ -185,11 +185,12 @@ def _model_to_row(m: RegistryModel) -> dict[str, Any]:
         # traffic, and a catalog sync writing this row must not touch it. It is
         # set by `confirm_registry_model` alone.
         #
-        # `input_map` and `extra_params` are absent for the same reason, one step
-        # further: only a human knows that `garm_img` is the garment or that this
-        # upscaler's `scale` is worth exposing, so a sync writing the empty
-        # defaults here would erase that on every catalog refresh. Both are set
-        # by `update_registry_model` alone.
+        # `input_map`, `extra_params` and `price_schedule` are absent for the same
+        # reason, one step further: only a human knows that `garm_img` is the
+        # garment, that this upscaler's `scale` is worth exposing, or that the
+        # rate doubles between 01:00 and 04:00 UTC — no catalog publishes any of
+        # it, so a sync writing the empty defaults here would erase it on every
+        # refresh. All three are set by `update_registry_model` alone.
     }
 
 
@@ -246,7 +247,23 @@ def _row_to_model(row: aiosqlite.Row) -> RegistryModel:
             for part in str(_col(row, "extra_params") or "").split(",")
             if part.strip()
         ),
+        price_schedule=_price_schedule(_col(row, "price_schedule")),
     )
+
+
+def _price_schedule(raw: Any) -> PriceSchedule | None:
+    """The stored schedule, or none at all for a column nobody can read.
+
+    Same bargain `_json_map` makes: the API validates what an operator types, and
+    a row that got past it broken loads at its base rate rather than taking the
+    whole registry down. Billing round the clock at the off-peak figure is wrong
+    by a factor of two for a few hours; a registry that will not load is wrong
+    for everything.
+    """
+    try:
+        return PriceSchedule.parse(raw)
+    except ValueError:
+        return None
 
 
 def _json_map(raw: Any) -> dict[str, str]:
@@ -361,6 +378,10 @@ class Database:
                     -- the adapter's declared set. An allowlist, never a
                     -- passthrough; also human-only.
                     extra_params TEXT NOT NULL DEFAULT '',
+                    -- JSON: the UTC windows in which every rate on this row is
+                    -- multiplied, and by how much (DeepSeek's peak hours).
+                    -- Empty means the row costs the same round the clock.
+                    price_schedule TEXT NOT NULL DEFAULT '',
                     -- Bumped on every write. The optimistic lock counts on it
                     -- rather than on updated_at: two edits inside the same
                     -- second carry the same timestamp and the lock would pass.
@@ -494,6 +515,10 @@ class Database:
             # Which of its own knobs this model lets through. Empty everywhere,
             # which is the adapter-only set every existing row had.
             "extra_params": "TEXT NOT NULL DEFAULT ''",
+            # Peak-hour pricing. Empty on every existing row, which is the flat
+            # round-the-clock rate they were all billed at, so the migration
+            # changes no historical number.
+            "price_schedule": "TEXT NOT NULL DEFAULT ''",
         },
         "request_logs": {
             "finish_reason": "TEXT",
@@ -877,6 +902,9 @@ class Database:
             # And for this model's own knobs: `scale` on an upscaler is real and
             # useful, and reaching it used to require editing the adapter.
             "extra_params",
+            # And for the peak hours: a provider announces them in a mail, not in
+            # a catalog, so the only way in is an operator typing them.
+            "price_schedule",
         }
     )
 

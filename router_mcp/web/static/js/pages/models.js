@@ -77,6 +77,19 @@ function renderFacets() {
   }));
 }
 
+// A row whose rates depend on the hour shows its base rate in the table, and the
+// mark is the only warning that the other rate exists.
+function peakMark(model) {
+  return model.price_schedule ? ` ×${model.price_schedule.multiplier}` : '';
+}
+
+function peakTitle(model) {
+  if (!model.price_schedule) return '';
+  const { windows, multiplier, label } = model.price_schedule;
+  return `Базовая ставка вне пика. ${label} ×${multiplier}: ${windows.join(', ')} UTC.`
+    + (model.price_factor_now !== 1 ? '\nСейчас действует пиковая ставка.' : '');
+}
+
 // Where the price came from, with everything known about it in the tooltip and
 // the cell dimmed when nobody has confirmed the number.
 function priceOriginCell(model) {
@@ -142,8 +155,13 @@ function render() {
       { text: model.model_id, className: 'mono' },
       (model.tasks || model.modalities).join(','),
       model.tier,
-      { text: pricePerMillion(model.prompt_price), className: 'num' },
-      { text: pricePerMillion(model.completion_price), className: 'num' },
+      // Marked where the number in the column is only half the story: a row with
+      // peak hours shows its base rate, and an unmarked table would read as the
+      // whole price list.
+      { text: pricePerMillion(model.prompt_price) + peakMark(model), className: 'num',
+        title: peakTitle(model) },
+      { text: pricePerMillion(model.completion_price) + peakMark(model), className: 'num',
+        title: peakTitle(model) },
     ]) {
       const spec = (cell === null || typeof cell !== 'object') ? { text: cell } : cell;
       tr.appendChild(el('td', spec.text, spec));
@@ -279,6 +297,57 @@ function extraParamsField(model) {
   return box;
 }
 
+// Peak hours. DeepSeek charges twice its base rate between 01:00 and 04:00 UTC
+// and again between 06:00 and 10:00, and the prices above are then the off-peak
+// figure — which is not what the row costs right now, and the card has to say so
+// rather than let the operator read the cheaper half of a two-rate price list.
+function priceScheduleFields(model) {
+  const box = el('div', undefined, { className: 'input-map' });
+  box.appendChild(el('h3', 'Пиковые часы'));
+  box.appendChild(el('p',
+    'Окна времени по UTC через запятую и множитель. Цены выше — базовая ставка '
+    + 'вне окон; внутри они умножаются. Пустое поле — цена одна круглые сутки.',
+    { className: 'hint' }));
+  const windows = el('label', undefined, { className: 'price-field' });
+  windows.appendChild(document.createTextNode('Окна, UTC'));
+  const wInput = el('input', undefined, { id: 'edit-peak-windows' });
+  wInput.value = (model.price_schedule?.windows || []).join(', ');
+  wInput.placeholder = '01:00-04:00, 06:00-10:00';
+  windows.appendChild(wInput);
+  box.appendChild(windows);
+
+  const mult = el('label', undefined, { className: 'price-field' });
+  mult.appendChild(document.createTextNode('Множитель'));
+  const mInput = el('input', undefined, { id: 'edit-peak-multiplier' });
+  mInput.type = 'number';
+  mInput.step = 'any';
+  mInput.value = model.price_schedule?.multiplier || '';
+  mInput.placeholder = '2';
+  mult.appendChild(mInput);
+  box.appendChild(mult);
+
+  if (model.price_factor_now && model.price_factor_now !== 1) {
+    box.appendChild(el('p',
+      `Сейчас действует ${model.price_schedule.label} ×${model.price_factor_now}: `
+      + 'прогон в эту минуту спишется по умноженной ставке.',
+      { className: 'hint warn' }));
+  }
+  return box;
+}
+
+function readPriceSchedule(model) {
+  const wField = $('edit-peak-windows');
+  const mField = $('edit-peak-multiplier');
+  if (!wField || !mField) return null;
+  const windows = wField.value.split(',').map((s) => s.trim()).filter(Boolean);
+  const multiplier = Number(mField.value) || 1;
+  const had = Boolean(model.price_schedule);
+  // Nothing typed and nothing there before: sending `{}` would be a clearing
+  // edit on every save of every flat-rate row.
+  if (!windows.length && !had) return null;
+  return { windows, multiplier, label: model.price_schedule?.label || 'пиковый тариф' };
+}
+
 function readExtraParams() {
   const field = $('edit-extra-params');
   if (!field) return null;
@@ -359,6 +428,8 @@ function select(model) {
         { className: 'hint warn' }));
     }
   }
+
+  card.appendChild(priceScheduleFields(model));
 
   if (takesImages(model)) card.appendChild(inputMapFields(model));
   card.appendChild(extraParamsField(model));
@@ -547,6 +618,7 @@ async function save(model) {
   const compute = computeField && computeField.value !== ''
     ? Number(computeField.value) : null;
   const extra = readExtraParams();
+  const schedule = readPriceSchedule(model);
   if (!confirmJump('Промпт', model.prompt_price * 1e6, prompt)) return;
   if (!confirmJump('Ответ', model.completion_price * 1e6, completion)) return;
   const updated = await api(
@@ -561,6 +633,9 @@ async function save(model) {
       // a map the operator never saw.
       ...($('edit-role-image') ? { input_map: readInputMap() } : {}),
       ...(extra === null ? {} : { extra_params: extra }),
+      // Same rule as the roles: only when the operator could see the field, and
+      // `{}` clears the schedule rather than meaning "unchanged".
+      ...(schedule === null ? {} : { price_schedule: schedule }),
       revision: model.revision } });
   toast('Строка сохранена');
   replace(updated);

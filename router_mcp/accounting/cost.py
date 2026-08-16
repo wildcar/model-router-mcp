@@ -25,6 +25,7 @@ Two rules the rest of the system leans on (§7 of docs/UI_CONCEPT_v2.md):
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from decimal import Decimal
 from typing import Any, Callable
 
@@ -52,6 +53,13 @@ class CostResult:
     # The sum by its terms: [{units, rate, kind, label, amount}]. The inspector
     # prints these so a price can be checked rather than trusted.
     breakdown: list[dict[str, Any]] = field(default_factory=list)
+    # What the registry's rates were multiplied by, when the row prices its peak
+    # hours differently (DeepSeek). 1.0 for every flat-rate row. Carried out
+    # because the rates in the breakdown are the multiplied ones: without this an
+    # operator comparing the log against the price table sees two numbers that
+    # disagree and no reason why.
+    price_factor: float = 1.0
+    price_factor_label: str = ""
 
 
 def _d(value: float | int | None) -> Decimal:
@@ -76,7 +84,15 @@ def compute_cost(
     override_usd: float | None = None,
     subscription: SubscriptionRecord | None = None,
     notional: bool = False,
+    at: datetime | None = None,
 ) -> CostResult:
+    """Price one finished request.
+
+    `at` is when the request ran, and matters only for a row whose rates depend
+    on the time of day (`RegistryModel.price_schedule`). It defaults to now,
+    which is right for a run being logged as it finishes and wrong for a
+    recomputation of an old row — so the caller that has the timestamp passes it.
+    """
     # 1. Provider-reported cost. Under a subscription the CLI still reports what
     # the work would have cost; that number is real information and fake money,
     # so it is labelled and kept out of the real total.
@@ -101,7 +117,13 @@ def compute_cost(
         # No quota -> cannot attribute per-request; record zero but flag mode.
         return CostResult(0.0, "amortized", "amortized_subscription")
 
-    # 3. Per-request from registry prices.
+    # 3. Per-request from registry prices, as they stood when the request ran.
+    # Everything below works on plain rates: a row that charges double between
+    # 01:00 and 04:00 UTC hands back a copy of itself with the rates already
+    # multiplied, so no term, no ladder and no dry run has to know about hours.
+    factor = model.price_factor_at(at)
+    label = model.price_schedule.label if factor != 1.0 and model.price_schedule else ""
+    model = model.priced_at(at)
     if (
         not model.is_free
         and not model.has_rate_for(modality)
@@ -117,7 +139,8 @@ def compute_cost(
         # confirmed rate for one group and none for another (a per-second-of-audio
         # price says nothing about seconds of GPU), and trusting the provenance
         # alone turned that gap into a confident zero.
-        return CostResult(0.0, "unpriced", "per_request")
+        return CostResult(0.0, "unpriced", "per_request", price_factor=factor,
+                          price_factor_label=label)
 
     terms = _terms(model, modality, usage)
     total = sum((_d(t["amount"]) for t in terms), Decimal(0))
@@ -125,7 +148,7 @@ def compute_cost(
     # and so does a cache rate we had to guess at.
     guessed_cache = any(t.get("assumed") for t in terms)
     source = "computed" if model.price_is_verified and not guessed_cache else "estimated"
-    return CostResult(float(total), source, "per_request", terms)
+    return CostResult(float(total), source, "per_request", terms, factor, label)
 
 
 def _terms(model: RegistryModel, modality: Modality, usage: Usage) -> list[dict[str, Any]]:

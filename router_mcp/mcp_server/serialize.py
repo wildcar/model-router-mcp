@@ -44,6 +44,12 @@ def model_to_dict(m: RegistryModel) -> dict[str, Any]:
         "price_source": m.price_source,
         "price_source_kind": m.price_source_kind,
         "price_checked_at": m.price_checked_at,
+        # When the rates above are not the whole story: the UTC windows in which
+        # they are multiplied, and by how much. Null for a flat-rate row, which
+        # is every row but DeepSeek's. `price_factor_now` is what a caller
+        # comparing costs this minute should multiply by.
+        "price_schedule": m.price_schedule.to_dict() if m.price_schedule else None,
+        "price_factor_now": m.price_factor_at(),
         "price_is_verified": m.price_is_verified,
         "price_is_unknown": m.price_is_unknown,
         "updated_at": m.updated_at,

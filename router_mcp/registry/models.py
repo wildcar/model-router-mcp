@@ -12,13 +12,133 @@ other, so a row built either way loads.
 
 from __future__ import annotations
 
+import dataclasses
+import json
+import re
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any
 
 from router_mcp.domain.modality import Modality
 from router_mcp.domain.task import DEFAULT_TASK, Task
 
 # Per-1K-token threshold below which a text model counts as "cheap".
 CHEAP_THRESHOLD_PER_1K = 0.001
+
+_HHMM = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
+
+
+def _minutes(text: str) -> int:
+    match = _HHMM.fullmatch(str(text).strip())
+    if match is None:
+        raise ValueError(f"Not a UTC time of day: {text!r}; expected HH:MM")
+    return int(match.group(1)) * 60 + int(match.group(2))
+
+
+def _hhmm(minutes: int) -> str:
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+@dataclass(frozen=True, slots=True)
+class PriceSchedule:
+    """Times of day at which every rate on the row is multiplied.
+
+    DeepSeek bills peak hours at twice the off-peak rate (01:00–04:00 and
+    06:00–10:00 UTC as of 2026-08-16), and the registry holds one number per
+    rate. Storing the peak figure overcharges the seventeen off-peak hours;
+    storing the off-peak figure undercharges the other seven. Neither is a price
+    the provider actually charges, so the row carries the base rate plus the
+    windows in which it doubles, and accounting multiplies at the moment of the
+    run.
+
+    A multiplier rather than a second set of columns because that is the shape of
+    the discount every provider that does this has published: one schedule, all
+    rates scaled together. Nine more price columns would have to be filled in
+    twice and could drift apart.
+
+    Windows are minutes of the **UTC** day, half-open `[start, end)`. A window
+    whose start is after its end wraps past midnight — DeepSeek's previous
+    schedule ran 16:30–00:30 UTC, so this is not a hypothetical.
+    """
+
+    windows: tuple[tuple[int, int], ...] = ()
+    multiplier: float = 1.0
+    # What to call the multiplied rate on screen. The registry has no vocabulary
+    # of its own for "peak", and a provider may well name its window something
+    # else (a night discount is the same mechanism upside down).
+    label: str = "пиковый тариф"
+
+    @property
+    def is_active(self) -> bool:
+        return bool(self.windows) and self.multiplier != 1.0
+
+    def factor_at(self, moment: datetime) -> float:
+        """The multiplier in force at `moment`, which is 1.0 outside every window."""
+        if not self.is_active:
+            return 1.0
+        utc = moment.astimezone(timezone.utc)
+        minute = utc.hour * 60 + utc.minute
+        for start, end in self.windows:
+            inside = start <= minute < end if start < end else (minute >= start or minute < end)
+            if inside:
+                return self.multiplier
+        return 1.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "windows": [f"{_hhmm(start)}-{_hhmm(end)}" for start, end in self.windows],
+            "multiplier": self.multiplier,
+            "label": self.label,
+            # Written out rather than assumed: the column is hand-edited, and a
+            # reader who has to guess the zone reads the whole schedule wrong.
+            "tz": "UTC",
+        }
+
+    def to_json(self) -> str:
+        return json.dumps(self.to_dict(), ensure_ascii=False)
+
+    @classmethod
+    def parse(cls, raw: Any) -> "PriceSchedule | None":
+        """A schedule from its stored JSON, or None for anything unusable.
+
+        Strict about the times — an operator who types `25:00` wants to hear
+        about it — but a row whose column holds junk loads without a schedule
+        rather than taking the registry down, the same bargain `input_map` makes.
+        """
+        if not raw:
+            return None
+        data = raw
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except json.JSONDecodeError:
+                return None
+        if not isinstance(data, dict):
+            return None
+        windows: list[tuple[int, int]] = []
+        for item in data.get("windows") or ():
+            if isinstance(item, str):
+                parts = item.split("-")
+            elif isinstance(item, (list, tuple)):
+                parts = list(item)
+            else:
+                raise ValueError(f"Not a time window: {item!r}")
+            if len(parts) != 2:
+                raise ValueError(f"Not a time window: {item!r}; expected HH:MM-HH:MM")
+            start, end = _minutes(parts[0]), _minutes(parts[1])
+            if start == end:
+                raise ValueError(f"Empty time window: {item!r}")
+            windows.append((start, end))
+        try:
+            multiplier = float(data.get("multiplier", 1.0))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Not a multiplier: {data.get('multiplier')!r}") from exc
+        if multiplier <= 0:
+            raise ValueError("A price multiplier must be positive")
+        label = str(data.get("label") or "пиковый тариф")
+        if not windows or multiplier == 1.0:
+            return None
+        return cls(tuple(windows), multiplier, label)
 
 
 @dataclass(slots=True)
@@ -83,6 +203,10 @@ class RegistryModel:
     price_source: str | None = None
     price_source_kind: str = "estimate"
     price_checked_at: str | None = None
+    # Times of day at which the rates above are multiplied (DeepSeek's peak
+    # hours). None means the row costs the same round the clock, which is every
+    # other row here. Human-written like `input_map`: no catalog publishes it.
+    price_schedule: PriceSchedule | None = None
     # Last write to the row, both set by the database. `revision` is what the
     # console sends back on an edit: a timestamp has second resolution, and two
     # writes inside one second would slip through the optimistic lock.
@@ -180,6 +304,45 @@ class RegistryModel:
     def is_free(self) -> bool:
         """Free as a fact, not as a gap: confirmed provenance and zero rates."""
         return self._all_prices_zero and self.price_is_verified
+
+    # The rates a schedule scales. All of them: a provider that raises its prices
+    # for eight hours raises the price of the row, and a column left out here
+    # would quietly bill the off-peak figure during the peak.
+    _SCHEDULED_RATES = (
+        "prompt_price",
+        "completion_price",
+        "image_price",
+        "audio_price_per_second",
+        "character_price",
+        "cache_read_price",
+        "cache_write_price",
+        "web_search_price",
+        "compute_price_per_second",
+    )
+
+    def priced_at(self, moment: datetime | None = None) -> "RegistryModel":
+        """This row with the rates in force at `moment` (default: now, UTC).
+
+        Returns `self` when nothing scales, so the common row — every row but
+        DeepSeek's two — allocates nothing and compares identical. Everything
+        downstream (`compute_cost`, `billing_unit`, `ladder_price`, the dry-run
+        estimate) then works on ordinary rates and needs to know nothing about
+        schedules.
+        """
+        schedule = self.price_schedule
+        if schedule is None or not schedule.is_active:
+            return self
+        factor = schedule.factor_at(moment or datetime.now(timezone.utc))
+        if factor == 1.0:
+            return self
+        scaled = {name: getattr(self, name) * factor for name in self._SCHEDULED_RATES}
+        return dataclasses.replace(self, **scaled)
+
+    def price_factor_at(self, moment: datetime | None = None) -> float:
+        """What the rates on this row are multiplied by at `moment`."""
+        if self.price_schedule is None:
+            return 1.0
+        return self.price_schedule.factor_at(moment or datetime.now(timezone.utc))
 
     def has_unit_rate_for(self, modality: Modality) -> bool:
         """Whether a per-unit rate exists for that billing group.

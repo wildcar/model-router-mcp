@@ -34,7 +34,9 @@
       "tasks": [
         "text-to-text"
       ],
-      "extra_params": []
+      "extra_params": [],
+      "price_schedule": null,
+      "price_factor_now": 1.0
     },
     {
       "service_provider": "anthropic-api",
@@ -70,7 +72,9 @@
       "tasks": [
         "text-to-text"
       ],
-      "extra_params": []
+      "extra_params": [],
+      "price_schedule": null,
+      "price_factor_now": 1.0
     },
     {
       "service_provider": "anthropic-api",
@@ -106,7 +110,9 @@
       "tasks": [
         "text-to-text"
       ],
-      "extra_params": []
+      "extra_params": [],
+      "price_schedule": null,
+      "price_factor_now": 1.0
     },
     {
       "service_provider": "claude-cli",
@@ -142,7 +148,9 @@
       "tasks": [
         "cli"
       ],
-      "extra_params": []
+      "extra_params": [],
+      "price_schedule": null,
+      "price_factor_now": 1.0
     },
     {
       "service_provider": "codex-cli",
@@ -178,7 +186,9 @@
       "tasks": [
         "cli"
       ],
-      "extra_params": []
+      "extra_params": [],
+      "price_schedule": null,
+      "price_factor_now": 1.0
     },
     {
       "service_provider": "codex-oauth",
@@ -214,7 +224,9 @@
       "tasks": [
         "text-to-image"
       ],
-      "extra_params": []
+      "extra_params": [],
+      "price_schedule": null,
+      "price_factor_now": 1.0
     },
     {
       "service_provider": "replicate",
@@ -257,7 +269,55 @@
       "extra_params": [
         "category",
         "garment_des"
-      ]
+      ],
+      "price_schedule": null,
+      "price_factor_now": 1.0
+    },
+    {
+      "service_provider": "deepseek",
+      "model_provider": "deepseek",
+      "model_id": "deepseek-v4-flash",
+      "display_name": "DeepSeek V4 Flash",
+      "modalities": [
+        "chat"
+      ],
+      "capabilities": [],
+      "tier": "cheap",
+      "prompt_price": 2.2e-07,
+      "completion_price": 6.6e-07,
+      "image_price": 0.0,
+      "audio_price_per_second": 0.0,
+      "character_price": 0.0,
+      "cache_read_price": 7e-09,
+      "cache_write_price": 0.0,
+      "context_length": 0,
+      "source": "catalog",
+      "pricing_mode": "per_request",
+      "is_active": true,
+      "last_seen_at": null,
+      "deprecated_at": null,
+      "replaced_by": null,
+      "price_source": "https://api-docs.deepseek.com/quick_start/pricing",
+      "price_source_kind": "page",
+      "price_checked_at": null,
+      "price_is_verified": true,
+      "price_is_unknown": false,
+      "updated_at": "2026-07-26T12:41:56+00:00",
+      "revision": 0,
+      "tasks": [
+        "text-to-text"
+      ],
+      "extra_params": [],
+      "price_schedule": {
+        "windows": [
+          "01:00-04:00",
+          "06:00-10:00"
+        ],
+        "multiplier": 2.0,
+        "label": "пиковый тариф",
+        "tz": "UTC"
+      },
+      "price_factor_now": 1.0
     }
   ],
   "total": 7,

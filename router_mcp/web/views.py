@@ -58,19 +58,25 @@ def _cost(
     source: str | None,
     breakdown: list[dict[str, Any]] | None = None,
     provider_value: float | None = None,
+    price_factor: float = 1.0,
+    price_factor_label: str = "",
 ):
     """Money always travels with its provenance — see §7.1 of the concept.
 
     A number without `source` is exactly the kind of confidently wrong figure the
     console exists to prevent, so the key is never omitted. `provider_value` is
     the sum the provider itself reported, when it did: the second opinion the
-    reconciliation compares ours against.
+    reconciliation compares ours against. `price_factor` says the rates in the
+    breakdown are not the ones in the price table and why — a peak-hour run whose
+    arithmetic silently uses doubled rates reads as a mistake.
     """
     return {
         "value": value,
         "source": source,
         "breakdown": breakdown or [],
         "provider_value": provider_value,
+        "price_factor": price_factor,
+        "price_factor_label": price_factor_label,
     }
 
 
@@ -272,7 +278,9 @@ def run_from_dispatch(
         ),
         cost=_cost(result.cost.cost_usd, result.cost.cost_source,
                    result.cost.breakdown,
-                   provider_value=result.response.raw_meta.get("provider_cost_usd")),
+                   provider_value=result.response.raw_meta.get("provider_cost_usd"),
+                   price_factor=result.cost.price_factor,
+                   price_factor_label=result.cost.price_factor_label),
         latency_ms=result.latency_ms,
         attempts=result.attempts,
         provider_status=result.provider_status,

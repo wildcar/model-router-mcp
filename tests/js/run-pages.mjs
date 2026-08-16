@@ -258,7 +258,21 @@ await runPage('models', 'models', async (doc, calls, settleNow) => {
   check('модели: свои параметры модели подставлены строкой',
     doc.getElementById('edit-extra-params').value === 'category, garment_des',
     doc.getElementById('edit-extra-params').value);
+  // Peak hours: the table shows the base rate, so the row that has a second
+  // rate has to say so — an unmarked number reads as the whole price list.
+  const peak = [...doc.querySelectorAll('#models tbody tr')].find(
+    (tr) => tr.textContent.includes('deepseek-v4-flash'));
+  check('модели: строка с пиковым тарифом помечена в таблице',
+    peak.textContent.includes('×2'), peak.textContent);
+  peak.dispatch('click');
+  check('модели: окна пика подставлены в поле',
+    doc.getElementById('edit-peak-windows').value === '01:00-04:00, 06:00-10:00',
+    doc.getElementById('edit-peak-windows').value);
+  check('модели: множитель подставлен',
+    doc.getElementById('edit-peak-multiplier').value === 2);
   doc.querySelector('#models tbody').children[0].dispatch('click');
+  check('модели: у обычной строки поле пика пустое',
+    doc.getElementById('edit-peak-windows').value === '');
 
   // «Спросить поставщика»: the live list, and adopting from it.
   const ask = doc.getElementById('ask-provider');

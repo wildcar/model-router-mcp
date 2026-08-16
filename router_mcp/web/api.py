@@ -39,7 +39,7 @@ from router_mcp.domain.task import (
     validate_task_inputs,
 )
 from router_mcp.mcp_server.serialize import model_to_dict
-from router_mcp.registry.models import RegistryModel
+from router_mcp.registry.models import PriceSchedule, RegistryModel
 from router_mcp.runtime import get_core
 from router_mcp.web import capabilities, health, mcp_summary, public_blobs, retention
 from router_mcp.web.views import page, run_from_dispatch, run_from_log
@@ -1079,6 +1079,10 @@ class ModelPatch(BaseModel):
     # This model's own knobs, on top of the adapter's declared set. `[]` clears
     # it, for the same reason `input_map: {}` does.
     extra_params: list[str] | None = None
+    # Peak-hour pricing: `{"windows": ["01:00-04:00"], "multiplier": 2.0,
+    # "label": "пиковый тариф"}`, times in UTC. The prices above are then the
+    # base (off-peak) rate. `{}` clears it back to a flat round-the-clock rate.
+    price_schedule: dict[str, Any] | None = None
     # Optimistic locking: the revision the operator's copy of the row carried.
     revision: int | None = None
     # Drop the local price and take the catalog's again on the next sync.
@@ -1157,6 +1161,26 @@ async def api_patch_model(
             )
         cleaned = {k: str(v).strip() for k, v in body.input_map.items() if str(v).strip()}
         fields["input_map"] = json.dumps(cleaned, ensure_ascii=False)
+
+    if body.price_schedule is not None:
+        # Inside neither branch: the windows are not a price, so `revert_price`
+        # leaves them alone — except that handing the row back to the catalog
+        # does clear them, because a catalog that publishes a rate publishes one
+        # rate, and a stale multiplier on top of it doubles a number nobody
+        # checked. An empty object is how an operator drops the schedule.
+        try:
+            schedule = PriceSchedule.parse(body.price_schedule)
+        except ValueError as exc:
+            raise BadRequest(f"Расписание цен: {exc}") from exc
+        fields["price_schedule"] = schedule.to_json() if schedule else ""
+        if schedule:
+            # Typing a schedule is vouching for how the row is priced: the base
+            # rate under it is now half of what the vendor advertises, and a sync
+            # that overwrote it with the flat catalog figure would leave the
+            # multiplier standing on top of the wrong number.
+            fields.setdefault("price_source_kind", body.price_source_kind or "manual")
+    elif body.revert_price:
+        fields["price_schedule"] = ""
 
     if body.extra_params is not None:
         names = [str(p).strip() for p in body.extra_params]

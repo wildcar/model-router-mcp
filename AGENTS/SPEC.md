@@ -85,6 +85,7 @@ on it; adapters never touch storage/mcp directly.
 32. ✅ Replicate as a provider: the catalog is an env-configured allowlist, inputs are mapped through each model's own OpenAPI schema, prices arrive `unknown` and are typed in by hand.
 33. ✅ A stored file can be handed to a provider by a signed, expiring link on a separate host; without a signing key nothing is served on that path.
 34. ✅ A provider's model list can be asked for on demand and stored selectively: the registry keeps the models that answered a request (`confirmed_at`), what a human curated, and nothing else. A market-sized catalog is browsed, not mirrored. [ADR-0008]
+35. ✅ A price may depend on the time of day: a row carries its base rate plus the UTC windows in which every rate is multiplied (`price_schedule`), and cost, the dry run and the fallback ladder all read the rate in force at that moment. DeepSeek's peak hours are the first case.
 
 ## Tasks, media and billing groups (30)
 
@@ -276,6 +277,40 @@ elsewhere the row points at the vendor's price page and stays `page`/`manual`
 until a human confirms it. `compute_cost` reports `cost_source='estimated'`
 instead of `'computed'` when the price behind the number is unverified
 (`kind='estimate'`), so an invented figure is visible in logs and usage.
+
+### Prices that depend on the time of day (16)
+
+A provider may charge more at some hours: DeepSeek doubled its rates for
+01:00–04:00 and 06:00–10:00 UTC on 2026-08-16. One number per rate cannot hold
+that — the peak figure overcharges seventeen hours a day and the off-peak figure
+undercharges seven — so `registry_models.price_schedule` carries the windows
+alongside the base rate:
+
+```json
+{"windows": ["01:00-04:00", "06:00-10:00"], "multiplier": 2.0,
+ "label": "пиковый тариф", "tz": "UTC"}
+```
+
+The stored prices are the rate **outside** every window; inside one, all nine
+rate columns are multiplied together (`RegistryModel.priced_at(moment)` returns
+the row at the rates in force, and returns `self` for the flat-rate rows, which
+is every other row). Windows are UTC minutes, half-open `[start, end)`, and may
+wrap past midnight.
+
+Everything that reads a rate reads it at a moment: `compute_cost(..., at=)` uses
+the run's start (a long run is billed the rate it was quoted), the dry-run
+estimate and the fallback ladder use now, so «дешевле» compares what two rows
+would actually charge. The multiplied rates are what the breakdown shows, and
+`CostResult.price_factor` / the `cost` block of the `Run` envelope carry the
+factor and its label — otherwise the arithmetic in the log contradicts the price
+table with no explanation. A provider-reported sum is never multiplied.
+
+No catalog publishes any of this, so the column is human-only: the sync never
+writes it (like `input_map` and `extra_params`), and typing a schedule counts as
+vouching for the price, which sets `price_source_kind` to `manual` unless the
+edit named another. `revert_price` clears it along with the price. A column that
+cannot be parsed loads as no schedule and bills the base rate, because a registry
+that will not load is worse than a rate that is wrong for a few hours.
 
 ### Fallback policy (17)
 

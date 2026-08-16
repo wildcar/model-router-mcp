@@ -378,6 +378,10 @@ class RegistryService:
                 "price_source_kind": fresh.price_source_kind,
                 "price_checked_at": fresh.price_checked_at or stamp,
             }
+            # `price_schedule` is not in here, and cannot be: the sync does not
+            # write that column at all. It does not have to be — typing a
+            # schedule counts as a human price (`api_patch_model`), so a row that
+            # has one is never `prices_authoritative` in the first place.
         else:
             # Keep the price, but record the page the provider publishes it on
             # when we have nothing better on file.

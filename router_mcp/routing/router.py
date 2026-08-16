@@ -413,14 +413,19 @@ class ModelRouter:
         # of the two token rates is zero for every image, audio and video row, so
         # ordering by it meant «дешевле» ranked by model_id.
         group = request.task.billing_group
-        ref = reference.ladder_price(group) if reference is not None else None
+        # At the rates in force now, so that «дешевле» compares what the two rows
+        # would actually charge for this request. A row in its peak hours really
+        # is the more expensive one, and a ladder built on the base rate would
+        # step onto it saying the opposite.
+        now = datetime.now(timezone.utc)
+        ref = reference.priced_at(now).ladder_price(group) if reference is not None else None
 
         considered: list[Candidate] = []
         eligible: list[Candidate] = []
         for model in pool:
             if model.model_id in exclude:
                 continue
-            price = model.ladder_price(group)
+            price = model.priced_at(now).ladder_price(group)
             adapter = self._adapters.get(model.service_provider_id)
             if model.price_is_unknown:
                 # A price ladder cannot place a model whose price nobody knows,
@@ -500,17 +505,22 @@ class ModelRouter:
     @staticmethod
     def _candidate_sort_key(request: RouterRequest):
         requested_tier = request.tier
+        # One clock for the whole sort: rates read model by model could straddle
+        # the edge of a peak window and order the pool by two different price
+        # lists, which is not an ordering at all.
+        now = datetime.now(timezone.utc)
 
         def key(m: RegistryModel) -> tuple:
             # When a tier is requested, exact matches first; otherwise prefer
             # cheaper tiers, then cheaper absolute price. Models whose price is
             # simply unknown go last: their zeros are missing data, not a bargain.
             tier_rank = 0 if (requested_tier and m.tier == requested_tier) else 1
+            priced = m.priced_at(now)
             return (
                 1 if m.price_is_unknown else 0,
                 tier_rank,
                 _TIER_ORDER.get(m.tier, 99),
-                m.prompt_price + m.completion_price,
+                priced.prompt_price + priced.completion_price,
                 m.model_id,
             )
 
@@ -622,6 +632,16 @@ class ModelRouter:
                 "source": "unpriced",
                 "assumption": "у модели нет цены в реестре",
             }
+        # Quoted at the rate in force right now: a price the screen shows at
+        # 02:00 UTC and the log then doubles is worse than no price at all. The
+        # note says so, because the same run an hour later costs half as much.
+        factor = model.price_factor_at()
+        peak = (
+            f"; сейчас {model.price_schedule.label} ×{factor:g}"
+            if factor != 1.0 and model.price_schedule
+            else ""
+        )
+        model = model.priced_at()
         group = request.modality
         if group in PER_UNIT_GROUPS:
             spec, per_unit = billing_unit(model, group)
@@ -634,7 +654,7 @@ class ModelRouter:
             return {
                 "value": per_unit,
                 "source": "computed" if model.price_is_verified else "estimated",
-                "assumption": spec.per_unit,
+                "assumption": spec.per_unit + peak,
             }
         text = request.text or json.dumps(request.messages or [], ensure_ascii=False)
         # Four characters to a token is the usual rule of thumb; it is a rough
@@ -649,7 +669,7 @@ class ModelRouter:
             "source": "computed" if model.price_is_verified else "estimated",
             "assumption": (
                 f"промпт ≈{prompt_tokens} токенов (по длине текста), "
-                f"ответ {completion_tokens} токенов"
+                f"ответ {completion_tokens} токенов{peak}"
             ),
         }
 
@@ -663,6 +683,10 @@ class ModelRouter:
         without waiting for the result.
         """
         t0 = time.monotonic()
+        # Wall clock as well, because `t0` cannot say what hour it is and a row
+        # with peak-hour pricing is charged by the clock. Taken at the start: a
+        # long run that crosses into the peak is billed the rate it was quoted.
+        started_at = datetime.now(timezone.utc)
         # Persist large request payloads up-front so they survive failures.
         request_ref = self._persist_request_attachment(request)
         request_text = self._truncate_request_text(request)
@@ -724,7 +748,7 @@ class ModelRouter:
         try:
             return await self._dispatch_inner(
                 request, log_id, steps, step, t0, request_text, request_ref, request_json,
-                lambda: dropped,
+                lambda: dropped, started_at,
             )
         except asyncio.CancelledError:
             # Cancellation is an outcome, not an absence of one: the provider may
@@ -769,6 +793,10 @@ class ModelRouter:
         request_ref: str | None,
         request_json: dict[str, Any] | None,
         dropped,
+        # When the run started, in wall-clock UTC. Only the peak-hour rows read
+        # it, and they need the hour rather than the elapsed milliseconds `t0`
+        # carries. Defaulted so a caller that has no clock still prices at now.
+        started_at: datetime | None = None,
     ) -> DispatchResult:
         try:
             attempts = await self.plan(request)
@@ -880,8 +908,17 @@ class ModelRouter:
             override_usd=response.cost_override_usd,
             subscription=subscription,
             notional=response.cost_is_notional,
+            at=started_at,
         )
         step("cost", "cost computed", cost_usd=cost.cost_usd, cost_source=cost.cost_source)
+        if cost.price_factor != 1.0:
+            # The rates in the breakdown are not the ones in the price table, and
+            # the timeline is where an operator goes to find out why.
+            step(
+                "cost",
+                f"{cost.price_factor_label} ×{cost.price_factor:g}",
+                price_factor=cost.price_factor,
+            )
 
         meta = response.raw_meta or {}
         finished_at = datetime.now(timezone.utc).isoformat(timespec="seconds")

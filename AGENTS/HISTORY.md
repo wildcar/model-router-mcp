@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-08-16 · пиковые часы: цена, зависящая от времени суток
+- What: `price_schedule` на строке реестра (окна UTC + множитель, базовая ставка — внепиковая); `priced_at(момент)` читают учёт (по старту прогона), прикидка и лестница подмены; множитель едет в конверте и таймлайне; поля в консоли и пометка ×2 в таблице; цены DeepSeek v4-flash/v4-pro заведены по объявлению.
+- Why: DeepSeek с 16:00 UTC 2026-08-16 берёт вдвое больше в 01:00–04:00 и 06:00–10:00 — одно число на ставку врало бы либо 17 часов в сутки, либо 7.
+- Files: registry/models.py, storage/database.py, accounting/cost.py, routing/router.py, web/{api,views}.py, mcp_server/serialize.py, web/static/js/pages/models.js, tests/test_price_schedule.py, tests/js/{run-pages.mjs,fixtures/models.json}, AGENTS/SPEC.md
+- Next: деплой и те же цены на прод через PATCH; решить, не устарели ли вдвое `deepseek-chat`/`deepseek-reasoner`.
+
 ## 2026-08-11 · модели картинок для agentish: 11 строк Replicate + 3 фикса
 - What: заведены manual-строки §5.2–§5.6 (фон/апскейлы/инпейнт/face-swap/редакторы) с ценами page; синк не депрекирует manual; array-входы image_input; dropped_params → ignored_params; список моделей = GET /registry/models (контракт запинен тестом).
 - Why: agentish ждал строк реестра для удаления фона/апскейла и списка моделей под выбор пользователя.
