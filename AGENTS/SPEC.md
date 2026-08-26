@@ -87,6 +87,7 @@ on it; adapters never touch storage/mcp directly.
 34. ✅ A provider's model list can be asked for on demand and stored selectively: the registry keeps the models that answered a request (`confirmed_at`), what a human curated, and nothing else. A market-sized catalog is browsed, not mirrored. [ADR-0008]
 35. ✅ A price may depend on the time of day: a row carries its base rate plus the UTC windows in which every rate is multiplied (`price_schedule`), and cost, the dry run and the fallback ladder all read the rate in force at that moment. DeepSeek's peak hours are the first case.
 36. ✅ Application identity per request (`app_url` / `app_name`): the site the app runs on wins, a plain name is the fallback, and the effective identity is logged, filterable in the journal and forwarded to providers that have such a parameter (OpenRouter's `HTTP-Referer` / `X-Title`). A request with no identity is made as the router itself: `https://mr.wildcar.org` (`SELF_APP_URL`).
+37. ✅ OpenRouter's dedicated images endpoint (`POST /images`): rows marked with the `images_api` capability — models absent from `GET /models` entirely, meta/muse-image first — generate and edit images there (`input_references` for reference photos), and an unmarked row follows the chat endpoint's own «use /api/v1/images» 404 instead of dying on it. The adapter now declares `image-to-image`.
 
 ## Tasks, media and billing groups (30)
 
@@ -507,6 +508,28 @@ claude-cli appends `--allowedTools WebSearch` — explicit whitelisting: today
 box stays out of the call rather than forbidding the model to search. The
 subscription backends publish no search rate, so no accounting term is added
 there: codex-oauth/CLI costs stay estimated or notional as before.
+
+### OpenRouter images endpoint (37)
+
+OpenRouter serves two kinds of image models. Chat-shaped ones (the Gemini
+image family) live in `GET /models` and answer on `/chat/completions` — the
+path this adapter always had. Pure image models (meta/muse-image, seedream,
+gpt-image-*) are listed only in `GET /images/models`, refuse the chat endpoint
+with an HTTP 404 that names `/api/v1/images`, and take
+`{model, prompt, aspect_ratio, resolution, n, quality, output_format, seed,
+input_references[]}`; the answer is `data[].b64_json + media_type` and
+`usage.cost`.
+
+The registry row opts in with the `images_api` capability (human-set: these
+models are invisible to the catalog sync, so their rows are `manual`). A row
+without the mark that hits the distinctive 404 is retried once on `/images` —
+the provider's own routing advice, not a retired id; a plain 404 still means
+the model is gone. Reference images ride in `input_references` in the same
+content-part shape as chat image parts, which is what makes `image-to-image`
+(declared by the adapter since this requirement) work: editing, composition,
+reference conditioning. App-identity headers (36) apply on this path as on
+the chat path. Billing: the answer carries `usage.cost`; the registry rate is
+`image_price` per image, entered by hand from a confirmed run.
 
 ### Response files
 

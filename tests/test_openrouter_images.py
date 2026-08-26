@@ -1,0 +1,160 @@
+"""OpenRouter's dedicated images endpoint. No network.
+
+Some image models answer only on POST /images and are absent from GET /models
+entirely (meta/muse-image was the first — its chat call came back
+«…cannot be used with the chat/completions endpoint», seen live on prod, log
+16434). The contract under test: a row marked `images_api` goes straight
+there, an unmarked row follows the provider's own 404 hint, references ride
+in `input_references`, and the base64 answer becomes attachments with the
+usage and the provider's cost kept.
+"""
+
+from __future__ import annotations
+
+import base64
+import json
+from typing import Any
+
+import httpx
+import pytest
+
+from router_mcp.adapters.openrouter import OpenRouterAdapter
+from router_mcp.domain.errors import ModelUnavailable, ProviderError
+from router_mcp.domain.messages import Attachment, RouterRequest
+from router_mcp.domain.modality import Modality
+from router_mcp.domain.task import Task
+from router_mcp.registry.models import RegistryModel
+
+BASE = "https://openrouter.test/api/v1"
+PNG = b"\x89PNG fake bytes"
+
+CHAT_REFUSAL = (
+    '{"error":{"message":"meta/muse-image is an image generation model and '
+    "cannot be used with the chat/completions endpoint. "
+    'Use the /api/v1/images endpoint instead.","code":404}}'
+)
+
+
+def _images_body(n: int = 1) -> dict[str, Any]:
+    return {
+        "id": "img-1",
+        "data": [
+            {"b64_json": base64.b64encode(PNG).decode(), "media_type": "image/png"}
+            for _ in range(n)
+        ],
+        "usage": {"cost": 0.011, "completion_tokens": 4321},
+    }
+
+
+def _adapter(responses: dict[str, httpx.Response]):
+    """An adapter whose transport answers by path and keeps every request."""
+    calls: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return responses[request.url.path.rsplit("/", 1)[-1]]
+
+    adapter = OpenRouterAdapter(api_key="sk-test", base_url=BASE, retries=0)
+    adapter._client = httpx.AsyncClient(
+        base_url=BASE, transport=httpx.MockTransport(handle)
+    )
+    return adapter, calls
+
+
+def _model(capabilities: tuple[str, ...] = ("images_api",)) -> RegistryModel:
+    return RegistryModel(
+        service_provider_id="openrouter",
+        model_provider="meta",
+        model_id="meta/muse-image",
+        display_name="Meta: Muse Image",
+        modalities=(Modality.IMAGE,),
+        tasks=(Task.TEXT_TO_IMAGE, Task.IMAGE_TO_IMAGE),
+        capabilities=capabilities,
+        source="manual",
+        price_source_kind="estimate",
+    )
+
+
+@pytest.mark.asyncio
+async def test_marked_row_goes_straight_to_images():
+    adapter, calls = _adapter({"images": httpx.Response(200, json=_images_body())})
+    request = RouterRequest(
+        Task.TEXT_TO_IMAGE, "u", text="дерево на закате",
+        params={"aspect_ratio": "1:1", "n": 1, "temperature": 0.7},
+    )
+    response = await adapter.generate(request, _model())
+
+    assert [c.url.path for c in calls] == ["/api/v1/images"]
+    payload = json.loads(calls[0].content.decode())
+    assert payload["model"] == "meta/muse-image"
+    assert payload["prompt"] == "дерево на закате"
+    assert payload["aspect_ratio"] == "1:1" and payload["n"] == 1
+    # A chat knob has no meaning on this endpoint and must not be sent on.
+    assert "temperature" not in payload
+    assert response.usage.images == 1
+    assert response.attachments[0].data == PNG
+    assert response.attachments[0].mime == "image/png"
+    assert response.raw_meta["provider_cost_usd"] == 0.011
+    assert response.raw_meta["endpoint"] == "/images"
+
+
+@pytest.mark.asyncio
+async def test_reference_images_ride_in_input_references():
+    adapter, calls = _adapter({"images": httpx.Response(200, json=_images_body())})
+    request = RouterRequest(
+        Task.IMAGE_TO_IMAGE, "u", text="убери фон",
+        attachments=[Attachment(kind="image", mime="image/jpeg", data=b"jpeg")],
+    )
+    await adapter.generate(request, _model())
+    payload = json.loads(calls[0].content.decode())
+    ref = payload["input_references"][0]
+    assert ref["type"] == "image_url"
+    assert ref["image_url"]["url"].startswith("data:image/jpeg;base64,")
+
+
+@pytest.mark.asyncio
+async def test_unmarked_row_follows_the_chat_404_hint():
+    """The provider says which endpoint to use; that is routing advice, not a
+    retired model, so the request must not die on it."""
+    adapter, calls = _adapter({
+        "completions": httpx.Response(404, text=CHAT_REFUSAL),
+        "images": httpx.Response(200, json=_images_body()),
+    })
+    request = RouterRequest(Task.TEXT_TO_IMAGE, "u", text="дерево")
+    response = await adapter.generate(request, _model(capabilities=()))
+    assert [c.url.path for c in calls] == [
+        "/api/v1/chat/completions", "/api/v1/images",
+    ]
+    assert response.usage.images == 1
+
+
+@pytest.mark.asyncio
+async def test_a_plain_404_still_means_the_model_is_gone():
+    adapter, _calls = _adapter({
+        "completions": httpx.Response(404, text='{"error":{"message":"No such model"}}'),
+    })
+    request = RouterRequest(Task.TEXT_TO_IMAGE, "u", text="дерево")
+    with pytest.raises(ModelUnavailable):
+        await adapter.generate(request, _model(capabilities=()))
+
+
+@pytest.mark.asyncio
+async def test_empty_answer_is_a_named_failure():
+    adapter, _calls = _adapter({
+        "images": httpx.Response(200, json={"data": [], "usage": {"cost": 0}}),
+    })
+    request = RouterRequest(Task.TEXT_TO_IMAGE, "u", text="дерево")
+    with pytest.raises(ProviderError, match="empty response"):
+        await adapter.generate(request, _model())
+
+
+@pytest.mark.asyncio
+async def test_images_path_carries_the_app_identity():
+    adapter, calls = _adapter({"images": httpx.Response(200, json=_images_body())})
+    request = RouterRequest(
+        Task.TEXT_TO_IMAGE, "u", text="дерево",
+        app_url="https://agentish.example", app_name="Agentish",
+    )
+    await adapter.generate(request, _model())
+    assert calls[0].headers["HTTP-Referer"] == "https://agentish.example"
+    assert calls[0].headers["X-Title"] == "Agentish"

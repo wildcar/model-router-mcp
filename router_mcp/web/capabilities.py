@@ -101,6 +101,18 @@ PARAM_SPECS: dict[str, dict[str, Any]] = {
         "Каждый вариант оплачивается отдельно",
         min=1, max=8, step=1, default=None,
     ),
+    # The same two facts as num_outputs/width×height, in the words OpenRouter's
+    # images endpoint reads them.
+    "n": _param(
+        "n", "integer", "Сколько картинок",
+        "Каждая оплачивается отдельно",
+        min=1, max=10, step=1, default=None,
+    ),
+    "resolution": _param(
+        "resolution", "text", "Разрешение",
+        "Например 1K или 2K; набор у каждой модели свой",
+        default=None,
+    ),
     "num_inference_steps": _param(
         "num_inference_steps", "integer", "Шагов расчёта",
         "Больше шагов — дольше и дороже, качество растёт не бесконечно",

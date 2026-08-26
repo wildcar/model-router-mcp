@@ -26,7 +26,7 @@ from router_mcp.adapters.base import (
     truncated_error,
 )
 from router_mcp.domain import progress
-from router_mcp.domain.errors import ProviderError, ProviderUnavailable
+from router_mcp.domain.errors import ModelUnavailable, ProviderError, ProviderUnavailable
 from router_mcp.domain.messages import Attachment, RouterRequest, RouterResponse, Usage
 from router_mcp.domain.task import Task
 from router_mcp.registry.models import RegistryModel
@@ -52,6 +52,18 @@ LEGACY_WEB_PLUGIN_ID = "web"
 # provider's, not ours; on the tool rung an error naming tools is about the
 # tool — the payload contains nothing else unusual.
 TOOL_UNSUPPORTED_RE = re.compile(r"\btools?\b", re.IGNORECASE)
+
+# Some image models answer only on OpenRouter's dedicated images endpoint
+# (POST /images: model + prompt in, base64 out) and are absent from GET /models
+# entirely — meta/muse-image was the first. A registry row opts in with this
+# capability; a row that lacks it still lands there when the chat endpoint
+# answers its distinctive 404 («…cannot be used with the chat/completions
+# endpoint. Use the /api/v1/images endpoint instead»), matched below.
+IMAGES_API_CAPABILITY = "images_api"
+IMAGES_ONLY_RE = re.compile(r"images endpoint", re.IGNORECASE)
+# Tasks the images endpoint can serve; also the only tasks whose 404 may mean
+# "wrong endpoint" rather than "model gone".
+IMAGE_TASKS = (Task.TEXT_TO_IMAGE, Task.IMAGE_TO_IMAGE)
 
 
 
@@ -136,13 +148,24 @@ def _image_part(att: Attachment) -> dict[str, Any] | None:
 class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
     name = "openrouter"
     env_var = "OPENROUTER_API_KEY"
-    # Everything goes through /chat/completions, including the models that answer
-    # with an image, so the knobs are the same for all three.
-    supported_tasks = {Task.TEXT_TO_TEXT, Task.IMAGE_TO_TEXT, Task.TEXT_TO_IMAGE}
+    # Chat-shaped models — including the ones that answer with an image — go
+    # through /chat/completions. Models carrying `images_api` (and the ones the
+    # chat endpoint refuses with its "use /api/v1/images" 404) go to the
+    # dedicated images endpoint, which is also what makes editing an image
+    # (`image-to-image`, reference photos in `input_references`) reachable here.
+    supported_tasks = {
+        Task.TEXT_TO_TEXT, Task.IMAGE_TO_TEXT, Task.TEXT_TO_IMAGE,
+        Task.IMAGE_TO_IMAGE,
+    }
     # A market of four hundred ids, five of which were ever addressed from here.
     # Fetched on demand, stored on adoption or on a confirmed answer (ADR-0008).
     catalog_scope = "browse"
     _CHAT_PARAMS = ("temperature", "max_tokens", "top_p", "reasoning")
+    # What POST /images reads. Wire names as OpenRouter spells them; each path
+    # builds its payload from its own tuple, so a chat knob sent to an images
+    # model is simply not sent on (and vice versa) — the task-level declaration
+    # below is the union, because one task can travel either path.
+    _IMAGE_PARAMS = ("aspect_ratio", "resolution", "n", "quality", "output_format", "seed")
     # `web_search` is normalized, not a passthrough field: the caller says a
     # boolean, this adapter translates it into whatever OpenRouter accepts
     # today. That keeps MCP clients unaware of OpenRouter's tool vocabulary and
@@ -150,7 +173,8 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
     SUPPORTED_PARAMS = {
         Task.TEXT_TO_TEXT: _CHAT_PARAMS + ("web_search",),
         Task.IMAGE_TO_TEXT: _CHAT_PARAMS + ("web_search",),
-        Task.TEXT_TO_IMAGE: _CHAT_PARAMS,
+        Task.TEXT_TO_IMAGE: _CHAT_PARAMS + _IMAGE_PARAMS,
+        Task.IMAGE_TO_IMAGE: _IMAGE_PARAMS,
     }
 
     def __init__(
@@ -201,6 +225,8 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
         return headers
 
     async def generate(self, request: RouterRequest, model: RegistryModel) -> RouterResponse:
+        if request.task in IMAGE_TASKS and IMAGES_API_CAPABILITY in model.capabilities:
+            return await self._generate_image(request, model)
         messages = self._build_messages(request)
         payload: dict[str, Any] = {
             "model": model.model_id,
@@ -219,12 +245,25 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
             self.SUPPORTED_PARAMS.get(request.task) or ()
         )
         headers = self._app_headers(request)
-        if web_search:
-            data, search_mode = await self._chat_with_web_search(
-                payload, model.model_id, headers
-            )
-        else:
-            data, search_mode = await self._chat_data(payload, headers), None
+        try:
+            if web_search:
+                data, search_mode = await self._chat_with_web_search(
+                    payload, model.model_id, headers
+                )
+            else:
+                data, search_mode = await self._chat_data(payload, headers), None
+        except ModelUnavailable as exc:
+            # The provider's own hint that this is an images-endpoint model a
+            # row simply has not been marked for — not a retired id. Rows adopt
+            # the `images_api` capability by hand; this keeps an unmarked one
+            # working instead of failing on a distinction the caller cannot see.
+            if request.task in IMAGE_TASKS and IMAGES_ONLY_RE.search(str(exc)):
+                progress.emit(
+                    "endpoint",
+                    "модель отвечает только на /images, повторяю туда",
+                )
+                return await self._generate_image(request, model)
+            raise
 
         choices = data.get("choices", []) if isinstance(data, dict) else []
         choice0 = choices[0] if choices and isinstance(choices[0], dict) else {}
@@ -278,6 +317,92 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
             text=text or None,
             attachments=attachments,
             raw_meta=raw_meta,
+        )
+
+    async def _generate_image(
+        self, request: RouterRequest, model: RegistryModel
+    ) -> RouterResponse:
+        """POST /images: the endpoint for models the chat surface refuses.
+
+        Prompt plus reference images in, base64 images out. The reference
+        images ride in `input_references` in the same content-part shape the
+        chat endpoint uses, so `_image_part` serves both. The create is
+        synchronous and billed on success, like a chat call, so the standard
+        retry policy applies.
+        """
+        payload: dict[str, Any] = {"model": model.model_id}
+        if request.text:
+            payload["prompt"] = request.text
+        for key in self._IMAGE_PARAMS:
+            if key in request.params:
+                payload[key] = request.params[key]
+        references = [
+            part for part in (_image_part(att) for att in request.attachments) if part
+        ]
+        if references:
+            payload["input_references"] = references
+
+        response = await self._request_with_retry(
+            "POST",
+            "/images",
+            json=payload,
+            headers=self._app_headers(request),
+            # Generation regularly outlives the 60-second chat default; the
+            # same allowance the codex image path gets (nginx already waits).
+            timeout=180.0,
+        )
+        try:
+            data = response.json()
+        except json.JSONDecodeError as exc:
+            raise ProviderUnavailable("OpenRouter returned invalid JSON") from exc
+        top_error = self._extract_top_level_error(data)
+        if top_error is not None:
+            message, code = top_error
+            if code in (429, 500, 502, 503, 504):
+                raise ProviderUnavailable(f"OpenRouter temporarily unavailable: {message}")
+            raise ProviderError(message)
+
+        attachments: list[Attachment] = []
+        entries = data.get("data") if isinstance(data, dict) else None
+        for item in entries or []:
+            if not isinstance(item, dict):
+                continue
+            mime = str(item.get("media_type") or "image/png")
+            b64 = item.get("b64_json")
+            if isinstance(b64, str) and b64.strip():
+                attachments.append(
+                    Attachment(kind="image", mime=mime, data=base64.b64decode(b64))
+                )
+            elif isinstance(item.get("url"), str) and item["url"].strip():
+                attachments.append(Attachment(kind="image", mime=mime, url=item["url"]))
+        if not attachments:
+            logger.warning(
+                "OpenRouter /images parse miss model=%s sample=%s",
+                model.model_id,
+                json.dumps(data, ensure_ascii=False)[:600],
+            )
+            raise ProviderError("Model returned an empty response")
+
+        raw_usage = data.get("usage") if isinstance(data, dict) else None
+        raw_usage = raw_usage if isinstance(raw_usage, dict) else {}
+        usage = Usage(
+            prompt_tokens=raw_usage.get("prompt_tokens"),
+            completion_tokens=raw_usage.get("completion_tokens"),
+            total_tokens=raw_usage.get("total_tokens"),
+            images=len(attachments),
+            raw=raw_usage,
+        )
+        return RouterResponse(
+            task=request.task,
+            provider=self.name,
+            model_id=model.model_id,
+            usage=usage,
+            attachments=attachments,
+            raw_meta={
+                "provider_request_id": data.get("id") if isinstance(data, dict) else None,
+                "provider_cost_usd": self._reported_cost(raw_usage),
+                "endpoint": "/images",
+            },
         )
 
     async def _chat_data(
