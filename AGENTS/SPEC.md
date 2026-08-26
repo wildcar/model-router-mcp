@@ -354,6 +354,14 @@ both are caller-supplied and untrusted, a grouping key exactly like
   they arrived. `GET /logs?app=` filters by substring (like `user`/`model`),
   `GET /logs/suggest?field=app` feeds the typeahead, and «Расход» groups by
   `app`.
+- **`app_url` must be a domain the app owns.** Observed live (2026-08-26,
+  posinus): OpenRouter attributes an app by the referer's *domain* and cuts
+  the path — `https://dzen.ru/posinus` was recorded as dzen.ru's existing app
+  («Autoposting dzen», `https://dzen.ru/`), account gone, our X-Title
+  ignored. An app living under someone else's domain identifies with its own
+  (posinus now sends `https://wildcar.org` + «Positive news» — recorded
+  correctly). Our journal is unaffected either way: it stores what the caller
+  sent.
 
 ## Web contract (18–20)
 

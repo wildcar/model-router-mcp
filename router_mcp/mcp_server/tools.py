@@ -103,7 +103,9 @@ async def chat(
     it runs on wins, a plain name is the fallback. The identity is logged, the
     journal filters by it, and providers that take such a parameter receive it
     (OpenRouter's HTTP-Referer / X-Title). Omitted, the request is made as the
-    router itself.
+    router itself. Note: OpenRouter attributes by the URL's *domain* and cuts
+    the path — a page on someone else's site (https://dzen.ru/yourblog) is
+    recorded as that domain's app, so pass a domain your app owns.
 
     Pass `images_b64` to ask about pictures. The task then becomes `image-to-text`
     and only models that declare it are eligible — a model that can *draw* is not
