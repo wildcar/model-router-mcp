@@ -191,6 +191,8 @@ function requestTab(run, labels) {
     ['Канал', labels?.channels?.[run.channel]?.label || run.channel],
     ['Инструмент', run.tool],
     ['Клиент', run.client_id],
+    // The site wins over the name; both halves are in the request snapshot.
+    ['Приложение', run.app || req.app_url || req.app_name],
     ['Ключ идемпотентности', req.client_request_id,
       { copy: Boolean(req.client_request_id) }],
     ['Пакет', req.batch_id],

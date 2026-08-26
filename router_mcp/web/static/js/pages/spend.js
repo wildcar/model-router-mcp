@@ -16,6 +16,7 @@ const BUCKET_HEADS = {
   model: 'Модель',
   provider: 'Поставщик',
   channel: 'Канал',
+  app: 'Приложение',
   day: 'День',
 };
 

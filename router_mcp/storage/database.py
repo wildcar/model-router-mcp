@@ -101,6 +101,10 @@ class RequestLogRecord:
     client_id: str | None = None
     client_request_id: str | None = None
     batch_id: str | None = None  # one operator action that fanned out into N runs
+    # The effective application identity (site, else name). One column, not
+    # two: the journal filters by "which app", and the split lives in the
+    # request snapshot for the rows that need it.
+    app: str | None = None
     # Execution detail the console's timeline and error card need.
     attempts: int | None = None  # HTTP tries inside the successful provider attempt
     provider_status: int | None = None  # last upstream HTTP status
@@ -430,6 +434,7 @@ class Database:
                     client_id TEXT,
                     client_request_id TEXT,
                     batch_id TEXT,
+                    app TEXT,
                     attempts INTEGER,
                     provider_status INTEGER,
                     provider_request_id TEXT,
@@ -537,6 +542,9 @@ class Database:
             "client_request_id": "TEXT",
             # Wave 3: the multi-model mode of «Прогон» sends N runs at once.
             "batch_id": "TEXT",
+            # The application the request came from (site, else name). Null on
+            # every existing row: nobody identified themselves before the field.
+            "app": "TEXT",
             "attempts": "INTEGER",
             "provider_status": "INTEGER",
             "provider_request_id": "TEXT",
@@ -1097,7 +1105,7 @@ class Database:
     LOG_LIST_COLUMNS = (
         "id", "created_at", "external_user_id", "modality", "task", "service_provider_id",
         "model_provider", "model_id", "requested_model_id", "fallback_reason",
-        "status", "error_message", "channel", "tool", "client_id", "batch_id",
+        "status", "error_message", "channel", "tool", "client_id", "batch_id", "app",
         "prompt_tokens", "completion_tokens", "total_tokens", "cache_read_tokens",
         "reasoning_tokens", "audio_seconds", "compute_seconds", "images", "characters",
         "cost_usd", "cost_source", "pricing_mode", "provider_cost_usd",
@@ -1134,6 +1142,7 @@ class Database:
         user_contains: str | None = None,
         model_contains: str | None = None,
         provider: str | None = None,
+        app_contains: str | None = None,
     ) -> tuple[list[str], list[Any]]:
         clauses: list[str] = []
         params: list[Any] = []
@@ -1164,6 +1173,11 @@ class Database:
         if provider:
             clauses.append("service_provider_id = ?")
             params.append(provider)
+        # Substring like the user box: «wildcar» finds https://wildcar.org and
+        # every subdomain of it.
+        if app_contains:
+            clauses.append("instr(lower(app), lower(?)) > 0")
+            params.append(app_contains)
         if channel:
             clauses.append("channel = ?")
             params.append(channel)
@@ -1216,6 +1230,7 @@ class Database:
         user_contains: str | None = None,
         model_contains: str | None = None,
         provider: str | None = None,
+        app_contains: str | None = None,
         before_id: int | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
@@ -1241,6 +1256,7 @@ class Database:
             user_contains=user_contains,
             model_contains=model_contains,
             provider=provider,
+            app_contains=app_contains,
         )
         if before_id is not None:
             clauses.append("id < ?")
@@ -1273,6 +1289,7 @@ class Database:
         user_contains: str | None = None,
         model_contains: str | None = None,
         provider: str | None = None,
+        app_contains: str | None = None,
     ) -> int:
         clauses, params = self._log_filters(
             external_user_id=external_user_id,
@@ -1291,6 +1308,7 @@ class Database:
             user_contains=user_contains,
             model_contains=model_contains,
             provider=provider,
+            app_contains=app_contains,
         )
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         row = await self._fetchone(
@@ -1304,6 +1322,7 @@ class Database:
         "user": "external_user_id",
         "model": "model_id",
         "provider": "service_provider_id",
+        "app": "app",
     }
 
     async def suggest_log_values(
@@ -1391,6 +1410,7 @@ class Database:
         "model": "model_id",
         "provider": "service_provider_id",
         "channel": "channel",
+        "app": "app",
         "day": "substr(created_at, 1, 10)",
     }
 

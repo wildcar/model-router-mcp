@@ -4,6 +4,13 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-08-26 · идентификация приложения в запросе, журнале и у провайдеров
+- What: `app_url`/`app_name` на всех входах (MCP + web API + /runs); эффективная идентичность в `request_logs.app`, конверт `Run` несёт `app` (schema v3); журнал — колонка, фильтр подстрокой, подсказки, группировка расхода; OpenRouter получает HTTP-Referer/X-Title на каждый запрос, без идентификации — от роутера (`SELF_APP_URL=https://mr.wildcar.org`).
+- Why: задача пользователя — знать, какое приложение делает запрос, фильтровать по нему и передавать идентичность провайдерам, у которых есть такой параметр.
+- Files: domain/messages.py, adapters/openrouter.py, config.py, bootstrap.py, storage/database.py, routing/router.py, web/{views,api,labels}.py, mcp_server/tools.py, templates/logs.html, static/js/{pages/logs.js,pages/spend.js,components/inspector.js}, tests/test_app_identity.py, AGENTS/SPEC.md
+- Fixes-on-the-fly: test_health_mcp — захардкоженная дата строк выпала из окна 720 ч, теперь штамп «сейчас».
+- Next: деплой на прод (миграция `app` придёт рестартом); подсказать agentish слать app_url.
+
 ## 2026-08-16 · пиковые часы: цена, зависящая от времени суток
 - What: `price_schedule` на строке реестра (окна UTC + множитель, базовая ставка — внепиковая); `priced_at(момент)` читают учёт (по старту прогона), прикидка и лестница подмены; множитель едет в конверте и таймлайне; поля в консоли и пометка ×2 в таблице; цены DeepSeek v4-flash/v4-pro заведены по объявлению.
 - Why: DeepSeek с 16:00 UTC 2026-08-16 берёт вдвое больше в 01:00–04:00 и 06:00–10:00 — одно число на ставку врало бы либо 17 часов в сутки, либо 7.

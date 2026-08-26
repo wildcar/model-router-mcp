@@ -90,12 +90,20 @@ async def chat(
     provider: str | None = None,
     params: dict[str, Any] | None = None,
     fallback: dict[str, Any] | str | None = None,
+    app_url: str | None = None,
+    app_name: str | None = None,
 ) -> dict[str, Any]:
     """Route a chat request to a model and return its text response with usage/cost.
 
     Provide either `text` (a single user message) or `messages` (OpenAI-shaped
     history). `model_id` pins a specific model; otherwise the router picks one by
     `tier`/`provider` hints.
+
+    `app_url` / `app_name` identify the application making the request: the site
+    it runs on wins, a plain name is the fallback. The identity is logged, the
+    journal filters by it, and providers that take such a parameter receive it
+    (OpenRouter's HTTP-Referer / X-Title). Omitted, the request is made as the
+    router itself.
 
     Pass `images_b64` to ask about pictures. The task then becomes `image-to-text`
     and only models that declare it are eligible — a model that can *draw* is not
@@ -125,6 +133,8 @@ async def chat(
         fallback=FallbackPolicy.parse(fallback),
         channel="mcp",
         tool="chat",
+        app_url=app_url,
+        app_name=app_name,
     )
     result = await dispatch_tool(request)
     out = dispatch_summary(result)
@@ -148,9 +158,12 @@ async def generate_image(
     provider: str | None = None,
     params: dict[str, Any] | None = None,
     fallback: dict[str, Any] | str | None = None,
+    app_url: str | None = None,
+    app_name: str | None = None,
 ) -> dict[str, Any]:
     """Generate an image from a text prompt. Returns image(s) as base64 and/or
-    URLs, with usage and cost. `fallback` works as in `chat`."""
+    URLs, with usage and cost. `fallback` and `app_url`/`app_name` work as in
+    `chat`."""
     core = get_core()
     request = RouterRequest(
         task=Task.TEXT_TO_IMAGE,
@@ -162,6 +175,8 @@ async def generate_image(
         fallback=FallbackPolicy.parse(fallback),
         channel="mcp",
         tool="generate_image",
+        app_url=app_url,
+        app_name=app_name,
     )
     result = await dispatch_tool(request)
     out = dispatch_summary(result)
@@ -180,6 +195,8 @@ async def edit_image(
     provider: str | None = None,
     params: dict[str, Any] | None = None,
     fallback: dict[str, Any] | str | None = None,
+    app_url: str | None = None,
+    app_name: str | None = None,
 ) -> dict[str, Any]:
     """Change an existing image according to a text instruction (`image-to-image`).
 
@@ -190,7 +207,7 @@ async def edit_image(
     the call fails saying so.
 
     `mask_b64` marks the region to change, where the model accepts one.
-    `fallback` works as in `chat`.
+    `fallback` and `app_url`/`app_name` work as in `chat`.
     """
     core = get_core()
     attachments = [Attachment(kind="image", mime=mime, data=base64.b64decode(image_b64))]
@@ -209,6 +226,8 @@ async def edit_image(
         fallback=FallbackPolicy.parse(fallback),
         channel="mcp",
         tool="edit_image",
+        app_url=app_url,
+        app_name=app_name,
     )
     result = await dispatch_tool(request)
     out = dispatch_summary(result)
@@ -224,9 +243,11 @@ async def transcribe(
     model_id: str | None = None,
     provider: str | None = None,
     fallback: dict[str, Any] | str | None = None,
+    app_url: str | None = None,
+    app_name: str | None = None,
 ) -> dict[str, Any]:
     """Transcribe base64-encoded audio to text (speech-to-text).
-    `fallback` works as in `chat`."""
+    `fallback` and `app_url`/`app_name` work as in `chat`."""
     request = RouterRequest(
         task=Task.SPEECH_TO_TEXT,
         external_user_id=external_user_id,
@@ -236,6 +257,8 @@ async def transcribe(
         fallback=FallbackPolicy.parse(fallback),
         channel="mcp",
         tool="transcribe",
+        app_url=app_url,
+        app_name=app_name,
     )
     result = await dispatch_tool(request)
     out = dispatch_summary(result)
@@ -252,9 +275,11 @@ async def synthesize_speech(
     provider: str | None = None,
     params: dict[str, Any] | None = None,
     fallback: dict[str, Any] | str | None = None,
+    app_url: str | None = None,
+    app_name: str | None = None,
 ) -> dict[str, Any]:
     """Synthesize speech from text (text-to-speech). Returns base64 audio.
-    `fallback` works as in `chat`."""
+    `fallback` and `app_url`/`app_name` work as in `chat`."""
     core = get_core()
     merged = dict(params or {})
     if voice:
@@ -269,6 +294,8 @@ async def synthesize_speech(
         fallback=FallbackPolicy.parse(fallback),
         channel="mcp",
         tool="synthesize_speech",
+        app_url=app_url,
+        app_name=app_name,
     )
     result = await dispatch_tool(request)
     out = dispatch_summary(result)
@@ -283,11 +310,13 @@ async def run_cli(
     engine: str = "codex",
     cwd: str | None = None,
     timeout_sec: int | None = None,
+    app_url: str | None = None,
+    app_name: str | None = None,
 ) -> dict[str, Any]:
     """Run a prompt through a local CLI engine (`codex` or `claude`).
 
     `cwd` (optional) must be under a server-allowed root. Returns the engine's
-    text output with usage and cost.
+    text output with usage and cost. `app_url`/`app_name` work as in `chat`.
     """
     engine = engine.strip().lower()
     if engine not in ("codex", "claude"):
@@ -305,6 +334,8 @@ async def run_cli(
         params=params,
         channel="mcp",
         tool="run_cli",
+        app_url=app_url,
+        app_name=app_name,
     )
     result = await dispatch_tool(request)
     out = dispatch_summary(result)

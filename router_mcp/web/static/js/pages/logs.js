@@ -24,6 +24,7 @@ function filters() {
     user: $('f-user').value.trim(),
     provider: $('f-provider').value,
     model: $('f-model').value.trim(),
+    app: $('f-app').value.trim(),
     status: $('f-status').value,
     task: $('f-task').value,
     modality: $('f-modality').value,
@@ -204,6 +205,9 @@ function logRow(r) {
     { text: r.id, className: 'num' },
     { text: localTime(r.created_at), title: r.created_at },
     r.external_user_id,
+    // Which application asked. Empty means the caller did not say and the
+    // request went out under the router's own identity.
+    { text: r.app || '—', className: r.app ? 'trunc' : 'muted', title: r.app || '' },
     r.service_provider_id || '—',
     { node: modelCell(r) },
     // The task, because the group is ambiguous between two of them: a row that
@@ -389,6 +393,7 @@ const typeahead = debounce((field, inputId, listId) => {
 
 $('f-user').addEventListener('input', () => typeahead('user', 'f-user', 'f-user-options'));
 $('f-model').addEventListener('input', () => typeahead('model', 'f-model', 'f-model-options'));
+$('f-app').addEventListener('input', () => typeahead('app', 'f-app', 'f-app-options'));
 
 // The day pager. From «все дни» either arrow steps into today — the newest day
 // is where the operator was looking anyway.
@@ -415,7 +420,7 @@ $('f-day-clear').addEventListener('click', () => {
   reload();
 });
 
-for (const id of ['f-user', 'f-provider', 'f-model', 'f-status', 'f-task',
+for (const id of ['f-user', 'f-provider', 'f-model', 'f-app', 'f-status', 'f-task',
                   'f-modality', 'f-channel', 'f-date',
                   'f-fallback', 'f-retries', 'f-unverified', 'f-mismatch']) {
   $(id).addEventListener('change', () => loadLogs());
@@ -428,6 +433,7 @@ $('tz').textContent = timeZoneLabel();
 const initial = readParams();
 if (initial.user) $('f-user').value = initial.user;
 if (initial.model) $('f-model').value = initial.model;
+if (initial.app) $('f-app').value = initial.app;
 if (initial.status) $('f-status').value = initial.status;
 if (initial.channel) $('f-channel').value = initial.channel;
 if (initial.date) $('f-date').value = initial.date;
@@ -482,4 +488,5 @@ Promise.allSettled([
   // Warm the datalists so the boxes offer recent labels on first focus.
   suggest('user', $('f-user').value.trim(), 'f-user-options');
   suggest('model', $('f-model').value.trim(), 'f-model-options');
+  suggest('app', $('f-app').value.trim(), 'f-app-options');
 });

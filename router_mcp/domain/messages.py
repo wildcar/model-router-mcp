@@ -162,6 +162,13 @@ class RouterRequest:
     tool: str | None = None  # MCP tool name, when the call came through /mcp
     client_id: str | None = None  # caller-supplied label; untrusted, like the user id
     client_request_id: str | None = None  # caller's idempotency key
+    # Which application is asking. The site it runs on is the identity of
+    # record; a plain name is the fallback for apps that have none. Both are
+    # caller-supplied and untrusted — a grouping key like `external_user_id` —
+    # and they are forwarded to providers that take such a parameter
+    # (OpenRouter's HTTP-Referer / X-Title).
+    app_url: str | None = None
+    app_name: str | None = None
     # Set when one operator action fanned out into several runs (the
     # multi-model mode). Grouping happens by this key rather than by timestamp,
     # which cannot tell two runs of one batch from two batches a second apart.
@@ -171,6 +178,13 @@ class RouterRequest:
     def modality(self) -> Modality:
         """The group this request is billed in."""
         return self.task.billing_group
+
+    @property
+    def app(self) -> str | None:
+        """The effective application identity: the site wins, the name is the
+        fallback, None means the caller did not say. This one string is what
+        the journal stores and filters by."""
+        return self.app_url or self.app_name
 
 
 @dataclass(slots=True)

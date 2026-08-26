@@ -735,6 +735,7 @@ class ModelRouter:
                 client_id=request.client_id,
                 client_request_id=request.client_request_id,
                 batch_id=request.batch_id,
+                app=request.app,
             )
         )
 
@@ -774,6 +775,7 @@ class ModelRouter:
                     client_id=request.client_id,
                     client_request_id=request.client_request_id,
                     batch_id=request.batch_id,
+                    app=request.app,
                     plan_json=_steps_json(steps, dropped),
                     finished_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 ),
@@ -958,6 +960,7 @@ class ModelRouter:
             client_id=request.client_id,
             client_request_id=request.client_request_id,
             batch_id=request.batch_id,
+            app=request.app,
             attempts=max(len(http_trace), 1),
             provider_status=_last_status(http_trace),
             provider_request_id=_provider_request_id(meta),
@@ -1106,6 +1109,10 @@ class ModelRouter:
             "client_id": request.client_id,
             "client_request_id": request.client_request_id,
             "batch_id": request.batch_id,
+            # Both halves as they arrived; the row's `app` column keeps the
+            # effective one (site, else name).
+            "app_url": request.app_url,
+            "app_name": request.app_name,
         }
 
     @staticmethod
@@ -1158,6 +1165,7 @@ class ModelRouter:
             client_id=request.client_id,
             client_request_id=request.client_request_id,
             batch_id=request.batch_id,
+            app=request.app,
             attempts=len(trace) or None,
             provider_status=_last_status(trace)
             or getattr(exc, "provider_status", None),

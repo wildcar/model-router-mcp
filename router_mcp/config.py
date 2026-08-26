@@ -33,6 +33,13 @@ class Settings(BaseSettings):
     http_timeout_seconds: float = Field(default=60.0, alias="HTTP_TIMEOUT_SECONDS")
     http_retries: int = Field(default=2, alias="HTTP_RETRIES")
 
+    # --- Self identity ----------------------------------------------------
+    # Who this router says it is to providers that take an app identity
+    # (OpenRouter's HTTP-Referer / X-Title) when the caller supplied none:
+    # requests with no app_url/app_name are made as the router itself.
+    self_app_url: str = Field(default="https://mr.wildcar.org", alias="SELF_APP_URL")
+    self_app_name: str = Field(default="model-router-mcp", alias="SELF_APP_NAME")
+
     # --- OpenRouter (chat + image catalog) ------------------------------
     openrouter_api_key: str | None = Field(default=None, alias="OPENROUTER_API_KEY")
     openrouter_base_url: str = Field(

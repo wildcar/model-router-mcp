@@ -23,7 +23,7 @@ from router_mcp.routing.router import DispatchResult
 # Bumped whenever the envelope changes shape. The browser sends it back on every
 # request so a page loaded before a restart cannot keep talking to a newer API
 # while silently mis-reading the answers.
-SCHEMA_VERSION = 2  # 2: the envelope carries `request`
+SCHEMA_VERSION = 3  # 2: the envelope carries `request`; 3: `app` (who called)
 
 
 def _usage(
@@ -90,6 +90,7 @@ def _run(
     channel: str | None,
     tool: str | None,
     client_id: str | None,
+    app: str | None,
     model: dict[str, Any],
     requested_model: str | None,
     fallback: dict[str, Any] | None,
@@ -123,6 +124,10 @@ def _run(
         "channel": channel,
         "tool": tool,
         "client_id": client_id,
+        # Which application asked: the site it runs on, else its name. Empty
+        # when the caller did not say — the request then went out as the router
+        # itself, and inventing that here would hide who really called.
+        "app": app,
         "model": model,
         "requested_model": requested_model,
         "fallback": fallback,
@@ -218,6 +223,9 @@ def _request(
         "attachments": attachments,
         "client_request_id": snap.get("client_request_id"),
         "batch_id": snap.get("batch_id"),
+        # As the caller sent them; the effective identity is on the run itself.
+        "app_url": snap.get("app_url"),
+        "app_name": snap.get("app_name"),
     }
 
 
@@ -261,6 +269,7 @@ def run_from_dispatch(
         channel=request.channel if request else None,
         tool=request.tool if request else None,
         client_id=request.client_id if request else None,
+        app=request.app if request else None,
         model=_model(response.provider, response.model_id),
         requested_model=result.requested_model_id,
         fallback=_fallback(result.requested_model_id, result.fallback_reason),
@@ -332,6 +341,7 @@ def run_from_log(row: dict[str, Any]) -> dict[str, Any]:
         channel=row.get("channel"),
         tool=row.get("tool"),
         client_id=row.get("client_id"),
+        app=row.get("app"),
         model=_model(row.get("service_provider_id"), row.get("model_id")),
         requested_model=row.get("requested_model_id"),
         fallback=_fallback(row.get("requested_model_id"), row.get("fallback_reason")),

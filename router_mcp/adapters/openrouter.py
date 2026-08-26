@@ -15,6 +15,7 @@ import re
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -52,6 +53,21 @@ LEGACY_WEB_PLUGIN_ID = "web"
 # tool — the payload contains nothing else unusual.
 TOOL_UNSUPPORTED_RE = re.compile(r"\btools?\b", re.IGNORECASE)
 
+
+
+def _header_safe(value: str) -> str:
+    """A caller-supplied string as an HTTP header value.
+
+    Header values are ASCII; a Cyrillic app name would make httpx raise before
+    the request ever left. OpenRouter's own guidance for non-ASCII titles is to
+    URL-encode them, so that is what happens — the log keeps the original.
+    """
+    value = value.strip()
+    try:
+        value.encode("ascii")
+        return value
+    except UnicodeEncodeError:
+        return quote(value, safe=" ")
 
 
 def _image_part(att: Attachment) -> dict[str, Any] | None:
@@ -96,22 +112,44 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
         base_url: str,
         timeout_seconds: float = 60.0,
         retries: int = 2,
+        app_url: str = "https://mr.wildcar.org",
+        app_name: str = "model-router-mcp",
     ) -> None:
         self._api_key = api_key
         self._retries = retries
+        # Who the request says it is from, when the caller does not: OpenRouter
+        # attributes traffic by HTTP-Referer / X-Title, so these are set per
+        # request (not as client defaults — a default X-Title cannot be unset
+        # by a merge, and it would mislabel an app identified by URL alone).
+        self._app_url = app_url
+        self._app_name = app_name
         self._client = httpx.AsyncClient(
             base_url=base_url,
             timeout=timeout_seconds,
             headers={
                 "Authorization": f"Bearer {api_key or ''}",
                 "Content-Type": "application/json",
-                "HTTP-Referer": "https://localhost",
-                "X-Title": "model-router-mcp",
             },
         )
 
     def is_configured(self) -> bool:
         return bool(self._api_key)
+
+    def _app_headers(self, request: RouterRequest | None = None) -> dict[str, str]:
+        """The identity headers for one call: the caller's app, or ourselves.
+
+        The site is the identity of record, so `app_url` lands in HTTP-Referer
+        and a request that carries neither field goes out as the router itself.
+        X-Title is set only when there is a real name to put in it: an app
+        identified by URL alone must not be titled with our name.
+        """
+        app_url = request.app_url if request else None
+        app_name = request.app_name if request else None
+        headers = {"HTTP-Referer": _header_safe(app_url or self._app_url)}
+        title = app_name or (self._app_name if not app_url else None)
+        if title:
+            headers["X-Title"] = _header_safe(title)
+        return headers
 
     async def generate(self, request: RouterRequest, model: RegistryModel) -> RouterResponse:
         messages = self._build_messages(request)
@@ -131,10 +169,13 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
         web_search = bool(request.params.get("web_search")) and "web_search" in (
             self.SUPPORTED_PARAMS.get(request.task) or ()
         )
+        headers = self._app_headers(request)
         if web_search:
-            data, search_mode = await self._chat_with_web_search(payload, model.model_id)
+            data, search_mode = await self._chat_with_web_search(
+                payload, model.model_id, headers
+            )
         else:
-            data, search_mode = await self._chat_data(payload), None
+            data, search_mode = await self._chat_data(payload, headers), None
 
         choices = data.get("choices", []) if isinstance(data, dict) else []
         choice0 = choices[0] if choices and isinstance(choices[0], dict) else {}
@@ -190,15 +231,23 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
             raw_meta=raw_meta,
         )
 
-    async def _chat_data(self, payload: dict[str, Any]) -> dict[str, Any]:
+    async def _chat_data(
+        self, payload: dict[str, Any], headers: dict[str, str] | None = None
+    ) -> dict[str, Any]:
         """POST /chat/completions and return the parsed body.
+
+        `headers` carries the app identity of the request (HTTP-Referer /
+        X-Title); the client itself holds none, so what one call says about its
+        origin cannot leak into the next.
 
         Transient failures — 429/5xx (also when reported as a top-level `error`
         object in a 200 body), timeouts, invalid JSON — surface as
         `ProviderUnavailable`; everything else is `ProviderError`/`AccessDenied`
         from the retry mixin.
         """
-        response = await self._request_with_retry("POST", "/chat/completions", json=payload)
+        response = await self._request_with_retry(
+            "POST", "/chat/completions", json=payload, headers=headers
+        )
         try:
             data = response.json()
         except json.JSONDecodeError as exc:
@@ -213,7 +262,10 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
         return data if isinstance(data, dict) else {}
 
     async def _chat_with_web_search(
-        self, payload: dict[str, Any], model_id: str
+        self,
+        payload: dict[str, Any],
+        model_id: str,
+        headers: dict[str, str] | None = None,
     ) -> tuple[dict[str, Any], str]:
         """The search ladder: server tool → legacy plugin → no search.
 
@@ -232,7 +284,7 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
         """
         try:
             data = await self._chat_data(
-                {**payload, "tools": [{"type": WEB_SEARCH_TOOL_TYPE}]}
+                {**payload, "tools": [{"type": WEB_SEARCH_TOOL_TYPE}]}, headers
             )
             progress.emit("web_search", "веб-поиск: серверный инструмент")
             return data, "server_tool"
@@ -252,7 +304,7 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
             progress.emit("web_search", "модель без поддержки tools, пробую плагин web")
         try:
             data = await self._chat_data(
-                {**payload, "plugins": [{"id": LEGACY_WEB_PLUGIN_ID}]}
+                {**payload, "plugins": [{"id": LEGACY_WEB_PLUGIN_ID}]}, headers
             )
             progress.emit("web_search", "веб-поиск: плагин web")
             return data, "plugin"
@@ -262,7 +314,7 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
                 "retrying without web search", model_id, exc,
             )
             progress.emit("web_search", "плагин web недоступен, выполняю запрос без поиска")
-        data = await self._chat_data(payload)
+        data = await self._chat_data(payload, headers)
         progress.emit("web_search", "веб-поиск не выполнялся, ответ без поиска")
         return data, "off"
 
@@ -271,7 +323,10 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
         """Live model list with pricing (the source RegistryService used to own)."""
         if not self.is_configured():
             return None
-        response = await self._request_with_retry("GET", "/models")
+        # The catalog is the router's own request, so it identifies as ourselves.
+        response = await self._request_with_retry(
+            "GET", "/models", headers=self._app_headers()
+        )
         try:
             payload = response.json()
         except json.JSONDecodeError as exc:

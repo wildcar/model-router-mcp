@@ -98,6 +98,11 @@ class ChatBody(BaseModel):
     # {"policy": "same"|"cheaper"|"pricier", "max_steps": 1, "scope": ...}
     # or just the policy name. See FallbackPolicy.
     fallback: dict[str, Any] | str | None = None
+    # Which application is asking: the site it runs on wins, a plain name is
+    # the fallback. Logged, filterable, and forwarded to providers that take
+    # such a parameter; omitted, the request goes out as the router itself.
+    app_url: str | None = None
+    app_name: str | None = None
 
 
 class ImageBody(BaseModel):
@@ -107,6 +112,8 @@ class ImageBody(BaseModel):
     provider: str | None = None
     params: dict[str, Any] | None = None
     fallback: dict[str, Any] | str | None = None
+    app_url: str | None = None
+    app_name: str | None = None
 
 
 class TtsBody(BaseModel):
@@ -121,6 +128,8 @@ class TtsBody(BaseModel):
     # not exist.
     params: dict[str, Any] | None = None
     fallback: dict[str, Any] | str | None = None
+    app_url: str | None = None
+    app_name: str | None = None
 
 
 class CliBody(BaseModel):
@@ -131,6 +140,8 @@ class CliBody(BaseModel):
     timeout_sec: int | None = None
     # Same gap as tts: `model` (claude-cli) had no way in from the web API.
     params: dict[str, Any] | None = None
+    app_url: str | None = None
+    app_name: str | None = None
 
 
 class ManualModelBody(BaseModel):
@@ -304,6 +315,8 @@ async def api_chat(body: ChatBody, http_request: Request) -> dict[str, Any]:
             fallback=parse_fallback(body.fallback),
             channel=channel,
             client_id=client_id,
+            app_url=body.app_url,
+            app_name=body.app_name,
         )
     )
 
@@ -322,6 +335,8 @@ async def api_image(body: ImageBody, http_request: Request) -> dict[str, Any]:
             fallback=parse_fallback(body.fallback),
             channel=channel,
             client_id=client_id,
+            app_url=body.app_url,
+            app_name=body.app_name,
         )
     )
 
@@ -333,6 +348,8 @@ async def api_transcribe(
     external_user_id: str = Form("web-tester"),
     model_id: str | None = Form(None),
     provider: str | None = Form(None),
+    app_url: str | None = Form(None),
+    app_name: str | None = Form(None),
 ) -> dict[str, Any]:
     audio = await file.read()
     channel, client_id = _channel(http_request)
@@ -347,6 +364,8 @@ async def api_transcribe(
             ],
             channel=channel,
             client_id=client_id,
+            app_url=app_url,
+            app_name=app_name,
         )
     )
 
@@ -368,6 +387,8 @@ async def api_tts(body: TtsBody, http_request: Request) -> dict[str, Any]:
             fallback=parse_fallback(body.fallback),
             channel=channel,
             client_id=client_id,
+            app_url=body.app_url,
+            app_name=body.app_name,
         )
     )
 
@@ -392,6 +413,8 @@ async def api_cli(body: CliBody, http_request: Request) -> dict[str, Any]:
             params=params,
             channel=channel,
             client_id=client_id,
+            app_url=body.app_url,
+            app_name=body.app_name,
         )
     )
 
@@ -443,6 +466,9 @@ class RunBody(BaseModel):
     # of spending the money again; the batch groups one operator action.
     client_request_id: str | None = None
     batch_id: str | None = None
+    # The application making the request: the site it runs on, else a name.
+    app_url: str | None = None
+    app_name: str | None = None
 
 
 def _attachment_from_ref(ref: str, kind: str, role: str | None = None) -> Attachment:
@@ -520,6 +546,8 @@ def _router_request(body: RunBody, http_request: Request | None) -> RouterReques
         client_id=client_id,
         client_request_id=body.client_request_id,
         batch_id=body.batch_id,
+        app_url=body.app_url,
+        app_name=body.app_name,
     )
 
 
@@ -596,6 +624,7 @@ async def api_logs(
     model_id: str | None = None,
     model: str | None = None,
     provider: str | None = None,
+    app: str | None = None,
     channel: str | None = None,
     batch_id: str | None = None,
     since: str | None = None,
@@ -612,9 +641,9 @@ async def api_logs(
     `cursor` is the id to page *before*: the log grows from the head, so an
     offset would show part of page one again on page two.
 
-    `user` and `model` match by substring — the console's boxes are search
-    fields, and «ort-bot» has to find every ort-bot-XXXX. `model_id` stays the
-    exact match for callers that hold a full id.
+    `user`, `model` and `app` match by substring — the console's boxes are
+    search fields, and «ort-bot» has to find every ort-bot-XXXX. `model_id`
+    stays the exact match for callers that hold a full id.
     """
     core = get_core()
     limit = max(1, min(limit, 200))
@@ -626,6 +655,7 @@ async def api_logs(
         model_id=model_id,
         model_contains=model,
         provider=provider,
+        app_contains=app,
         channel=channel,
         batch_id=batch_id,
         since=since,

@@ -86,6 +86,7 @@ on it; adapters never touch storage/mcp directly.
 33. ✅ A stored file can be handed to a provider by a signed, expiring link on a separate host; without a signing key nothing is served on that path.
 34. ✅ A provider's model list can be asked for on demand and stored selectively: the registry keeps the models that answered a request (`confirmed_at`), what a human curated, and nothing else. A market-sized catalog is browsed, not mirrored. [ADR-0008]
 35. ✅ A price may depend on the time of day: a row carries its base rate plus the UTC windows in which every rate is multiplied (`price_schedule`), and cost, the dry run and the fallback ladder all read the rate in force at that moment. DeepSeek's peak hours are the first case.
+36. ✅ Application identity per request (`app_url` / `app_name`): the site the app runs on wins, a plain name is the fallback, and the effective identity is logged, filterable in the journal and forwarded to providers that have such a parameter (OpenRouter's `HTTP-Referer` / `X-Title`). A request with no identity is made as the router itself: `https://mr.wildcar.org` (`SELF_APP_URL`).
 
 ## Tasks, media and billing groups (30)
 
@@ -332,6 +333,27 @@ It never leaves the task and never retries a prompt-level rejection. The
 substitution is explicit in the response (`requested_model_id`, `model_id`,
 `fallback_reason`) and in `request_logs`.
 
+## Application identity (36)
+
+Every dispatching entry point (MCP tools, `/api/chat|image|tts|transcribe|cli`,
+`/api/v1/runs`) accepts `app_url` (the site the application runs on) and
+`app_name` (a plain name for apps with no site). The effective identity is
+`app_url or app_name` — the site wins because it is verifiable and stable;
+both are caller-supplied and untrusted, a grouping key exactly like
+`external_user_id`.
+
+- **Forwarding**: adapters that have such a parameter receive it. OpenRouter is
+  the only one today: `HTTP-Referer` ← `app_url`, `X-Title` ← `app_name`, set
+  per request. A request with no identity is made as the router itself —
+  `HTTP-Referer: https://mr.wildcar.org` (`SELF_APP_URL`) with
+  `X-Title: model-router-mcp` (`SELF_APP_NAME`); a request identified by URL
+  alone sends no `X-Title` rather than mislabelling the app with ours.
+- **Journal**: `request_logs.app` stores the effective identity; the `Run`
+  envelope carries it as `app`, and the snapshot keeps `app_url`/`app_name` as
+  they arrived. `GET /logs?app=` filters by substring (like `user`/`model`),
+  `GET /logs/suggest?field=app` feeds the typeahead, and «Расход» groups by
+  `app`.
+
 ## Web contract (18–20)
 
 Wave 0 of `docs/UI_CONCEPT_v2.md`. The console is one consumer of it; MCP and
@@ -408,13 +430,13 @@ get the same facts appended to the message text, since FastMCP hands clients
 `GET /api/v1/logs` is cursor-paged by descending id (offset would repeat rows,
 because the log grows from the head) and projected to the columns the table
 shows — the full row carries the response text and the raw usage block.
-Filters: user, status, modality, model, provider, channel, since/until,
-`with_fallback`, `with_retries`, `unverified_cost`, `cost_mismatch`. `user` and
-`model` match by substring, case-insensitive («ort-bot» finds every
+Filters: user, status, modality, model, provider, app, channel, since/until,
+`with_fallback`, `with_retries`, `unverified_cost`, `cost_mismatch`. `user`,
+`model` and `app` match by substring, case-insensitive («ort-bot» finds every
 ort-bot-XXXX); `model_id` stays the exact match. `GET /api/v1/logs/{id}`
 returns the full row as a `Run`.
 
-`GET /api/v1/logs/suggest?field=user|model|provider&q=` — distinct values the
+`GET /api/v1/logs/suggest?field=user|model|provider|app&q=` — distinct values the
 log has seen for that column, freshest first, narrowed by `q` (substring).
 Feeds the journal's filter dropdowns and as-you-type подсказки; the field goes
 into SQL through a closed map, anything else is a 400. The console's day

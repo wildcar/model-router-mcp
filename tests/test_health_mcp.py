@@ -96,7 +96,11 @@ def test_mcp_probe_answers_in_process(client):
 
 def test_tool_and_client_stats_come_from_the_log(client, app_db_path):
     import sqlite3
+    from datetime import datetime, timezone
 
+    # A recent stamp, not a literal: the summary window is capped at 720 hours,
+    # and a hardcoded date silently aged out of it a month after it was written.
+    stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
     conn = sqlite3.connect(app_db_path)
     with conn:
         for i, (tool, status, latency) in enumerate(
@@ -107,7 +111,7 @@ def test_tool_and_client_stats_come_from_the_log(client, app_db_path):
                 "INSERT INTO request_logs (external_user_id, modality, channel, tool, "
                 "client_id, status, latency_ms, created_at) VALUES (?,?,?,?,?,?,?,?)",
                 ("mcp-user", "chat", "mcp", tool, "telecodex" if i % 2 else None,
-                 status, latency, "2026-07-26T10:00:00+00:00"),
+                 status, latency, stamp),
             )
     conn.close()
 

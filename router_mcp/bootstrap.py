@@ -151,6 +151,8 @@ def _build_adapters(settings: Settings) -> list[ProviderSpec]:
                 base_url=settings.openrouter_base_url,
                 timeout_seconds=settings.http_timeout_seconds,
                 retries=settings.http_retries,
+                app_url=settings.self_app_url,
+                app_name=settings.self_app_name,
             ),
         ),
         ProviderSpec(

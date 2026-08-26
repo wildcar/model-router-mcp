@@ -25,6 +25,7 @@
           <option value="model">модель</option>
           <option value="provider">поставщик</option>
           <option value="channel">канал</option>
+          <option value="app">приложение</option>
           <option value="day">день</option>
         </select>
       </label>
@@ -66,6 +67,10 @@
       <input id="f-model" placeholder="(все)" list="f-model-options" autocomplete="off">
     </label>
     <datalist id="f-model-options"></datalist>
+    <label>Приложение
+      <input id="f-app" placeholder="(все)" list="f-app-options" autocomplete="off">
+    </label>
+    <datalist id="f-app-options"></datalist>
     <label>Статус
       <select id="f-status">
         <option value="">все</option>
@@ -115,7 +120,8 @@
     <label><input id="f-mismatch" type="checkbox"> расходится с поставщиком</label>
   </div>
   <table id="logs"><thead><tr>
-    <th class="num">id</th><th>Время</th><th>Метка</th><th>Поставщик</th><th>Модель</th>
+    <th class="num">id</th><th>Время</th><th>Метка</th><th>Приложение</th>
+    <th>Поставщик</th><th>Модель</th>
     <th>Задача</th><th>Канал</th><th>Статус</th><th class="num">Время ответа</th>
     <th class="num">Промпт</th><th class="num">Кэш</th>
     <th class="num">Ответ</th><th class="num">Рассужд.</th>
