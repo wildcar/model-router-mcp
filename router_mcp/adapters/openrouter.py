@@ -55,19 +55,66 @@ TOOL_UNSUPPORTED_RE = re.compile(r"\btools?\b", re.IGNORECASE)
 
 
 
-def _header_safe(value: str) -> str:
-    """A caller-supplied string as an HTTP header value.
+def _escape_non_ascii(value: str) -> str:
+    """Percent-encode only the characters a header cannot carry.
 
-    Header values are ASCII; a Cyrillic app name would make httpx raise before
-    the request ever left. OpenRouter's own guidance for non-ASCII titles is to
-    URL-encode them, so that is what happens — the log keeps the original.
+    Not `quote(value)`: that would also escape the ASCII punctuation — the
+    colon and slashes of a URL, the bang of a title — and mangle exactly the
+    part that was already fine.
+    """
+    return "".join(ch if ord(ch) < 128 else quote(ch) for ch in value)
+
+
+def _referer_safe(value: str) -> str:
+    """A caller-supplied URL as the HTTP-Referer value.
+
+    Header values are ASCII; a Cyrillic URL would make httpx raise before the
+    request ever left. Percent-encoding is the native representation of
+    non-ASCII in a URL (browsers do the same in their own Referer), so it is
+    the right escape here — and only here, not for the human-readable title.
+    """
+    return _escape_non_ascii(value.strip())
+
+
+# Cyrillic to Latin for X-Title, one practical romanization. OpenRouter shows
+# the header verbatim: a percent-encoded «Проверка» reached its usage dashboard
+# as %D0%9F… (seen live, 2026-08-26), so the title must stay readable letters.
+# Includes the Kazakh letters — the apps behind this router are Kazakhstani.
+_CYR_TO_LAT = {
+    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "e",
+    "ж": "zh", "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m",
+    "н": "n", "о": "o", "п": "p", "р": "r", "с": "s", "т": "t", "у": "u",
+    "ф": "f", "х": "kh", "ц": "ts", "ч": "ch", "ш": "sh", "щ": "shch",
+    "ъ": "", "ы": "y", "ь": "", "э": "e", "ю": "yu", "я": "ya",
+    "ә": "a", "ғ": "g", "қ": "q", "ң": "n", "ө": "o", "ұ": "u", "ү": "u",
+    "һ": "h", "і": "i",
+}
+
+
+def _title_safe(value: str) -> str:
+    """A caller-supplied app name as the X-Title value, kept readable.
+
+    ASCII passes through. Cyrillic is transliterated («ИИшная» → IIshnaya) —
+    the dashboard on the other end prints the header as it came, so an escape
+    a human cannot read defeats the point of naming the app. Anything still
+    non-ASCII after that (another script entirely) falls back to
+    percent-encoding, which at least survives the wire. The log keeps the
+    original either way.
     """
     value = value.strip()
     try:
         value.encode("ascii")
         return value
     except UnicodeEncodeError:
-        return quote(value, safe=" ")
+        pass
+    chars = []
+    for ch in value:
+        mapped = _CYR_TO_LAT.get(ch.lower())
+        if mapped is None:
+            chars.append(ch)
+        else:
+            chars.append(mapped.capitalize() if ch.isupper() else mapped)
+    return _escape_non_ascii("".join(chars))
 
 
 def _image_part(att: Attachment) -> dict[str, Any] | None:
@@ -145,10 +192,12 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
         """
         app_url = request.app_url if request else None
         app_name = request.app_name if request else None
-        headers = {"HTTP-Referer": _header_safe(app_url or self._app_url)}
+        headers = {"HTTP-Referer": _referer_safe(app_url or self._app_url)}
         title = app_name or (self._app_name if not app_url else None)
         if title:
-            headers["X-Title"] = _header_safe(title)
+            title = _title_safe(title)
+        if title:
+            headers["X-Title"] = title
         return headers
 
     async def generate(self, request: RouterRequest, model: RegistryModel) -> RouterResponse:

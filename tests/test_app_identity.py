@@ -106,12 +106,43 @@ async def test_no_identity_means_the_router_itself():
 
 
 @pytest.mark.asyncio
-async def test_cyrillic_name_is_encoded_not_crashed():
-    """Header values are ASCII; httpx would raise on «ИИшная» before sending."""
+async def test_cyrillic_name_is_transliterated_readably():
+    """Header values are ASCII, and OpenRouter prints X-Title verbatim: a
+    percent-encoded «Проверка» reached its dashboard as %D0%9F… (seen live).
+    The title must stay letters a human can read."""
     adapter, seen = _adapter()
-    await adapter.generate(_request(app_name="ИИшная"), _model())
-    title = seen[0]["X-Title"]
-    assert title == "%D0%98%D0%98%D1%88%D0%BD%D0%B0%D1%8F"
+    await adapter.generate(
+        _request(app_name="Проверка идентификации"), _model()
+    )
+    assert seen[0]["X-Title"] == "Proverka identifikatsii"
+
+
+@pytest.mark.asyncio
+async def test_kazakh_letters_are_transliterated_too():
+    adapter, seen = _adapter()
+    await adapter.generate(_request(app_name="Қазақ Үні"), _model())
+    assert seen[0]["X-Title"] == "Qazaq Uni"
+
+
+@pytest.mark.asyncio
+async def test_other_scripts_fall_back_to_percent_encoding():
+    """No table covers every alphabet; what it cannot romanize must still
+    survive the wire instead of crashing httpx."""
+    adapter, seen = _adapter()
+    await adapter.generate(_request(app_name="你好"), _model())
+    assert seen[0]["X-Title"] == "%E4%BD%A0%E5%A5%BD"
+
+
+@pytest.mark.asyncio
+async def test_cyrillic_referer_stays_percent_encoded():
+    """The referer is a URL, and percent-encoding is how URLs carry non-ASCII —
+    a transliterated URL would name a host that does not exist."""
+    adapter, seen = _adapter()
+    await adapter.generate(_request(app_url="https://сайт.рф/х"), _model())
+    # The ASCII structure of the URL survives; only the Cyrillic is escaped.
+    assert seen[0]["HTTP-Referer"] == (
+        "https://%D1%81%D0%B0%D0%B9%D1%82.%D1%80%D1%84/%D1%85"
+    )
 
 
 # --- the journal ---------------------------------------------------------
