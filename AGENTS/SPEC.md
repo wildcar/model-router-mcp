@@ -360,8 +360,10 @@ both are caller-supplied and untrusted, a grouping key exactly like
   («Autoposting dzen», `https://dzen.ru/`), account gone, our X-Title
   ignored. An app living under someone else's domain identifies with its own
   (posinus now sends `https://wildcar.org` + «Positive news» — recorded
-  correctly). Our journal is unaffected either way: it stores what the caller
-  sent.
+  correctly). Subdomains are distinct apps to OpenRouter — verified live:
+  `mr.wildcar.org` and `agentish.wildcar.org` show as two entries — so the
+  house pattern is one subdomain of wildcar.org per application. Our journal
+  is unaffected either way: it stores what the caller sent.
 
 ## Web contract (18–20)
 

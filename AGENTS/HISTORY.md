@@ -8,7 +8,7 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 - What: оговорка в SPEC §36 и в подсказке MCP `chat`: app_url должен быть доменом самого приложения — OpenRouter отрезает путь и приписывает трафик регистрации домена (dzen.ru/posinus превратился в «Autoposting dzen» / dzen.ru, наш X-Title проигнорирован).
 - Why: живое наблюдение оператора при настройке идентификации у posinus; с app_url=https://wildcar.org записалось правильно.
 - Files: AGENTS/SPEC.md, router_mcp/mcp_server/tools.py (докстринг)
-- Next: —
+- Next: подтверждено там же: поддомены OpenRouter различает (mr. и agentish.wildcar.org — две записи), домашний шаблон — поддомен wildcar.org на приложение.
 
 ## 2026-08-26 · meta/muse-image + ручка /images у OpenRouter
 - What: адаптер ходит на POST /images для строк с capability `images_api` (и по 404-подсказке чата для непомеченных); объявлен image-to-image, референсы в `input_references`; muse заведён manual-строкой, цена $0.01/картинка замером (прогон 16436), правка картинки проверена живьём (16437, computed = провайдерской сумме).
