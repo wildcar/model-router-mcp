@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-08-26 · meta/muse-image + ручка /images у OpenRouter
+- What: адаптер ходит на POST /images для строк с capability `images_api` (и по 404-подсказке чата для непомеченных); объявлен image-to-image, референсы в `input_references`; muse заведён manual-строкой, цена $0.01/картинка замером (прогон 16436), правка картинки проверена живьём (16437, computed = провайдерской сумме).
+- Why: пользователь попросил добавить модель; в GET /models её нет вовсе, /chat/completions её отвергает — понадобился новый путь в адаптере.
+- Files: router_mcp/adapters/openrouter.py, router_mcp/web/capabilities.py, tests/test_openrouter_images.py, AGENTS/SPEC.md (§37)
+- Next: сказать agentish/positive news, что muse доступна на обе задачи; следить за cost_mismatch — ставка замерена одной картинкой дефолтного размера.
+
 ## 2026-08-26 · X-Title: транслитерация вместо процентов
 - What: кириллица в app_name теперь транслитерируется в латиницу для X-Title (ru + kk буквы); проценты остались только для чужих алфавитов и для кириллицы в HTTP-Referer (URL), причём экранируются лишь не-ASCII символы — двоеточие и слэши целы.
 - Why: оператор увидел на дашборде OpenRouter %D0%9F%D1%80… — провайдер печатает заголовок как есть, percent-encoding из первой версии нечитаем.
