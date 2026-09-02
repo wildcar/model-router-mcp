@@ -88,6 +88,12 @@ curl -fsS http://127.0.0.1:8088/health
   reuse-detection revokes the whole token family (openai-auth-sync ADR-0002; that
   tool is retired). Both binaries are frozen copies: update manually on new
   versions.
+- Local models (`local` provider): weights under
+  `/opt/model-router-mcp/data/models/<model>/` (dev: `data/models/`), fetched
+  and sha256-checked by `deploy/fetch-models.sh` (both `install.sh` and
+  `deploy.sh` call it; the venv gets the `local` extra). Host is 4 cores /
+  3.9 GB RAM with ~1.3 GB free: UVDoc predicts in ~0.45 s with 2 threads,
+  the remap of a 12 MP photo adds ~0.65 s; keep `LOCAL_MAX_CONCURRENCY=2`.
 - codex-oauth (image gen) shares the service codex CLI's auth.json:
   `CODEX_AUTH_PATH=/var/lib/model-router/home/.codex/auth.json` (dev `.env`:
   keeper's `~/.codex/auth.json`). One grant, one file — the adapter re-reads it

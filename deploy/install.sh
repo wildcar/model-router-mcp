@@ -47,7 +47,12 @@ fi
 echo ">> installing dependencies"
 # Run pip from inside APP_DIR (the editable-install path hook is resolved
 # relative to cwd; the service user can't read the invoker's home dir).
-sudo -u "${SVC_USER}" bash -c "cd '${APP_DIR}' && .venv/bin/pip install --quiet --upgrade pip && .venv/bin/pip install --quiet -e '.[anthropic]'"
+sudo -u "${SVC_USER}" bash -c "cd '${APP_DIR}' && .venv/bin/pip install --quiet --upgrade pip && .venv/bin/pip install --quiet -e '.[anthropic,local]'"
+
+# 3b. Weights of the models the `local` provider computes on this host
+# (sha256-checked, idempotent). Without them a run answers model_not_loaded.
+echo ">> fetching local model weights"
+sudo -u "${SVC_USER}" bash "${SCRIPT_DIR}/fetch-models.sh" "${APP_DIR}/data/models"
 
 # 4. Template + install the unit.
 TMP_UNIT="$(mktemp)"

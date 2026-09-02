@@ -297,6 +297,25 @@ function extraParamsField(model) {
   return box;
 }
 
+// What the model cannot do, in words. A catalog never says «one sheet in frame,
+// a two-page spread is unpredictable»; the operator who found out does, here,
+// and the applications where a user picks a model show it next to the name.
+function descriptionField(model) {
+  const box = el('div', undefined, { className: 'input-map' });
+  box.appendChild(el('h3', 'Описание'));
+  box.appendChild(el('p',
+    'Что модель умеет и чего не умеет — словами. Читают операторы здесь и '
+    + 'приложения, где пользователь выбирает модель. Пустое поле — без описания.',
+    { className: 'hint' }));
+  const wrap = el('label', undefined, { className: 'price-field' });
+  const input = el('textarea', undefined, { id: 'edit-description' });
+  input.value = model.description || '';
+  input.rows = 4;
+  wrap.appendChild(input);
+  box.appendChild(wrap);
+  return box;
+}
+
 // Peak hours. DeepSeek charges twice its base rate between 01:00 and 04:00 UTC
 // and again between 06:00 and 10:00, and the prices above are then the off-peak
 // figure — which is not what the row costs right now, and the card has to say so
@@ -398,6 +417,9 @@ function select(model) {
   }
   facts.appendChild(body);
   card.appendChild(facts);
+  if (model.description) {
+    card.appendChild(el('p', model.description, { className: 'hint description' }));
+  }
 
   card.appendChild(el('h3', 'Цены'));
   card.appendChild(priceField('edit-prompt', 'Промпт', model.prompt_price));
@@ -433,6 +455,7 @@ function select(model) {
 
   if (takesImages(model)) card.appendChild(inputMapFields(model));
   card.appendChild(extraParamsField(model));
+  card.appendChild(descriptionField(model));
 
   const origin = caps.labels.price_source_kinds[model.price_source_kind];
   card.appendChild(el('p', `Откуда: ${origin?.label || model.price_source_kind}`,
@@ -619,6 +642,7 @@ async function save(model) {
     ? Number(computeField.value) : null;
   const extra = readExtraParams();
   const schedule = readPriceSchedule(model);
+  const descriptionBox = $('edit-description');
   if (!confirmJump('Промпт', model.prompt_price * 1e6, prompt)) return;
   if (!confirmJump('Ответ', model.completion_price * 1e6, completion)) return;
   const updated = await api(
@@ -633,6 +657,8 @@ async function save(model) {
       // a map the operator never saw.
       ...($('edit-role-image') ? { input_map: readInputMap() } : {}),
       ...(extra === null ? {} : { extra_params: extra }),
+      // Only when the field was drawn; an empty field clears the text.
+      ...(descriptionBox ? { description: descriptionBox.value.trim() } : {}),
       // Same rule as the roles: only when the operator could see the field, and
       // `{}` clears the schedule rather than meaning "unchanged".
       ...(schedule === null ? {} : { price_schedule: schedule }),

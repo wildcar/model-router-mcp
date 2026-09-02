@@ -34,7 +34,12 @@ echo ">> installing dependencies"
 # Run pip from inside APP_DIR: the editable install registers a path hook that
 # pip resolves relative to the cwd, and the service user cannot read the
 # invoking user's home dir (PermissionError otherwise).
-sudo -u "${SVC_USER}" bash -c "cd '${APP_DIR}' && .venv/bin/pip install --quiet -e '.[anthropic]'"
+sudo -u "${SVC_USER}" bash -c "cd '${APP_DIR}' && .venv/bin/pip install --quiet -e '.[anthropic,local]'"
+
+echo ">> fetching local model weights"
+# Idempotent and sha256-checked: present files cost one hash each. A model
+# added to fetch-models.sh reaches production with the code that uses it.
+sudo -u "${SVC_USER}" bash "${APP_DIR}/deploy/fetch-models.sh" "${APP_DIR}/data/models"
 
 echo ">> restarting ${SERVICE_NAME}"
 sudo systemctl restart "${SERVICE_NAME}"

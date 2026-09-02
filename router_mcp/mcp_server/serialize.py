@@ -58,6 +58,9 @@ def model_to_dict(m: RegistryModel) -> dict[str, Any]:
         "input_map": dict(m.input_map),
         # Knobs this model accepts beyond the adapter's declared set.
         "extra_params": list(m.extra_params),
+        # What it does and does not do, in the operator's words. Applications
+        # that let a user pick a model show this next to the name.
+        "description": m.description,
         # Sent back on an edit as an optimistic lock: a second-resolution
         # timestamp cannot tell two edits in the same second apart.
         "revision": m.revision,

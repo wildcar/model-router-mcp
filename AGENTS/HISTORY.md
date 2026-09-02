@@ -4,6 +4,13 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-09-02 · провайдер `local` и модель `local/uvdoc` — выпрямление страницы
+- What: адаптер `local` (функция в процессе; пул + семафор `LOCAL_MAX_CONCURRENCY=2`, дедлайн 60 с → `timeout`, `model_not_loaded`, `image_too_large`), UVDoc через ONNX (сетка 45×31 → remap полосами по оригиналу, JPEG→JPEG q92 / PNG→PNG, без EXIF), сид-строка с нулевой подтверждённой ценой и новой колонкой реестра `description`, `deploy/fetch-models.sh` с sha256, extra `.[local]`, смоук `scripts/uvdoc_smoke.py`, ADR-0009.
+- Why: задачи 6–7 постановки «Выпрямление страницы»: модели нет на Replicate, а наружу к моделям ходит только router-client — модель живёт в роутере первым локальным провайдером.
+- Files: router_mcp/adapters/{local,local_uvdoc}.py, domain/errors.py, registry/models.py, storage/database.py, bootstrap.py, config.py, web/api.py, mcp_server/serialize.py, web/static/js/pages/models.js, deploy/{fetch-models.sh,install.sh,deploy.sh,DEPLOY.md}, scripts/uvdoc_smoke.py, tests/test_{adapters_local,local_uvdoc,local_runs}.py, docs/adr/0009-local-provider.md, AGENTS/SPEC.md
+- Fixes-on-the-fly: смоук опроверг ожидание постановки — фото без документа не возвращается «как было», модель растягивает произвольный участок (отклонение сетки 0,10); веса 31,8 МБ, а не 8. Оба факта — в описание строки и SPEC §38.
+- Next: деплой на прод (`deploy.sh` скачает веса), живой прогон там; задачи 8–9 в agentish.
+
 ## 2026-08-26 · наблюдение: OpenRouter атрибуцирует приложение по домену
 - What: оговорка в SPEC §36 и в подсказке MCP `chat`: app_url должен быть доменом самого приложения — OpenRouter отрезает путь и приписывает трафик регистрации домена (dzen.ru/posinus превратился в «Autoposting dzen» / dzen.ru, наш X-Title проигнорирован).
 - Why: живое наблюдение оператора при настройке идентификации у posinus; с app_url=https://wildcar.org записалось правильно.

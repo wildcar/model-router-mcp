@@ -252,6 +252,7 @@ def _row_to_model(row: aiosqlite.Row) -> RegistryModel:
             if part.strip()
         ),
         price_schedule=_price_schedule(_col(row, "price_schedule")),
+        description=str(_col(row, "description") or ""),
     )
 
 
@@ -386,6 +387,9 @@ class Database:
                     -- multiplied, and by how much (DeepSeek's peak hours).
                     -- Empty means the row costs the same round the clock.
                     price_schedule TEXT NOT NULL DEFAULT '',
+                    -- What the model can and cannot do, for humans and for the
+                    -- applications choosing among models. Human-written.
+                    description TEXT NOT NULL DEFAULT '',
                     -- Bumped on every write. The optimistic lock counts on it
                     -- rather than on updated_at: two edits inside the same
                     -- second carry the same timestamp and the lock would pass.
@@ -524,6 +528,8 @@ class Database:
             # round-the-clock rate they were all billed at, so the migration
             # changes no historical number.
             "price_schedule": "TEXT NOT NULL DEFAULT ''",
+            # The model's caveats, as text. Empty on every existing row.
+            "description": "TEXT NOT NULL DEFAULT ''",
         },
         "request_logs": {
             "finish_reason": "TEXT",
@@ -735,8 +741,16 @@ class Database:
         Seeds must not resurrect a model the provider has retired (or an admin
         has corrected), so an existing row is left exactly as it is. Returns True
         when a row was actually inserted.
+
+        The human-only columns (`input_map`, `extra_params`, `description`) are
+        written here too — on insert only. A sync's upsert leaves them out so it
+        cannot erase an operator's edits; a seed inserting a brand-new row is
+        the one writer that knows them and cannot overwrite anyone.
         """
         row = _model_to_row(model)
+        row["input_map"] = json.dumps(model.input_map, ensure_ascii=False)
+        row["extra_params"] = ",".join(model.extra_params)
+        row["description"] = model.description
         cols = list(row.keys())
         conn = await self._get_conn()
         async with self._write_lock:
@@ -913,6 +927,8 @@ class Database:
             # And for the peak hours: a provider announces them in a mail, not in
             # a catalog, so the only way in is an operator typing them.
             "price_schedule",
+            # And for the caveats: what a model cannot do is not in any catalog.
+            "description",
         }
     )
 

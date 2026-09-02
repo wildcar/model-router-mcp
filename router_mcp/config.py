@@ -144,6 +144,19 @@ class Settings(BaseSettings):
     # default: an unsigned public path would serve any ref to anyone who guesses.
     public_blob_signing_key: str | None = Field(default=None, alias="PUBLIC_BLOB_SIGNING_KEY")
 
+    # --- Local models (computed in this process) -------------------------
+    # Where `deploy/fetch-models.sh` puts the weights; one subdirectory per model
+    # (`uvdoc/UVDoc_grid.onnx` + `.data`). Missing files answer
+    # `model_not_loaded`, an installation error rather than a request one.
+    local_models_dir: str = Field(default=str(DATA_DIR / "models"), alias="LOCAL_MODELS_DIR")
+    # How many local runs may compute at once. Two because inference shares the
+    # CPU with the router itself: a third concurrent run would slow every `chat`
+    # answer in the same process, so it waits for a slot instead.
+    local_max_concurrency: int = Field(default=2, alias="LOCAL_MAX_CONCURRENCY")
+    # A local run past this answers `timeout` (retriable); the thread finishes
+    # on its own and keeps its slot until it does.
+    local_run_timeout_seconds: float = Field(default=60.0, alias="LOCAL_RUN_TIMEOUT_SECONDS")
+
     # --- Codex (OAuth image generation) ---------------------------------
     codex_auth_path: str | None = Field(default=None, alias="CODEX_AUTH_PATH")
     codex_base_url: str = Field(

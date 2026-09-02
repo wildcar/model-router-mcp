@@ -233,6 +233,12 @@ class RegistryModel:
     # a passthrough — a name the model's schema has no property for is dropped
     # and reported, exactly like a declared one.
     extra_params: tuple[str, ...] = ()
+    # What this model does and, more usefully, does not: "one sheet in frame,
+    # edges visible; a two-page spread is unpredictable". Free text for the
+    # console and for the applications that let a user pick a model. Written
+    # by a human (or a seed), never by a catalog sync — no provider publishes
+    # the caveats.
+    description: str = ""
     extra: dict = field(default_factory=dict)
 
     # Provenances under which a zero price means "confirmed free" rather than

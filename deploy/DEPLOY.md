@@ -88,6 +88,23 @@ Check after the first start:
 curl -fsS -u <web-user> https://router.example.com/api/v1/health/summary | jq .work
 ```
 
+### Local model weights
+
+The `local` provider computes models on this host (UVDoc first). `install.sh`
+and `deploy.sh` both run `deploy/fetch-models.sh`, which downloads the weights
+into `/opt/model-router-mcp/data/models/<model>/` and checks the sha256 pinned
+in the script; present files cost one hash each. To run it by hand:
+
+```bash
+sudo -u modelrouter bash /opt/model-router-mcp/deploy/fetch-models.sh /opt/model-router-mcp/data/models
+```
+
+Without the files a run on such a model answers `model_not_loaded` (503) — an
+installation error, not one to retry. The runtime libraries are the `local`
+extra, which the scripts install (`.[anthropic,local]`); they are CPU builds and
+pull no CUDA. Tunables in `.env`: `LOCAL_MODELS_DIR`, `LOCAL_MAX_CONCURRENCY`
+(2: inference shares the CPU with the router), `LOCAL_RUN_TIMEOUT_SECONDS` (60).
+
 ## 5. Install the service
 
 ```bash

@@ -166,6 +166,8 @@ class ManualModelBody(BaseModel):
     # pass the vendor's price page in `price_source` so the number stays traceable.
     price_source: str | None = None
     price_source_kind: str = "manual"
+    # The model's caveats, shown wherever a human picks a model.
+    description: str | None = None
 
 
 class ProviderPatch(BaseModel):
@@ -1109,6 +1111,8 @@ class ModelPatch(BaseModel):
     # This model's own knobs, on top of the adapter's declared set. `[]` clears
     # it, for the same reason `input_map: {}` does.
     extra_params: list[str] | None = None
+    # What the model cannot do, in words. `""` clears it.
+    description: str | None = None
     # Peak-hour pricing: `{"windows": ["01:00-04:00"], "multiplier": 2.0,
     # "label": "пиковый тариф"}`, times in UTC. The prices above are then the
     # base (off-peak) rate. `{}` clears it back to a flat round-the-clock rate.
@@ -1156,6 +1160,7 @@ async def api_patch_model(
             ("price_source", body.price_source),
             ("pricing_mode", body.pricing_mode),
             ("subscription_id", body.subscription_id),
+            ("description", body.description),
         ):
             if value is not None:
                 fields[name] = value
@@ -1268,8 +1273,17 @@ async def api_add_manual_model(body: ManualModelBody) -> dict[str, Any]:
         price_source=body.price_source or await _provider_pricing_url(core, body.service_provider_id),
         price_source_kind=body.price_source_kind,
         price_checked_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        description=body.description or "",
     )
     await core.db.upsert_registry_model(model)
+    if body.description:
+        # The upsert leaves the human-only columns alone (a sync must not erase
+        # them), so the text a human typed just now is written separately.
+        stored = await core.db.update_registry_model(
+            body.service_provider_id, body.model_id, {"description": body.description}
+        )
+        if stored is not None:
+            return model_to_dict(stored)
     return model_to_dict(model)
 
 

@@ -147,6 +147,8 @@ table.multi td { padding:3px 6px; border-bottom:1px solid var(--border); }
 #models tbody tr { cursor:pointer; }
 #models tbody tr.selected { background:#1f2430; }
 .price-field { margin-bottom:10px; }
+.price-field textarea { display:block; width:100%; box-sizing:border-box; font:inherit; resize:vertical; }
+.hint.description { white-space:pre-line; }
 /* One row per chosen file on «Прогон»: the name, then what it is for. */
 .file-roles { margin-top:8px; }
 .file-role { display:flex; align-items:center; gap:8px; margin-bottom:6px; }

@@ -18,6 +18,11 @@ dependencies = [
 
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.40"]
+# The `local` provider: models computed on this host (UVDoc first). CPU builds
+# only — `onnxruntime` (not `onnxruntime-gpu`) and the headless OpenCV wheel
+# pull no CUDA and no GUI toolkit. About 100 MB of wheels, hence an extra.
+# The weights themselves come from deploy/fetch-models.sh, not from pip.
+local = ["onnxruntime>=1.17", "opencv-python-headless>=4.8", "numpy>=1.26"]
 dev = ["pytest>=8", "pytest-asyncio>=0.23"]
 # The acceptance tests of docs/UI_CONCEPT_v2.md §20 drive a real browser.
 # Separate from `dev` on purpose: it pulls a ~115 MB chromium

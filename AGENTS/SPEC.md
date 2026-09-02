@@ -88,6 +88,7 @@ on it; adapters never touch storage/mcp directly.
 35. ✅ A price may depend on the time of day: a row carries its base rate plus the UTC windows in which every rate is multiplied (`price_schedule`), and cost, the dry run and the fallback ladder all read the rate in force at that moment. DeepSeek's peak hours are the first case.
 36. ✅ Application identity per request (`app_url` / `app_name`): the site the app runs on wins, a plain name is the fallback, and the effective identity is logged, filterable in the journal and forwarded to providers that have such a parameter (OpenRouter's `HTTP-Referer` / `X-Title`). A request with no identity is made as the router itself: `https://mr.wildcar.org` (`SELF_APP_URL`).
 37. ✅ OpenRouter's dedicated images endpoint (`POST /images`): rows marked with the `images_api` capability — models absent from `GET /models` entirely, meta/muse-image first — generate and edit images there (`input_references` for reference photos), and an unmarked row follows the chat endpoint's own «use /api/v1/images» 404 instead of dying on it. The adapter now declares `image-to-image`.
+38. ✅ A provider whose models are computed in this process (`local`): an adapter that calls a Python function instead of an endpoint and is otherwise indistinguishable — the same `runs`, the same error envelope, a `usage` row at exactly zero. Inference runs in a thread pool behind a semaphore (`LOCAL_MAX_CONCURRENCY`), under a deadline (`timeout`, retriable); missing weights are `model_not_loaded`. First model: UVDoc, straightening a photographed page (`local/uvdoc`). [ADR-0009]
 
 ## Tasks, media and billing groups (30)
 
@@ -428,6 +429,9 @@ provider_status, retry_after_s, hint}}`.
 | `response_truncated` | 422 | output ceiling hit before any content |
 | `rate_limited` | 429 | provider refused; `retry_after_s` when it said so |
 | `not_configured` | 503 | no key/binary; `hint.env_var` names the variable |
+| `model_not_loaded` | 503 | a local model's weights are not on disk (`deploy/fetch-models.sh`); not retriable |
+| `image_too_large` | 413 | an input frame above a local model's pixel cap, refused from the header; not retriable |
+| `timeout` | 504 | a local run overran `LOCAL_RUN_TIMEOUT_SECONDS`; retriable, cost stays zero |
 | `provider_timeout` | 504 | no answer inside the read timeout |
 | `provider_error` / `provider_unavailable` / `access_denied` | 502 | upstream failure |
 
@@ -540,6 +544,69 @@ content-part shape as chat image parts, which is what makes `image-to-image`
 reference conditioning. App-identity headers (36) apply on this path as on
 the chat path. Billing: the answer carries `usage.cost`; the registry rate is
 `image_price` per image, entered by hand from a confirmed run.
+
+### Models computed on this host (38)
+
+Contract for requirement 38. Reasoning: `docs/adr/0009-local-provider.md`.
+
+The `local` provider (`adapters/local.py`) holds a dictionary of `LocalModel`s:
+each has its own inference function, weight files and input fields, and is
+seeded into the registry at startup (`service_provider_id='local'`,
+`model_id='local/<name>'`). The rule that only `router-client` ever reaches a
+model holds: an application gets a local model the way it gets a Replicate one
+— a registry row and an assignment.
+
+- **Same path as every provider.** `POST /api/v1/runs` → 202 → poll; the result
+  is a blob with `ref` and `url`; the row in `request_logs` and the `usage`
+  totals are written as for any run. Attachments arrive as bytes (the blob
+  store); the row's `input_map` binds roles onto the model's declared fields
+  and a loose attachment binds positionally, exactly as at Replicate. Text is
+  optional and, since no local model reads one, lands in `ignored_params` as
+  `prompt`. Parameters reach the function only if the row's `extra_params`
+  allows them **and** the model declares them; the adapter itself declares none.
+- **Price is zero as a fact.** The seed carries `image_price: 0` with
+  `price_source_kind='manual'`, so `price_is_unknown` is false, `is_free` is
+  true, and a run is `computed` at $0 — «бесплатно», never «нет методики».
+- **CPU is shared with the router.** At most `LOCAL_MAX_CONCURRENCY` (2) runs
+  compute at once, in a thread pool of that size behind a semaphore; a third
+  waits (a «ждём свободный слот» step on its timeline) and the event loop keeps
+  answering `chat`. Each session gets `cores // concurrency` threads.
+- **Deadline.** `LOCAL_RUN_TIMEOUT_SECONDS` (60) → `timeout`, 504, retriable.
+  A thread cannot be killed: the overrun computation finishes on its own and
+  holds its slot until it does, so the cap is never exceeded.
+- **Weights are an installation matter.** `deploy/fetch-models.sh` downloads
+  them into `LOCAL_MODELS_DIR` (`data/models/<model>/…`) and checks pinned
+  sha256 hashes; `install.sh` and `deploy.sh` both call it. A missing file
+  answers `model_not_loaded`, 503, not retriable — a `NotConfigured` subclass,
+  so a fallback policy may still choose a hosted model. `is_configured()` is
+  "the runtime libraries are importable" (`pip install -e '.[local]'`: CPU
+  `onnxruntime`, `opencv-python-headless`, `numpy` — no CUDA); the weights are
+  checked per model at run time.
+- **Registry rows have a `description`** (new column, patchable, in
+  `model_to_dict` and the console card): what a model cannot do is not in any
+  catalog, and the applications that let a user pick a model show it.
+
+**`local/uvdoc`** (`adapters/local_uvdoc.py`; UVDoc, Verhoeven–Magne–
+Sorkine-Hornung, SIGGRAPH Asia 2023, Apache-2.0; weights: the grid-output ONNX
+export `fredcallagan/uvdoc-grid-onnx`, 31.8 MB in two files). Task
+`image-to-image`, `input_map {"image": "image"}`, no parameters. The network
+sees an RGB 720×496 copy in [0, 1] and predicts a 2×45×31 inverse map in
+[-1, 1]; the map is stretched bilinearly to the output size with the grid's
+corners pinned to the image corners (as in the authors' code), converted to
+pixel coordinates of the full-resolution original and applied with
+`cv2.remap` (linear, border replicated) in horizontal bands so the two
+coordinate maps never exist at full size. Output size equals input size; JPEG
+in → JPEG quality 92, PNG in → PNG, anything else → PNG; no EXIF is written
+(orientation is applied on decode). Above 50 megapixels the run is refused
+from the file header as `image_too_large` (413, not retriable) before a pixel
+is decoded. Limits, stated in the row's description: one sheet in frame with
+its edges at least partly visible; a two-page spread, a stack, a sheet cropped
+on three sides — unpredictable; lighting, shadows and focus are untouched; and — measured, not assumed — with
+**no document in frame the model still finds one**: a landscape photo came back
+as an arbitrarily cropped, stretched frame (grid deviation 0.10 against
+0.03–0.06 on real pages), so a caller must check that a document is in the shot
+rather than rely on the model to leave a non-document alone.
+`scripts/uvdoc_smoke.py` runs the model on photographs with per-stage timings.
 
 ### Response files
 
@@ -816,7 +883,9 @@ router_mcp/
                        the ContextVar sink work in flight reports through)
   adapters/            base (ABC + RetryClientMixin), _subprocess (CLI helper),
                        openrouter, replicate, deepseek, claude_api, codex_oauth, deepgram,
-                       elevenlabs, yandex (SpeechKit TTS v3), codex_cli, claude_cli
+                       elevenlabs, yandex (SpeechKit TTS v3), codex_cli, claude_cli,
+                       local (models computed in-process: pool + semaphore +
+                       deadline), local_uvdoc (page unwarping, ONNX/OpenCV)
   registry/            models (RegistryModel), service (per-provider catalog sync)
   routing/router.py    ModelRouter.resolve + dispatch
   accounting/cost.py   compute_cost
@@ -833,6 +902,9 @@ router_mcp/
                        js/core/{api,dom,format,state,keys,runs}.js,
                        js/components/{json-view,inspector,timeline}.js,
                        js/pages/{run,models,logs,spend,overview,connections}.js}
+scripts/               uvdoc_smoke.py (local UVDoc on photographs, with timings)
+deploy/                install.sh, deploy.sh, fetch-models.sh (local model weights,
+                       sha256-pinned), the unit, the nginx template, DEPLOY.md
 tests/                 conftest (one app per session), test_smoke (chain),
                        test_web (app), test_web_views (envelope parity),
                        test_api_filters (log filters/cursor), test_blobs
@@ -846,7 +918,11 @@ tests/                 conftest (one app per session), test_smoke (chain),
                        without node), test_acceptance (§20 in a real browser,
                        skipped without playwright),
                        test_modalities, test_adapters_parse, test_cli,
-                       test_fallback, test_registry_sync, test_auth;
+                       test_fallback, test_registry_sync, test_auth,
+                       test_adapters_local (slots, deadline, roles, zero price
+                       with a stand-in model), test_local_uvdoc (header cap,
+                       remap geometry; the model when weights are installed),
+                       test_local_runs (blobs → runs → blob → usage over HTTP);
                        js/ (DOM stub + API fixtures), mcp_probe.py (manual)
 ```
 
@@ -879,7 +955,11 @@ everything.
   Full runbook: `deploy/DEPLOY.md`. Artifacts: `deploy/model-router-mcp.service`,
   `deploy/install.sh`, `deploy/deploy.sh`, `deploy/nginx-model-router.conf`.
 - Secrets/config live in `.env` (see `.env.example`); never committed.
-- Runtime data (`data/router.db`, `data/blobs/`) and `logs/` are gitignored.
+- Runtime data (`data/router.db`, `data/blobs/`, `data/models/`) and `logs/` are gitignored.
+- Local model weights: `deploy/fetch-models.sh` (called by `install.sh` and
+  `deploy.sh`) downloads them into `LOCAL_MODELS_DIR` and verifies pinned
+  sha256 hashes; the runtime libraries are the `local` extra
+  (`pip install -e '.[anthropic,local]'`, as the scripts do).
 - Endpoints: `GET /health` (open, status only); `/mcp` (Streamable HTTP, requires
   `Authorization: Bearer $AUTH_TOKEN` when set, enforced by a pure-ASGI middleware);
   web console `/`, `/registry`, `/logs` (guarded by nginx HTTP Basic auth).
@@ -901,3 +981,9 @@ See `AGENTS/STATE.md` for the live Now / Next snapshot.
   `telecodex_bot` (Codex CLI runner), `openai-auth-sync` (OAuth token sync).
 - Codex OAuth shares `auth.json` with those repos — use a dedicated copy to avoid
   refresh-token rotation conflicts.
+- Local models: UVDoc (Verhoeven, Magne, Sorkine-Hornung, SIGGRAPH Asia 2023;
+  https://github.com/tanguymagne/UVDoc, **Apache-2.0**) via the grid-output ONNX
+  export https://huggingface.co/fredcallagan/uvdoc-grid-onnx (Apache-2.0,
+  `UVDoc_grid.onnx` + `.data`, sha256 pinned in `deploy/fetch-models.sh`).
+  Runtime: `onnxruntime` (CPU build), `opencv-python-headless`, `numpy` — the
+  `local` extra in `pyproject.toml`; no CUDA, no GUI toolkit.

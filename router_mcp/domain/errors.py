@@ -62,6 +62,18 @@ class NotFound(RouterError):
     http_status = 404
 
 
+class ImageTooLarge(BadRequest):
+    """An input image above the pixel cap a local model will decode.
+
+    Raised from the file header, before a single pixel is decoded: the point is
+    to refuse a 200-megapixel scan with a message rather than have the process
+    killed for memory while three full-size buffers are being allocated.
+    """
+
+    code = "image_too_large"
+    http_status = 413
+
+
 class UnknownModel(RouterError):
     """No registry row matches the requested model id."""
 
@@ -102,6 +114,20 @@ class ProviderDisabled(NotConfigured):
     http_status = 409
 
 
+class ModelNotLoaded(NotConfigured):
+    """A model computed on this host has no weights on disk.
+
+    An installation fault, not a request fault: `deploy/fetch-models.sh` was
+    not run, or the file it fetched is gone. Subclasses NotConfigured so a
+    fallback policy may still pick a hosted model, and so «Обзор» reads it as
+    "set up", never as "the request was wrong". Retrying the same call cannot
+    help, which is what `retriable=False` (inherited) says.
+    """
+
+    code = "model_not_loaded"
+    http_status = 503
+
+
 class ProviderUnavailable(RouterError):
     """Transient upstream failure (timeout, 5xx, rate limit exhausted)."""
 
@@ -130,6 +156,19 @@ class ProviderTimeout(ProviderUnavailable):
     """
 
     code = "provider_timeout"
+    http_status = 504
+
+
+class ComputeTimeout(ProviderUnavailable):
+    """A run computed on this host did not finish inside its deadline.
+
+    Not `ProviderTimeout`: that one marks the cost unknown because a remote
+    provider very likely ran and billed the request. Local compute costs
+    nothing whether it finished or not, and the thread that overran is left
+    to finish on its own — it still holds its concurrency slot until it does.
+    """
+
+    code = "timeout"
     http_status = 504
 
 

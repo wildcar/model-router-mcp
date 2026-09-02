@@ -54,9 +54,14 @@ def test_a_task_separates_cannot_from_not_configured(client):
     """Two different answers, and the console must not conflate them: «мы так не
     умеем» is a dead end, «ключ не введён» is a two-minute fix."""
     tasks = client.get("/api/v1/capabilities").json()["tasks"]
-    # An adapter can drive it (Replicate), but no credentials are set in tests.
+    # Adapters can drive it (Replicate, OpenRouter, Codex), but no credentials
+    # are set in tests.
+    assert tasks["text-to-image"]["available"] is True
+    assert tasks["text-to-image"]["configured"] is False
+    # Editing an image needs no key at all once the `local` provider's runtime
+    # libraries are installed: UVDoc computes on this host.
     assert tasks["image-to-image"]["available"] is True
-    assert tasks["image-to-image"]["configured"] is False
+    assert tasks["image-to-image"]["configured"] is get_core().adapters["local"].is_configured()
     # Nothing here can do it at all.
     assert tasks["image-to-video"]["available"] is True
     assert tasks["cli"]["available"] is True

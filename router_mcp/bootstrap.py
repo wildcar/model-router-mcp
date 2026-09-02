@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 from router_mcp.adapters.base import ProviderAdapter
 from router_mcp.adapters.claude_api import PRICING_PAGE as anthropic_pricing_page
@@ -20,6 +21,8 @@ from router_mcp.adapters.deepgram import DeepgramAdapter
 from router_mcp.adapters.deepseek import PRICING_PAGE as deepseek_pricing_page
 from router_mcp.adapters.deepseek import DeepSeekAdapter
 from router_mcp.adapters.elevenlabs import ElevenLabsAdapter
+from router_mcp.adapters.local import MODELS as local_models
+from router_mcp.adapters.local import LocalAdapter, LocalModel
 from router_mcp.adapters.yandex import YandexSpeechKitAdapter
 from router_mcp.adapters.openrouter import OpenRouterAdapter
 from router_mcp.adapters.replicate import PRICING_PAGE as replicate_pricing_page
@@ -106,6 +109,38 @@ def _seed_model(
         price_source=price_source,
         price_source_kind="estimate",
         **prices,
+    )
+
+
+def _local_seed(spec: LocalModel) -> RegistryModel:
+    """The registry row for a model this build computes itself.
+
+    Priced at exactly zero with confirmed provenance: local compute costs the
+    operator nothing per run, and the row must read «бесплатно», not «цены
+    нет» — `price_is_unknown` is what keeps a row out of automatic selection
+    and marks its runs `unpriced`, and neither is true here. The subject role
+    is mapped explicitly so the row shows what it binds, and the description
+    carries the caveats no catalog would.
+    """
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return RegistryModel(
+        service_provider_id="local",
+        model_provider="local",
+        model_id=spec.model_id,
+        display_name=spec.display_name,
+        modalities=(),
+        tasks=(spec.task,),
+        tier="free",
+        source="seed",
+        price_source=(
+            f"computed on this host, no per-run charge; model card {spec.model_card}"
+            if spec.model_card else "computed on this host, no per-run charge"
+        ),
+        price_source_kind="manual",
+        price_checked_at=now,
+        input_map={"image": spec.inputs[0]} if spec.inputs else {},
+        extra_params=spec.params,
+        description=spec.description,
     )
 
 
@@ -337,6 +372,23 @@ def _build_adapters(settings: Settings) -> list[ProviderSpec]:
                 _chat_seed("anthropic-api", "anthropic", "claude-sonnet-4-6", "Claude Sonnet 4.6", 3e-6, 1.5e-5, anthropic_pricing_page),
                 _chat_seed("anthropic-api", "anthropic", "claude-opus-4-8", "Claude Opus 4.8", 1.5e-5, 7.5e-5, anthropic_pricing_page),
             ],
+        ),
+        ProviderSpec(
+            id="local",
+            display_name="Локальные модели",
+            adapter_key="local",
+            base_url=None,
+            adapter=LocalAdapter(
+                models_dir=settings.local_models_dir,
+                max_concurrency=settings.local_max_concurrency,
+                timeout_seconds=settings.local_run_timeout_seconds,
+                # For an attachment that arrives as a ref without its bytes.
+                load_blob=BlobStore(settings.blob_dir).load,
+            ),
+            # One row per model this build ships; the weights come from
+            # deploy/fetch-models.sh, and a missing file is a per-run
+            # `model_not_loaded`, not a missing row.
+            seed_models=[_local_seed(spec) for spec in local_models.values()],
         ),
         ProviderSpec(
             id="codex-cli",

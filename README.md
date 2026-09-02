@@ -52,6 +52,17 @@ bash deploy/deploy.sh           # update: pull, reinstall, restart, health-check
 `GET /health` is open; `/mcp` requires `Authorization: Bearer $AUTH_TOKEN` when
 set; the web console sits behind nginx HTTP Basic auth.
 
+## Local models
+
+The `local` provider computes models in the router process itself; the first is
+UVDoc (page unwarping, Apache-2.0). Install the CPU runtime and fetch the weights:
+
+```bash
+pip install -e ".[local]"          # onnxruntime (CPU), opencv-python-headless, numpy
+bash deploy/fetch-models.sh        # sha256-checked download into data/models/
+python scripts/uvdoc_smoke.py photo.jpg --out /tmp/uvdoc   # try it on a photograph
+```
+
 ## Status
 
 Phases 0–4 are complete: OpenRouter chat, image (Codex OAuth), STT (Deepgram),
