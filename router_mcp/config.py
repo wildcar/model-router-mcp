@@ -162,7 +162,12 @@ class Settings(BaseSettings):
     codex_base_url: str = Field(
         default="https://chatgpt.com/backend-api/codex", alias="CODEX_BASE_URL"
     )
-    codex_image_main_model: str = Field(default="gpt-5.4", alias="CODEX_IMAGE_MAIN_MODEL")
+    # The text model that *calls* the image tool; the picture itself comes from
+    # `codex_image_tool_model`. It must be a slug the account can still address
+    # (the codex-oauth catalog lists them): a retired one fails every image
+    # request with HTTP 400 «model is not supported when using Codex with a
+    # ChatGPT account» — gpt-5.4 went that way on 2026-09-05.
+    codex_image_main_model: str = Field(default="gpt-5.5", alias="CODEX_IMAGE_MAIN_MODEL")
     codex_image_tool_model: str = Field(default="gpt-image-2", alias="CODEX_IMAGE_TOOL_MODEL")
     # The model list endpoint filters by client version (a model can declare a
     # `minimal_client_version`), so the version is a request parameter, not

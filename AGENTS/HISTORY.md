@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-09-06 · codex image: ведущая модель по умолчанию gpt-5.5
+- What: дефолт `CODEX_IMAGE_MAIN_MODEL` gpt-5.4 → gpt-5.5 в `config.py` и `.env.example`, с комментарием, почему слаг должен быть живым в каталоге.
+- Why: 2026-09-05 бэкенд снял gpt-5.4 для ChatGPT-аккаунтов — каждый text-to-image через codex-oauth падал HTTP 400 (26 строк `error`, последняя удачная 20268).
+- Files: router_mcp/config.py, .env.example, AGENTS/STATE.md
+- Next: деплой и живой прогон «gpt-5.5 зовёт image_generation»; прод `.env` правит оператор; позже — ведущая модель из каталога.
+
 ## 2026-09-02 · провайдер `local` и модель `local/uvdoc` — выпрямление страницы
 - What: адаптер `local` (функция в процессе; пул + семафор `LOCAL_MAX_CONCURRENCY=2`, дедлайн 60 с → `timeout`, `model_not_loaded`, `image_too_large`), UVDoc через ONNX (сетка 45×31 → remap полосами по оригиналу, JPEG→JPEG q92 / PNG→PNG, без EXIF), сид-строка с нулевой подтверждённой ценой и новой колонкой реестра `description`, `deploy/fetch-models.sh` с sha256, extra `.[local]`, смоук `scripts/uvdoc_smoke.py`, ADR-0009.
 - Why: задачи 6–7 постановки «Выпрямление страницы»: модели нет на Replicate, а наружу к моделям ходит только router-client — модель живёт в роутере первым локальным провайдером.
