@@ -39,6 +39,11 @@ def model_to_dict(m: RegistryModel) -> dict[str, Any]:
         # the id is listed or seeded but never actually served anything here.
         "confirmed_at": m.confirmed_at,
         "replaced_by": m.replaced_by,
+        # Who retired the row when it was not the catalog: "backend" means the
+        # provider refused a request on an id it still lists, and the sync will
+        # not revive the row for a day (ADR-0010). Null for a catalog or manual
+        # retirement, which is every row retired before 2026-09-08.
+        "retired_by": m.retired_by,
         # Price provenance: a caller comparing costs needs to know which numbers
         # are confirmed and which are guesses.
         "price_source": m.price_source,
