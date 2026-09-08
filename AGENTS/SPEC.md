@@ -265,6 +265,24 @@ Contract for requirement 34. Reasoning and rejected alternatives:
   `supported_in_api: false` entries are skipped, and the image tool model is
   appended because it is addressable but not listed. Rows are priced `unknown`:
   a subscription publishes no rate, and a zero would win every automatic pick.
+- A refusal retires a row (ADR-0010). codex-oauth reads `/responses` answering
+  HTTP 404 `model_not_found` or HTTP 400 «model is not supported» as "this slug
+  is gone": the request fails with `model_unavailable` naming the slug (a
+  fallback policy may act on it), and the row is retired at once with
+  `retired_by: "backend"` — not left to a catalog sync, because on 2026-09-08
+  `GET /models` kept listing gpt-5.5 for hours after `/responses` stopped
+  serving it. A row retired that way stays retired through catalog syncs for
+  24 h (`held` in the sync report); afterwards the catalog is believed again.
+  The console's restore clears the mark.
+- The text model that leads a codex-oauth image request comes from the
+  registry: `CODEX_IMAGE_MAIN_MODEL` leads while its own row is active,
+  otherwise the provider's active `text-to-text` rows lead, confirmed ones
+  first. When the leader is refused mid-request the image call is repeated once
+  with the next live leader (the first call drew nothing, `usage` empty); the
+  run then carries `requested_model_id` = the image model and a
+  `fallback_reason` naming both leaders, and the timeline gets a `fallback`
+  step. With no live leader left the error's `hint` names the retired slugs and
+  `CODEX_IMAGE_MAIN_MODEL` as the thing to change.
 - Per-model parameter options: levels a catalog publishes are stored as
   capabilities (`effort:xhigh`) and served on the tree node as `param_options`.
   A pinned model narrows the «Глубина рассуждения» select to its own levels; with

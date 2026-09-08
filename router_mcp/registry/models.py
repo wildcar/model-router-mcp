@@ -194,6 +194,12 @@ class RegistryModel:
     last_seen_at: str | None = None
     deprecated_at: str | None = None
     replaced_by: str | None = None
+    # Who retired the row, when somebody other than the catalog did. None is the
+    # historical case: the sync stopped finding the id upstream. "backend" means
+    # the provider still *lists* the id but refused a request on it (HTTP 404
+    # model_not_found, or 400 «model is not supported») — the catalog is wrong
+    # and the sync must not believe it again for a while (ADR-0010).
+    retired_by: str | None = None
     # Price provenance: where the number came from and when it was last checked.
     # "api"   — read from the provider's own catalog, trustworthy;
     # "page"  — copied from the vendor's price page (URL in price_source);

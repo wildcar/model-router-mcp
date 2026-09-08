@@ -464,6 +464,10 @@ async def build_core(settings: Settings) -> AppCore:
         adapters=adapters,
         ttl_seconds=settings.model_cache_ttl_seconds,
     )
+    # An adapter that chooses among registry rows at request time (codex-oauth's
+    # leading text model) gets the registry now that there is one.
+    for adapter in adapters.values():
+        adapter.bind_registry(registry)
     # Best-effort initial catalog sync (skips providers without keys/catalogs).
     try:
         await registry.sync_all(force=True)

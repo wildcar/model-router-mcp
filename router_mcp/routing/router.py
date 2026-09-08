@@ -894,6 +894,16 @@ class ModelRouter:
                 raise normalized from exc
 
         assert response is not None and model is not None and used_adapter is not None
+        internal = (response.raw_meta or {}).get("fallback_reason")
+        if internal:
+            # A substitution made *inside* one attempt: codex-oauth swapping the
+            # text model that leads an image request when the backend retires
+            # it. The row the caller addressed did answer, so `model` is right;
+            # the reason travels the same fields a ladder fallback uses, because
+            # a silent substitution is the one thing this file forbids.
+            requested_model_id = requested_model_id or model.model_id
+            reason = f"{reason}; {internal}" if reason else str(internal)
+            step("fallback", "substituted inside the provider", reason=str(internal))
         latency_ms = int((time.monotonic() - t0) * 1000)
         response_ref = self._persist_response_attachment(response)
         step("response", "response parsed", finish_reason=_finish_reason(response))

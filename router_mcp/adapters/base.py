@@ -12,7 +12,7 @@ import asyncio
 import logging
 import time
 from contextvars import ContextVar
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
@@ -31,6 +31,9 @@ from router_mcp.domain.messages import RouterRequest, RouterResponse
 from router_mcp.domain.modality import Modality
 from router_mcp.domain.task import Task
 from router_mcp.registry.models import RegistryModel
+
+if TYPE_CHECKING:  # the service imports this module; a runtime import would cycle
+    from router_mcp.registry.service import RegistryService
 
 logger = logging.getLogger(__name__)
 
@@ -256,6 +259,17 @@ class ProviderAdapter(abc.ABC):
         (CLI engines, fixed single-model services) and leaves the registry
         untouched; an empty list would mean "the provider offers nothing", which
         the sync treats as "deprecate everything" — so return None when in doubt.
+        """
+        return None
+
+    def bind_registry(self, registry: RegistryService) -> None:  # noqa: B027
+        """Hand the adapter the registry, once it exists.
+
+        Adapters are built before the database; the registry is built after
+        both. The one adapter that needs it today is codex-oauth, whose image
+        request is led by a text model it must pick from the live rows and
+        retire when the backend refuses it (ADR-0010). Everything else ignores
+        the call.
         """
         return None
 

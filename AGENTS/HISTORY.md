@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-09-08 · codex image: ведущая из реестра, отказ бэкенда гасит строку (ADR-0010)
+- What: адаптер codex-oauth ведёт картинку настроенной моделью, только пока её строка активна, иначе живой text-to-text строкой провайдера; 404 `model_not_found` и 400 «model is not supported» поднимают `ModelUnavailable` с подсказкой и сразу гасят строку (`RegistryService.retire_model`, колонка `retired_by`), путь картинки повторяется один раз со следующей ведущей и пишет `fallback_reason`; синк не оживляет такую строку сутки; дефолты на gpt-5.6-sol.
+- Why: 2026-09-08 бэкенд снял gpt-5.5, а каталог его перечислял; три картинки agentish (21752..21754) упали с 404 про модель, которую клиент не называл, `hint: null`.
+- Files: router_mcp/adapters/{codex_oauth,base}.py, registry/{service,models}.py, storage/database.py, routing/router.py, bootstrap.py, config.py, .env.example, tests/test_codex_main_model.py, tests/test_registry_sync.py, tests/test_migrations.py, docs/adr/0010-a-refusal-retires-the-row.md, AGENTS/SPEC.md
+- Next: деплой и живой прогон на проде - чат на gpt-5.5 должен вернуть 409 и погасить строку, картинка через gpt-image-2 нарисоваться; daypic проверить кадр 2:3.
+
 ## 2026-09-06 · codex image: ведущая модель по умолчанию gpt-5.5
 - What: дефолт `CODEX_IMAGE_MAIN_MODEL` gpt-5.4 → gpt-5.5 в `config.py` и `.env.example`, с комментарием, почему слаг должен быть живым в каталоге.
 - Why: 2026-09-05 бэкенд снял gpt-5.4 для ChatGPT-аккаунтов — каждый text-to-image через codex-oauth падал HTTP 400 (26 строк `error`, последняя удачная 20268).

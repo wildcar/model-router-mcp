@@ -182,6 +182,7 @@ def _model_to_row(m: RegistryModel) -> dict[str, Any]:
         "last_seen_at": m.last_seen_at,
         "deprecated_at": m.deprecated_at,
         "replaced_by": m.replaced_by,
+        "retired_by": m.retired_by,
         "price_source": m.price_source,
         "price_source_kind": m.price_source_kind,
         "price_checked_at": m.price_checked_at,
@@ -239,6 +240,7 @@ def _row_to_model(row: aiosqlite.Row) -> RegistryModel:
         last_seen_at=row["last_seen_at"],
         deprecated_at=row["deprecated_at"],
         replaced_by=row["replaced_by"],
+        retired_by=_col(row, "retired_by"),
         price_source=row["price_source"],
         price_source_kind=row["price_source_kind"] or "estimate",
         price_checked_at=row["price_checked_at"],
@@ -369,6 +371,10 @@ class Database:
                     last_seen_at DATETIME,
                     deprecated_at DATETIME,
                     replaced_by TEXT,
+                    -- Set when a *request* retired the row rather than a sync:
+                    -- 'backend' = the provider refused the id it still lists.
+                    -- Holds the row retired through catalog syncs (ADR-0010).
+                    retired_by TEXT,
                     price_source TEXT,
                     price_source_kind TEXT NOT NULL DEFAULT 'estimate',
                     price_checked_at DATETIME,
@@ -530,6 +536,9 @@ class Database:
             "price_schedule": "TEXT NOT NULL DEFAULT ''",
             # The model's caveats, as text. Empty on every existing row.
             "description": "TEXT NOT NULL DEFAULT ''",
+            # ADR-0010: who retired the row when it was not the catalog. Null on
+            # every existing row — all of them were retired by a sync or a hand.
+            "retired_by": "TEXT",
         },
         "request_logs": {
             "finish_reason": "TEXT",
@@ -766,24 +775,52 @@ class Database:
             return cur.rowcount > 0
 
     async def deprecate_registry_model(
-        self, service_provider_id: str, model_id: str, *, replaced_by: str | None = None
+        self,
+        service_provider_id: str,
+        model_id: str,
+        *,
+        replaced_by: str | None = None,
+        retired_by: str | None = None,
     ) -> None:
         """Mark a model as gone from its provider's catalog (never delete it:
-        request logs and cost history point at the row)."""
+        request logs and cost history point at the row).
+
+        `retired_by` names the writer when it is not the catalog sync — today
+        only "backend", the provider refusing an id it still lists. That one
+        overwrites both the date and the author: the hold `_sync_one` applies is
+        counted from the refusal, not from an older retirement the catalog may
+        already have undone once.
+        """
+        stamp = _now()
         conn = await self._get_conn()
         async with self._write_lock:
-            await conn.execute(
-                """
-                UPDATE registry_models
-                SET is_active = 0,
-                    deprecated_at = COALESCE(deprecated_at, ?),
-                    replaced_by = COALESCE(?, replaced_by),
-                    revision = revision + 1,
-                    updated_at = ?
-                WHERE service_provider_id = ? AND model_id = ?
-                """,
-                (_now(), replaced_by, _now(), service_provider_id, model_id),
-            )
+            if retired_by:
+                await conn.execute(
+                    """
+                    UPDATE registry_models
+                    SET is_active = 0,
+                        deprecated_at = ?,
+                        retired_by = ?,
+                        replaced_by = COALESCE(?, replaced_by),
+                        revision = revision + 1,
+                        updated_at = ?
+                    WHERE service_provider_id = ? AND model_id = ?
+                    """,
+                    (stamp, retired_by, replaced_by, stamp, service_provider_id, model_id),
+                )
+            else:
+                await conn.execute(
+                    """
+                    UPDATE registry_models
+                    SET is_active = 0,
+                        deprecated_at = COALESCE(deprecated_at, ?),
+                        replaced_by = COALESCE(?, replaced_by),
+                        revision = revision + 1,
+                        updated_at = ?
+                    WHERE service_provider_id = ? AND model_id = ?
+                    """,
+                    (stamp, replaced_by, stamp, service_provider_id, model_id),
+                )
             await conn.commit()
 
     async def confirm_registry_model(
@@ -837,7 +874,7 @@ class Database:
             await conn.execute(
                 """
                 UPDATE registry_models
-                SET is_active = 1, deprecated_at = NULL,
+                SET is_active = 1, deprecated_at = NULL, retired_by = NULL,
                     revision = revision + 1, updated_at = ?
                 WHERE service_provider_id = ? AND model_id = ?
                 """,

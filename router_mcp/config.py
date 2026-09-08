@@ -163,11 +163,15 @@ class Settings(BaseSettings):
         default="https://chatgpt.com/backend-api/codex", alias="CODEX_BASE_URL"
     )
     # The text model that *calls* the image tool; the picture itself comes from
-    # `codex_image_tool_model`. It must be a slug the account can still address
-    # (the codex-oauth catalog lists them): a retired one fails every image
-    # request with HTTP 400 «model is not supported when using Codex with a
-    # ChatGPT account» — gpt-5.4 went that way on 2026-09-05.
-    codex_image_main_model: str = Field(default="gpt-5.5", alias="CODEX_IMAGE_MAIN_MODEL")
+    # `codex_image_tool_model`. It leads only while its codex-oauth registry row
+    # is active; otherwise the adapter leads with a live text row of the provider
+    # and the log carries `fallback_reason` (ADR-0010). Two slugs died under a
+    # running service: gpt-5.4 (2026-09-05, HTTP 400 «model is not supported when
+    # using Codex with a ChatGPT account», catalog dropped it the same day) and
+    # gpt-5.5 (2026-09-08, HTTP 404 model_not_found while the catalog kept
+    # listing it). Still point it at a live slug: the fallback costs one refused
+    # call per retired leader.
+    codex_image_main_model: str = Field(default="gpt-5.6-sol", alias="CODEX_IMAGE_MAIN_MODEL")
     codex_image_tool_model: str = Field(default="gpt-image-2", alias="CODEX_IMAGE_TOOL_MODEL")
     # The model list endpoint filters by client version (a model can declare a
     # `minimal_client_version`), so the version is a request parameter, not
@@ -177,7 +181,7 @@ class Settings(BaseSettings):
     codex_image_quality: str = Field(default="medium", alias="CODEX_IMAGE_QUALITY")
 
     # --- CLI engines ----------------------------------------------------
-    codex_command: str = Field(default="codex exec --model gpt-5.5", alias="CODEX_COMMAND")
+    codex_command: str = Field(default="codex exec --model gpt-5.6-sol", alias="CODEX_COMMAND")
     claude_command: str = Field(default="claude", alias="CLAUDE_COMMAND")
     cli_run_timeout_sec: int = Field(default=1800, alias="CLI_RUN_TIMEOUT_SEC")
     # The claude CLI reports `total_cost_usd` whether it ran against an API key

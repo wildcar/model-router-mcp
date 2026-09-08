@@ -384,3 +384,63 @@ async def test_browsed_sync_does_not_resurrect_a_pruned_row(tmp_path):
         assert active == {"kept", "swept"}
     finally:
         await db.close()
+
+
+@pytest.mark.asyncio
+async def test_a_row_the_backend_refused_is_not_revived_by_the_catalog(tmp_path):
+    """gpt-5.5 (2026-09-08): `GET /models` kept listing a slug `/responses`
+    answered 404 on. A retirement on the backend's word outranks the catalog
+    for a day; after that the catalog is believed again (ADR-0010)."""
+    from router_mcp.registry.service import BACKEND_RETIREMENT_HOLD_SECONDS
+
+    db = await _db(tmp_path)
+    try:
+        adapter = FakeCatalogAdapter([_model("v3-chat"), _model("v4-pro")])
+        registry = RegistryService(db, adapters={"vendor": adapter})
+        await registry.sync_all(force=True)
+
+        await registry.retire_model(
+            "vendor", "v3-chat", reason="HTTP 404 model_not_found", replaced_by="v4-pro"
+        )
+        report = (await registry.sync_all(force=True))[0]
+
+        assert report.held == 1 and report.updated == 1 and report.deprecated == 0
+        row = await db.get_registry_model("vendor", "v3-chat")
+        assert row.is_active is False
+        assert row.retired_by == "backend" and row.replaced_by == "v4-pro"
+        assert {m.model_id for m in await db.list_registry_models()} == {"v4-pro"}
+
+        # A day later the hold is over: the catalog still lists it, so it comes
+        # back — and the next refusal would retire it again for another day.
+        from datetime import datetime, timedelta, timezone
+
+        stale = (
+            datetime.now(timezone.utc) - timedelta(seconds=BACKEND_RETIREMENT_HOLD_SECONDS + 60)
+        ).isoformat(timespec="seconds")
+        conn = await db._get_conn()
+        await conn.execute(
+            "UPDATE registry_models SET deprecated_at = ? WHERE model_id = 'v3-chat'", (stale,)
+        )
+        await conn.commit()
+        report = (await registry.sync_all(force=True))[0]
+
+        assert report.held == 0
+        row = await db.get_registry_model("vendor", "v3-chat")
+        assert row.is_active is True and row.retired_by is None and row.deprecated_at is None
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_restoring_by_hand_clears_the_backend_mark(tmp_path):
+    db = await _db(tmp_path)
+    try:
+        adapter = FakeCatalogAdapter([_model("v3-chat")])
+        registry = RegistryService(db, adapters={"vendor": adapter})
+        await registry.sync_all(force=True)
+        await registry.retire_model("vendor", "v3-chat", reason="HTTP 404")
+        await db.restore_registry_model("vendor", "v3-chat")
+        row = await db.get_registry_model("vendor", "v3-chat")
+        assert row.is_active is True and row.retired_by is None
+    finally:
+        await db.close()

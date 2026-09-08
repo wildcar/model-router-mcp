@@ -13,6 +13,17 @@ it being unable to *edit* one. `image-to-image` is still absent from
 request instead of quietly sending it to gpt-image-2 and returning a brand-new
 image (ADR-0006).
 
+The picture is drawn by the tool model (`gpt-image-2`); the *leading* text model
+only calls the tool, so which live slug leads hardly matters — but it must be
+live. It used to be `CODEX_IMAGE_MAIN_MODEL` verbatim, and twice the backend
+retired that slug under a running service: gpt-5.4 (2026-09-05, HTTP 400 «model
+is not supported», the catalog dropped it the same day) and gpt-5.5 (2026-09-08,
+HTTP 404 model_not_found while `GET /models` kept listing it). Now the configured
+slug leads only while its registry row is active; otherwise the live text rows of
+this provider lead, confirmed ones first. A refusal of the kind above retires the
+row at once (`RegistryService.retire_model`) and, on the image path, the request
+is repeated once with the next live leader (ADR-0010).
+
 Loads an OAuth auth.json (flat or providers.openai-codex layout) and refreshes
 the access token on 401/403. Binary results come back as bytes so the router
 persists them to the blob store.
@@ -30,18 +41,28 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from router_mcp.adapters.base import ProviderAdapter
+from router_mcp.adapters.base import MODEL_GONE_RE, ProviderAdapter
 from router_mcp.domain import progress
-from router_mcp.domain.errors import AccessDenied, NotConfigured, ProviderError, ProviderUnavailable
+from router_mcp.domain.errors import (
+    AccessDenied,
+    ModelUnavailable,
+    NotConfigured,
+    ProviderError,
+    ProviderUnavailable,
+)
 from router_mcp.domain.messages import Attachment, RouterRequest, RouterResponse, Usage
 from router_mcp.domain.task import Task
 from router_mcp.registry.models import RegistryModel
+
+if TYPE_CHECKING:
+    from router_mcp.registry.service import RegistryService
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +77,20 @@ CODEX_PRICING_PAGE = "https://platform.openai.com/docs/pricing"
 # («maximum reasoning with automatic task delegation»), and offering it in the
 # console reproduced the very error this adapter's form exists to prevent.
 API_REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+
+# How `/responses` says a slug is no longer served. Both shapes were seen live:
+# HTTP 400 «The 'gpt-5.4' model is not supported when using Codex with a ChatGPT
+# account» (2026-09-05) and HTTP 404 {"error": {"code": "model_not_found",
+# "message": "The model gpt-5.5 does not exist or you do not have access to
+# it"}} (2026-09-08). Either one retires the registry row; the generic 404
+# reading of `MODEL_GONE_RE` covers a third wording should one appear.
+MODEL_GONE_CODES = ("model_not_found",)
+MODEL_NOT_SUPPORTED_RE = re.compile(r"model.{0,60}not supported", re.IGNORECASE | re.DOTALL)
+# How many text models an image request may try in one call: the leader, and
+# one live replacement when the backend says the leader is gone. The first call
+# died before any drawing started (usage empty), so this is not a second
+# generation; a second refusal in a row is not worth a third.
+MAX_MAIN_MODEL_TRIES = 2
 
 
 class CodexOAuthAdapter(ProviderAdapter):
@@ -98,6 +133,13 @@ class CodexOAuthAdapter(ProviderAdapter):
         self._client_version = client_version
         self._retries = retries
         self._client = httpx.AsyncClient(timeout=timeout_seconds)
+        # Set by `bind_registry` once the registry exists. Without it (a bare
+        # adapter in a unit test) the configured main model is the whole ladder
+        # and a refusal retires nothing.
+        self._registry: RegistryService | None = None
+
+    def bind_registry(self, registry: RegistryService) -> None:
+        self._registry = registry
 
     def is_configured(self) -> bool:
         return self._auth_path is not None and self._auth_path.exists()
@@ -115,7 +157,14 @@ class CodexOAuthAdapter(ProviderAdapter):
         self, request: RouterRequest, model: RegistryModel
     ) -> RouterResponse:
         payload = self._text_payload(request, model)
-        result = await self._with_recovery(payload, self._read_text_stream)
+        try:
+            result = await self._with_recovery(payload, self._read_text_stream)
+        except ModelUnavailable as exc:
+            # The row the caller pinned is gone upstream. Retired here, not
+            # left to the next catalog sync: the catalog kept listing gpt-5.5
+            # for hours after `/responses` stopped serving it.
+            await self._retire(str(payload["model"]), str(exc))
+            raise
         text, usage_raw = result
         if not text.strip():
             raise ProviderError(
@@ -285,21 +334,122 @@ class CodexOAuthAdapter(ProviderAdapter):
             raise ProviderError("generate_image requires a non-empty `prompt`")
         size = str(request.params.get("size") or self._size)
         quality = str(request.params.get("quality") or self._quality)
-        payload = self._payload(prompt, size=size, quality=quality)
 
         async def read(response: httpx.Response) -> str | None:
             return await self._extract_image_b64_from_stream(response)
 
-        image_b64 = await self._with_recovery(payload, read)
+        ladder, reason = await self._main_model_ladder()
+        tried: list[str] = []
+        image_b64: str | None = None
+        main = ladder[0]
+        for main in ladder[:MAX_MAIN_MODEL_TRIES]:
+            payload = self._payload(prompt, size=size, quality=quality, main_model=main)
+            try:
+                image_b64 = await self._with_recovery(payload, read)
+                break
+            except ModelUnavailable as exc:
+                tried.append(main)
+                rest = [m for m in ladder if m not in tried]
+                again = bool(rest) and len(tried) < MAX_MAIN_MODEL_TRIES
+                await self._retire(main, str(exc), replaced_by=rest[0] if again else None)
+                if not again:
+                    raise self._main_model_gone(exc, tried, rest) from exc
+                reason = f"main model {main} failed: {exc}; retrying with {rest[0]}"
+                progress.emit("fallback", f"ведущая {main} снята, пробую {rest[0]}")
         if not image_b64:
             raise ProviderError("Codex image backend returned no image")
         image_bytes = base64.b64decode(image_b64)
+        raw_meta: dict[str, Any] = {"main_model": main}
+        if reason:
+            # Read by the router into `requested_model_id` / `fallback_reason`:
+            # the caller asked for gpt-image-2 and got gpt-image-2, but not the
+            # way the configuration said, and the log must say so.
+            raw_meta["fallback_reason"] = reason
+            raw_meta["requested_main_model"] = self._main_model
         return RouterResponse(
             task=Task.TEXT_TO_IMAGE,
             provider=self.name,
             model_id=model.model_id or self._image_model,
-            usage=Usage(images=1, raw={"size": size, "quality": quality}),
+            usage=Usage(images=1, raw={"size": size, "quality": quality, "main_model": main}),
             attachments=[Attachment(kind="image", mime="image/png", data=image_bytes)],
+            raw_meta=raw_meta,
+        )
+
+    async def _main_model_ladder(self) -> tuple[list[str], str | None]:
+        """Text models that may lead an image request, best first — and why the
+        configured one is not leading, when it is not.
+
+        `CODEX_IMAGE_MAIN_MODEL` leads while its own registry row is active. When
+        that row is retired (by a sync, by a hand, or by a refusal a minute ago)
+        the provider's live `text-to-text` rows lead instead, the ones an answer
+        has confirmed first (ADR-0008), then by id. Without a registry the
+        configured slug is the whole ladder; with a registry that holds no live
+        text row it is too — the backend is then the only judge left.
+        """
+        if self._registry is None:
+            return [self._main_model], None
+        rows = await self._registry.get_models(
+            provider=self.name,
+            task=Task.TEXT_TO_TEXT.value,
+            active_only=True,
+            allow_sync=False,
+        )
+        live = sorted(
+            (m for m in rows if m.model_id != self._image_model),
+            key=lambda m: (m.confirmed_at is None, m.model_id),
+        )
+        ids = [m.model_id for m in live]
+        if self._main_model in ids:
+            ids.remove(self._main_model)
+            return [self._main_model, *ids], None
+        if not ids:
+            return [self._main_model], None
+        return ids, (
+            f"main model {self._main_model} is retired in the registry; "
+            f"leading with {ids[0]}"
+        )
+
+    async def _retire(self, model_id: str, why: str, *, replaced_by: str | None = None) -> None:
+        """Retire the row the backend just refused. Never raises: the caller is
+        in the middle of an error path or a retry, and the registry write is a
+        side effect of it, not the point of it."""
+        if self._registry is None:
+            return
+        try:
+            await self._registry.retire_model(
+                self.name, model_id, reason=why, replaced_by=replaced_by
+            )
+        except Exception:  # noqa: BLE001
+            logger.warning("Could not retire %s/%s in the registry", self.name, model_id, exc_info=True)
+
+    def _main_model_gone(
+        self, exc: ModelUnavailable, tried: list[str], rest: list[str]
+    ) -> ModelUnavailable:
+        """The error the caller sees when no live leader drew the picture.
+
+        The caller asked for the image model and would otherwise read a 404
+        about a text model it never named, with `hint: null` (prod log 21752).
+        """
+        retired = ", ".join(tried)
+        action = (
+            "set CODEX_IMAGE_MAIN_MODEL to a text model of codex-oauth that is active "
+            "in the registry and restart the service"
+        )
+        if not rest:
+            action += "; no active text model of codex-oauth is left to lead the image tool"
+        return ModelUnavailable(
+            f"Codex image generation did not start: the text model that calls the "
+            f"image tool is gone upstream ({retired}) — {exc}",
+            provider=self.name,
+            model_id=tried[-1],
+            provider_status=exc.provider_status,
+            hint={
+                "kind": "env_var",
+                "env_var": "CODEX_IMAGE_MAIN_MODEL",
+                "target": self.name,
+                "retired": list(tried),
+                "action": action,
+            },
         )
 
     # --- catalog ---------------------------------------------------------
@@ -481,9 +631,11 @@ class CodexOAuthAdapter(ProviderAdapter):
             "ChatGPT-Account-ID": resolved or "",
         }
 
-    def _payload(self, prompt: str, *, size: str, quality: str) -> dict[str, Any]:
+    def _payload(
+        self, prompt: str, *, size: str, quality: str, main_model: str | None = None
+    ) -> dict[str, Any]:
         return {
-            "model": self._main_model,
+            "model": main_model or self._main_model,
             "store": False,
             "stream": True,
             "instructions": (
@@ -549,9 +701,25 @@ class CodexOAuthAdapter(ProviderAdapter):
                         continue
                     if response.status_code >= 400:
                         body = (await response.aread()).decode("utf-8", errors="replace")
-                        raise ProviderError(
-                            f"Codex backend error HTTP {response.status_code}: {body[:500]}"
-                        )
+                        message = f"Codex backend error HTTP {response.status_code}: {body[:500]}"
+                        if self._model_gone(response.status_code, body):
+                            # The one 4xx that is about the model, not the
+                            # request: a fallback policy may answer it with a
+                            # different model, and the caller learns which slug
+                            # died rather than reading a generic provider error.
+                            slug = str(payload.get("model") or self._main_model)
+                            raise ModelUnavailable(
+                                message,
+                                provider=self.name,
+                                model_id=slug,
+                                provider_status=response.status_code,
+                                hint={
+                                    "kind": "pick_model",
+                                    "retired": slug,
+                                    "action": "choose an active model of codex-oauth",
+                                },
+                            )
+                        raise ProviderError(message, provider_status=response.status_code)
                     return await read(response)
             except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
                 if attempt > self._retries:
@@ -559,6 +727,31 @@ class CodexOAuthAdapter(ProviderAdapter):
                 continue
         status = response.status_code if response is not None else "unknown"
         raise ProviderUnavailable(f"Codex backend unavailable: {status}")
+
+    @staticmethod
+    def _model_gone(status: int, body: str) -> bool:
+        """Whether a 4xx from `/responses` says the *model* is not served.
+
+        A typed code when there is one (`model_not_found`), else the wording:
+        «model is not supported» was the 400 of 2026-09-05, and the generic
+        "model … not found / does not exist" family is shared with the other
+        OpenAI-shaped providers. A 404 that so much as mentions a model counts
+        too — `/responses` has no other 404 to give.
+        """
+        code: Any = None
+        try:
+            error = json.loads(body).get("error")
+            if isinstance(error, dict):
+                code = error.get("code")
+        except (json.JSONDecodeError, AttributeError):
+            pass
+        if code in MODEL_GONE_CODES:
+            return True
+        if status == 404:
+            return "model" in body.lower()
+        if status == 400:
+            return bool(MODEL_NOT_SUPPORTED_RE.search(body) or MODEL_GONE_RE.search(body))
+        return False
 
     async def _recover_tokens(self, failed: dict[str, str]) -> dict[str, str]:
         """After a 401/403, prefer tokens another writer (the codex CLI shares

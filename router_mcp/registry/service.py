@@ -46,6 +46,29 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+# How long a row the *backend* retired stays retired while the catalog keeps
+# listing it. gpt-5.5 (2026-09-08) was listed by `GET /models` and refused by
+# `/responses` with 404 model_not_found; a sync every 30 minutes would have
+# revived the row and the next request would have retired it again — one wasted
+# call per half hour, and the automatic pick landing on a dead id in between.
+# After the hold the catalog is believed again: if the backend still refuses,
+# the first request retires the row for another day (ADR-0010).
+BACKEND_RETIREMENT_HOLD_SECONDS = 24 * 3600
+
+
+def _held_by_backend(model: RegistryModel, now: datetime) -> bool:
+    """True while a backend-retired row must not be revived by the catalog."""
+    if model.is_active or model.retired_by != "backend" or not model.deprecated_at:
+        return False
+    try:
+        since = datetime.fromisoformat(model.deprecated_at)
+    except ValueError:
+        return False
+    if since.tzinfo is None:
+        since = since.replace(tzinfo=timezone.utc)
+    return (now - since).total_seconds() < BACKEND_RETIREMENT_HOLD_SECONDS
+
+
 @dataclass(slots=True)
 class SyncReport:
     """What one provider sync did, for the API and the logs."""
@@ -59,6 +82,9 @@ class SyncReport:
     # because this catalog is browsed rather than mirrored. Reported so the
     # console can say «предлагает 424, храним 6» instead of looking broken.
     offered: int = 0
+    # Rows the catalog lists that stayed retired anyway, because a request on
+    # them was refused by the backend less than a day ago (ADR-0010).
+    held: int = 0
     skipped: str | None = None  # why nothing happened, when nothing happened
 
     def as_dict(self) -> dict:
@@ -156,11 +182,19 @@ class RegistryService:
             )
         }
         stamp = _now()
+        now = datetime.now(timezone.utc)
         browse_only = getattr(adapter, "catalog_scope", "full") == "browse"
         seen: set[str] = set()
         for fresh in incoming:
             seen.add(fresh.model_id)
             old = existing.get(fresh.model_id)
+            if old is not None and _held_by_backend(old, now):
+                # The catalog says the id exists; the backend said otherwise to
+                # a real request, and more recently. The catalog is the weaker
+                # witness here (ADR-0008 says a catalog is a question), so the
+                # row stays retired until the hold runs out.
+                report.held += 1
+                continue
             if browse_only and (old is None or not old.is_active):
                 # A browsed catalog is not an inventory: mirroring it filled the
                 # registry with hundreds of ids nobody addressed, and every one of
@@ -405,7 +439,36 @@ class RegistryService:
             is_active=True,
             last_seen_at=stamp,
             deprecated_at=None,
+            # A revived row is the catalog's again; whoever retired it before
+            # is no longer the reason it is in this state.
+            retired_by=None,
             **prices,
+        )
+
+    # --- retirement by a refusal -------------------------------------------
+    async def retire_model(
+        self,
+        provider_id: str,
+        model_id: str,
+        *,
+        reason: str,
+        replaced_by: str | None = None,
+    ) -> None:
+        """Retire a row because the provider refused a request on it.
+
+        The catalog is one witness to a model's existence and an answer is the
+        proof (ADR-0008); a definitive refusal — 404 model_not_found, 400 «model
+        is not supported» — is the proof of the opposite, and waiting for the
+        catalog to agree left gpt-5.5 addressable for a day after it was gone.
+        The row is retired at once, marked `retired_by="backend"` so the next
+        sync does not revive it on the catalog's word alone, and `replaced_by`
+        names what answered instead when the caller knows.
+        """
+        logger.warning(
+            "Retiring %s/%s on the backend's refusal: %s", provider_id, model_id, reason
+        )
+        await self._db.deprecate_registry_model(
+            provider_id, model_id, replaced_by=replaced_by, retired_by="backend"
         )
 
     # --- reads ------------------------------------------------------------
