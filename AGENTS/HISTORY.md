@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-09-10 · codex image: журнал пишет, чем рисовал бэкенд
+- What: адаптер codex-oauth дочитывает поток картинки до `response.completed` (`_read_image_stream`, `DrawnImage`) и кладёт в `usage.raw` и `raw_meta` эхо бэкенда `backend_image_model`, `actual_size`, `actual_quality`; комментарии config/.env.example/SPEC говорят, что `CODEX_IMAGE_TOOL_MODEL` только имя строки реестра.
+- Why: проверка gpt-image-2.5 показала, что бэкенд игнорирует `model`/`size`/`quality` инструмента (выдуманный слаг рисует, эхо всегда `gpt-image-2-codex`/auto/auto); журнал писал нашу подпись, а не факт.
+- Files: router_mcp/adapters/codex_oauth.py, router_mcp/config.py, .env.example, AGENTS/SPEC.md, tests/test_codex_main_model.py
+- Next: задеплоить, проверить строку на проде, следить за сменой алиаса после релиза Images 2.5.
+
 ## 2026-09-08 · codex image: ведущая из реестра, отказ бэкенда гасит строку (ADR-0010)
 - What: адаптер codex-oauth ведёт картинку настроенной моделью, только пока её строка активна, иначе живой text-to-text строкой провайдера; 404 `model_not_found` и 400 «model is not supported» поднимают `ModelUnavailable` с подсказкой и сразу гасят строку (`RegistryService.retire_model`, колонка `retired_by`), путь картинки повторяется один раз со следующей ведущей и пишет `fallback_reason`; синк не оживляет такую строку сутки; дефолты на gpt-5.6-sol.
 - Why: 2026-09-08 бэкенд снял gpt-5.5, а каталог его перечислял; три картинки agentish (21752..21754) упали с 404 про модель, которую клиент не называл, `hint: null`.

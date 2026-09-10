@@ -283,6 +283,14 @@ Contract for requirement 34. Reasoning and rejected alternatives:
   `fallback_reason` naming both leaders, and the timeline gets a `fallback`
   step. With no live leader left the error's `hint` names the retired slugs and
   `CODEX_IMAGE_MAIN_MODEL` as the thing to change.
+- The backend ignores the `image_generation` tool's `model`, `size` and
+  `quality` (2026-09-10: `gpt-image-2.5-flare`, `gpt-image-2.5` and a made-up
+  slug all drew, and `response.completed` echoed `gpt-image-2-codex` / `auto` /
+  `auto` each time; the leading model picks size and quality when it calls the
+  tool). `CODEX_IMAGE_TOOL_MODEL` therefore names the log row, not the drawing
+  model. The adapter reads the stream to `response.completed` and logs what was
+  applied in `usage_raw` — `backend_image_model`, `actual_size`,
+  `actual_quality` — next to the requested `size` / `quality` / `main_model`.
 - Per-model parameter options: levels a catalog publishes are stored as
   capabilities (`effort:xhigh`) and served on the tree node as `param_options`.
   A pinned model narrows the «Глубина рассуждения» select to its own levels; with

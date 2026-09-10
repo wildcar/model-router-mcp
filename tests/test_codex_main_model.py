@@ -72,34 +72,55 @@ class FakeResponses:
             status, payload = self.dead[model]
             return httpx.Response(status, json=payload)
         if body.get("tools"):
-            event = {
-                "type": "response.completed",
-                "response": {
-                    "id": "resp_1",
-                    "status": "completed",
-                    "output": [
-                        {
-                            "type": "image_generation_call",
-                            "result": base64.b64encode(PNG).decode(),
-                        }
-                    ],
-                    "usage": {},
-                },
+            # The shape of a live stream (prod, 2026-09-10): the call item
+            # carries the size and quality the leading model chose, and the
+            # final event echoes the tool as the backend applied it — its own
+            # model alias, `auto`, `auto` — whatever the definition said.
+            call = {
+                "id": "ig_1",
+                "type": "image_generation_call",
+                "status": "completed",
+                "result": base64.b64encode(PNG).decode(),
+                "size": "1370x1148",
+                "quality": "low",
+                "revised_prompt": "кот в очках, фото",
             }
+            events = [
+                {"type": "response.output_item.done", "output_index": 0, "item": call},
+                {
+                    "type": "response.completed",
+                    "response": {
+                        "id": "resp_1",
+                        "status": "completed",
+                        "model": model,
+                        "output": [call],
+                        "tools": [
+                            {
+                                "type": "image_generation",
+                                "model": "gpt-image-2-codex",
+                                "size": "auto",
+                                "quality": "auto",
+                                "output_format": "png",
+                            }
+                        ],
+                        "usage": {},
+                    },
+                },
+            ]
         else:
-            event = {
-                "type": "response.completed",
-                "response": {
-                    "id": "resp_2",
-                    "status": "completed",
-                    "output": [{"content": [{"text": f"hello from {model}"}]}],
-                    "usage": {"input_tokens": 5, "output_tokens": 3, "total_tokens": 8},
+            events = [
+                # Text arrives as deltas; the adapter joins them.
+                {"type": "response.output_text.delta", "delta": f"hello from {model}"},
+                {
+                    "type": "response.completed",
+                    "response": {
+                        "id": "resp_2",
+                        "status": "completed",
+                        "output": [{"content": [{"text": f"hello from {model}"}]}],
+                        "usage": {"input_tokens": 5, "output_tokens": 3, "total_tokens": 8},
+                    },
                 },
-            }
-        events = [event]
-        if not body.get("tools"):
-            # Text arrives as deltas; the adapter joins them.
-            events.insert(0, {"type": "response.output_text.delta", "delta": f"hello from {model}"})
+            ]
         sse = "".join(f"data: {json.dumps(e)}\n\n" for e in events) + "data: [DONE]\n\n"
         return httpx.Response(
             200, content=sse.encode(), headers={"content-type": "text/event-stream"}
@@ -304,6 +325,60 @@ async def test_the_router_logs_the_substitution(tmp_path):
         assert "gpt-5.6-sol" in logs[0]["fallback_reason"]
     finally:
         await db.close()
+
+
+@pytest.mark.asyncio
+async def test_the_log_says_what_the_backend_drew_with(tmp_path):
+    """The tool definition asked for gpt-image-2 at 1024x1536 medium. The row
+    keeps that, and next to it what the backend echoed back: its own model
+    alias, and the size and quality the leading model actually chose."""
+    backend = FakeResponses({})
+    db, registry, adapter = await _setup(tmp_path, backend, _ladder_rows())
+    try:
+        router = ModelRouter(db, registry, {PROVIDER: adapter}, BlobStore(str(tmp_path / "blobs")))
+        result = await router.dispatch(
+            _image_request(model_id="gpt-image-2", provider_hint=PROVIDER)
+        )
+        raw = result.response.usage.raw
+        assert (raw["size"], raw["quality"], raw["main_model"]) == ("1024x1536", "medium", "gpt-5.5")
+        assert raw["backend_image_model"] == "gpt-image-2-codex"
+        assert (raw["actual_size"], raw["actual_quality"]) == ("1370x1148", "low")
+        assert result.response.raw_meta["backend_image_model"] == "gpt-image-2-codex"
+        assert result.fallback_reason is None
+
+        # The list is projected to the table columns; the full row, raw usage
+        # included, is what the inspector opens.
+        row = await db.get_request_log(result.log_id)
+        stored = json.loads(row["usage_raw"])
+        assert stored["backend_image_model"] == "gpt-image-2-codex"
+        assert (stored["actual_size"], stored["actual_quality"]) == ("1370x1148", "low")
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
+async def test_a_stream_that_ends_early_still_yields_the_picture():
+    """Only a partial image and no `response.completed`: the picture is
+    returned and the echo fields stay empty rather than invented."""
+    adapter = CodexOAuthAdapter(
+        auth_path=None, base_url="https://x.invalid", main_model="gpt-5.6-sol",
+        image_model="gpt-image-2", size="1024x1536", quality="medium",
+    )
+    partial = base64.b64encode(PNG * 8).decode()
+    sse = "data: " + json.dumps(
+        {"type": "response.image_generation_call.partial_image", "partial_image_b64": partial}
+    ) + "\n\n"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, content=sse.encode(), headers={"content-type": "text/event-stream"}
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        async with client.stream("POST", "https://x.invalid/responses") as response:
+            drawn = await adapter._read_image_stream(response)
+    assert drawn.b64 == partial
+    assert (drawn.backend_model, drawn.size, drawn.quality) == (None, None, None)
 
 
 @pytest.mark.parametrize(

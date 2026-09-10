@@ -11,6 +11,23 @@ it as a managed service on this host.
 
 ## Now
 
+- ✅ Codex image: журнал показывает, чем бэкенд рисовал на самом деле
+  (2026-09-10). Проверка gpt-image-2.5 через codex-oauth показала, что бэкенд
+  не читает `model`, `size` и `quality` инструмента image_generation:
+  `gpt-image-2.5-flare`, `gpt-image-2.5` и выдуманный `gpt-image-9-nonexistent`
+  нарисовали одинаково, а `response.completed` каждый раз вернул инструмент как
+  `gpt-image-2-codex` / auto / auto. Размер и качество выбирает ведущая
+  чат-модель по тексту промпта. Адаптер теперь дочитывает поток до
+  `response.completed` (`_read_image_stream`, `DrawnImage`) и пишет в
+  `usage.raw` и `raw_meta` поля `backend_image_model`, `actual_size`,
+  `actual_quality` рядом с запрошенными `size`/`quality`/`main_model`; смена
+  алиаса на стороне OpenAI станет видна в журнале сама. Живой прогон с dev
+  auth.json: просили 1024×1536 medium, пришло 1536×1024 medium от
+  gpt-image-2-codex. Комментарии в config.py, .env.example и SPEC говорят, что
+  `CODEX_IMAGE_TOOL_MODEL` только имя строки реестра: переключать его на 2.5
+  бессмысленно, строка `gpt-image-2` уйдёт в retired и закреплённые за ней
+  вызовы упадут. Тесты: 494 зелёных без test_acceptance (2 новых в
+  test_codex_main_model).
 - ✅ Codex image: ведущая модель из реестра, отказ бэкенда гасит строку
   (2026-09-08, ADR-0010). Утром 2026-09-08 бэкенд снял gpt-5.5 для
   ChatGPT-аккаунтов, а каталог `GET /models` продолжал его перечислять. Три

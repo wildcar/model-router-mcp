@@ -172,6 +172,12 @@ class Settings(BaseSettings):
     # listing it). Still point it at a live slug: the fallback costs one refused
     # call per retired leader.
     codex_image_main_model: str = Field(default="gpt-5.6-sol", alias="CODEX_IMAGE_MAIN_MODEL")
+    # The model named in the `image_generation` tool — and the id of the registry
+    # row an image request is logged under. The backend does not read it (nor
+    # the tool's size and quality): every slug, real or made up, draws with its
+    # own `gpt-image-2-codex` at `auto`/`auto` (checked 2026-09-10). What it did
+    # apply is logged in `usage_raw` as `backend_image_model`, `actual_size`,
+    # `actual_quality`. Changing this value renames the row, nothing more.
     codex_image_tool_model: str = Field(default="gpt-image-2", alias="CODEX_IMAGE_TOOL_MODEL")
     # The model list endpoint filters by client version (a model can declare a
     # `minimal_client_version`), so the version is a request parameter, not

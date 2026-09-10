@@ -24,6 +24,17 @@ this provider lead, confirmed ones first. A refusal of the kind above retires th
 row at once (`RegistryService.retire_model`) and, on the image path, the request
 is repeated once with the next live leader (ADR-0010).
 
+Which picture model draws is not ours to choose either. The tool definition
+carries `model`, `size` and `quality` (`CODEX_IMAGE_TOOL_MODEL` and friends) and
+the backend reads none of them: on 2026-09-10 `gpt-image-2.5-flare`,
+`gpt-image-2.5` and a made-up `gpt-image-9-nonexistent` all drew, and every
+`response.completed` echoed the tool as `model: gpt-image-2-codex, size: auto,
+quality: auto`; the leading model picks size and quality when it calls the tool.
+So the registry row named by `CODEX_IMAGE_TOOL_MODEL` is our label for the log,
+and what the backend did apply is read off the stream (`_read_image_stream`)
+into `usage.raw` — `backend_image_model`, `actual_size`, `actual_quality` —
+where a change of alias upstream shows up on its own.
+
 Loads an OAuth auth.json (flat or providers.openai-codex layout) and refreshes
 the access token on 401/403. Binary results come back as bytes so the router
 persists them to the blob store.
@@ -42,6 +53,7 @@ import base64
 import json
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -91,6 +103,28 @@ MODEL_NOT_SUPPORTED_RE = re.compile(r"model.{0,60}not supported", re.IGNORECASE 
 # died before any drawing started (usage empty), so this is not a second
 # generation; a second refusal in a row is not worth a third.
 MAX_MAIN_MODEL_TRIES = 2
+
+
+def _text(value: Any) -> str | None:
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+@dataclass(slots=True)
+class DrawnImage:
+    """One image stream, read to its end.
+
+    `b64` is the picture. The other three are what the backend *reported*
+    applying, which is not what was asked: the tool's `model`, `size` and
+    `quality` are ignored upstream (module docstring). `size` and `quality` come
+    from the `image_generation_call` item, `backend_model` from the `tools` echo
+    in `response.completed`. Any of them may be missing when the stream ends
+    early; the picture is still returned.
+    """
+
+    b64: str | None = None
+    backend_model: str | None = None
+    size: str | None = None
+    quality: str | None = None
 
 
 class CodexOAuthAdapter(ProviderAdapter):
@@ -335,17 +369,14 @@ class CodexOAuthAdapter(ProviderAdapter):
         size = str(request.params.get("size") or self._size)
         quality = str(request.params.get("quality") or self._quality)
 
-        async def read(response: httpx.Response) -> str | None:
-            return await self._extract_image_b64_from_stream(response)
-
         ladder, reason = await self._main_model_ladder()
         tried: list[str] = []
-        image_b64: str | None = None
+        drawn = DrawnImage()
         main = ladder[0]
         for main in ladder[:MAX_MAIN_MODEL_TRIES]:
             payload = self._payload(prompt, size=size, quality=quality, main_model=main)
             try:
-                image_b64 = await self._with_recovery(payload, read)
+                drawn = await self._with_recovery(payload, self._read_image_stream)
                 break
             except ModelUnavailable as exc:
                 tried.append(main)
@@ -356,10 +387,18 @@ class CodexOAuthAdapter(ProviderAdapter):
                     raise self._main_model_gone(exc, tried, rest) from exc
                 reason = f"main model {main} failed: {exc}; retrying with {rest[0]}"
                 progress.emit("fallback", f"ведущая {main} снята, пробую {rest[0]}")
-        if not image_b64:
+        if not drawn.b64:
             raise ProviderError("Codex image backend returned no image")
-        image_bytes = base64.b64decode(image_b64)
-        raw_meta: dict[str, Any] = {"main_model": main}
+        image_bytes = base64.b64decode(drawn.b64)
+        # What the backend said it drew with, next to what was asked. The
+        # configured tool model is a label (module docstring); these three are
+        # the facts, and `usage.raw` is the part of the row the console shows.
+        drawn_with = {
+            "backend_image_model": drawn.backend_model,
+            "actual_size": drawn.size,
+            "actual_quality": drawn.quality,
+        }
+        raw_meta: dict[str, Any] = {"main_model": main, **drawn_with}
         if reason:
             # Read by the router into `requested_model_id` / `fallback_reason`:
             # the caller asked for gpt-image-2 and got gpt-image-2, but not the
@@ -370,7 +409,10 @@ class CodexOAuthAdapter(ProviderAdapter):
             task=Task.TEXT_TO_IMAGE,
             provider=self.name,
             model_id=model.model_id or self._image_model,
-            usage=Usage(images=1, raw={"size": size, "quality": quality, "main_model": main}),
+            usage=Usage(
+                images=1,
+                raw={"size": size, "quality": quality, "main_model": main, **drawn_with},
+            ),
             attachments=[Attachment(kind="image", mime="image/png", data=image_bytes)],
             raw_meta=raw_meta,
         )
@@ -815,20 +857,48 @@ class CodexOAuthAdapter(ProviderAdapter):
             if isinstance(event, dict):
                 yield event
 
-    async def _extract_image_b64_from_stream(self, response: httpx.Response) -> str | None:
+    async def _read_image_stream(self, response: httpx.Response) -> DrawnImage:
+        """The picture, and what the backend says it drew it with.
+
+        Read to the end rather than returning at the first full image: the
+        `tools` echo that names the backend's own image model arrives only in
+        `response.completed`, after the picture. A stream that ends early still
+        yields what it had — the latest partial image at worst.
+        """
+        drawn = DrawnImage()
         latest_partial: str | None = None
         async for event in self._events(response):
             event_type = event.get("type")
             if event_type == "error":
                 message = event.get("message")
                 raise ProviderError(str(message or "Codex image stream returned an error"))
-            found = self._extract_image_b64(event)
-            if found:
-                if event_type == "response.image_generation_call.partial_image":
-                    latest_partial = found
-                else:
-                    return found
-        return latest_partial
+            if event_type == "response.image_generation_call.partial_image":
+                latest_partial = self._extract_image_b64(event) or latest_partial
+                continue
+            if event_type == "response.output_item.done":
+                self._note_call(drawn, event.get("item"))
+            elif event_type == "response.completed":
+                final = event.get("response")
+                if isinstance(final, dict):
+                    for tool in final.get("tools") or []:
+                        if isinstance(tool, dict) and tool.get("type") == "image_generation":
+                            drawn.backend_model = _text(tool.get("model")) or drawn.backend_model
+                    for item in final.get("output") or []:
+                        self._note_call(drawn, item)
+            if drawn.b64 is None:
+                drawn.b64 = self._extract_image_b64(event)
+        if drawn.b64 is None:
+            drawn.b64 = latest_partial
+        return drawn
+
+    @staticmethod
+    def _note_call(drawn: DrawnImage, item: Any) -> None:
+        """Size and quality as the `image_generation_call` item reports them —
+        the leading model's choice, not the tool definition's."""
+        if not isinstance(item, dict) or item.get("type") != "image_generation_call":
+            return
+        drawn.size = _text(item.get("size")) or drawn.size
+        drawn.quality = _text(item.get("quality")) or drawn.quality
 
     @classmethod
     def _extract_image_b64(cls, node: Any) -> str | None:
