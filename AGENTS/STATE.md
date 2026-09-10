@@ -28,6 +28,13 @@ it as a managed service on this host.
   бессмысленно, строка `gpt-image-2` уйдёт в retired и закреплённые за ней
   вызовы упадут. Тесты: 494 зелёных без test_acceptance (2 новых в
   test_codex_main_model).
+  Прод обновлён 2026-09-10 14:07 UTC (`95f79c7`). Живьём: картинка через
+  gpt-image-2 под `codex-image-deploy-check`, строка 22771, `ok`, 48 с,
+  `usage_raw`: size 1024×1536 medium запрошено, `backend_image_model`
+  gpt-image-2-codex, `actual_size` 1024×1536, `actual_quality` medium. Строка
+  моя проверочная, остаётся в журнале. Дальше: раз в несколько дней смотреть
+  `backend_image_model` в свежих строках daypic, смена алиаса и будет сигналом,
+  что Codex перевёл инструмент на Images 2.5.
 - ✅ Codex image: ведущая модель из реестра, отказ бэкенда гасит строку
   (2026-09-08, ADR-0010). Утром 2026-09-08 бэкенд снял gpt-5.5 для
   ChatGPT-аккаунтов, а каталог `GET /models` продолжал его перечислять. Три
