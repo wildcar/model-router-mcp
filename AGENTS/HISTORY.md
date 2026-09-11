@@ -8,7 +8,7 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 - What: `/images` получил строку фильтров журнала (метка, поставщик, модель, приложение, статус, задача, канал, день) без группы тарификации и денежных/маршрутных флажков; `GET /logs/images` принимает `log_filters`; проводка фильтров вынесена в `components/log-filters.js`, журнал переведён на него.
 - Why: просьба оператора: на странице картинок тот же набор фильтров, кроме совсем нерелевантных.
 - Files: router_mcp/web/api.py, storage/database.py, web/templates/images.html, static/js/components/log-filters.js, static/js/pages/{images,logs}.js, tests/test_log_gallery.py, tests/js/run-pages.mjs, AGENTS/SPEC.md
-- Next: деплой и живая проверка фильтров ленты на проде.
+- Next: прод обновлён 22:40 UTC (`489d579`): фильтры ленты и глубокая ссылка работают, журнал на общем компоненте цел; agentish-3 за день накопил 73 ошибки image-to-image (Replicate sensitive) — смотреть на стороне приложения.
 
 ## 2026-09-11 · журнал без закладок, запись в окне с ▲▼ и миниатюрами, экраны «Расход» и «Картинки»
 - What: `/logs` открывается на строках; запись — `<dialog>` с ▲ «Запись #N» ▼ (соседи по фильтрам через `GET /logs/{id}/neighbors`, клавиши ↑↓) и полоской миниатюр запроса/ответа; «Расход» стал `/spend` с периодом и группировкой в адресе (`/logs?tab=spend` → 301); новый `/images` — все картинки журнала, сначала новые, подгрузка по скроллу, `GET /logs/images`; `GET /blobs/{ref}/thumb` рисует превью до 320 px через OpenCV с кэшем в памяти; `run_from_log` читает kind/mime вложения из расширения ref.
