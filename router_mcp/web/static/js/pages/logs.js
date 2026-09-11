@@ -14,6 +14,7 @@ import { SIDE_LABEL, fullUrl, runImages, thumbUrl } from '../core/media.js';
 import { idempotencyKey, start, watch } from '../core/runs.js';
 import { readParams, writeParams } from '../core/state.js';
 import { inspector } from '../components/inspector.js';
+import { mountLogFilters, toApiParams } from '../components/log-filters.js';
 
 const $ = (id) => document.getElementById(id);
 const PAGE_SIZE = 50;
@@ -22,41 +23,14 @@ let cursor = null;
 let shown = 0;
 let labels = null;
 
-function filters() {
-  return {
-    user: $('f-user').value.trim(),
-    provider: $('f-provider').value,
-    model: $('f-model').value.trim(),
-    app: $('f-app').value.trim(),
-    status: $('f-status').value,
-    task: $('f-task').value,
-    modality: $('f-modality').value,
-    channel: $('f-channel').value,
-    date: $('f-date').value,
-    with_fallback: $('f-fallback').checked,
-    with_retries: $('f-retries').checked,
-    unverified_cost: $('f-unverified').checked,
-    cost_mismatch: $('f-mismatch').checked,
-  };
-}
-
-// The URL keeps the local day; the server compares UTC strings. The bounds are
-// rendered in the same `+00:00` shape the rows are stored in, because the
-// comparison is lexicographic and a stray `Z` sorts after `+`.
-function dayBounds(date) {
-  const [y, m, d] = date.split('-').map(Number);
-  const iso = (dt) => dt.toISOString().slice(0, 19) + '+00:00';
-  return {
-    since: iso(new Date(y, m - 1, d)),
-    until: iso(new Date(new Date(y, m - 1, d + 1).getTime() - 1000)),
-  };
-}
-
-// What actually goes to /logs: the day filter travels as since/until.
-function apiParams(f) {
-  const { date, ...rest } = f;
-  return date ? { ...rest, ...dayBounds(date) } : rest;
-}
+// The filter row is the shared component («Картинки» mounts the same boxes);
+// this screen adds the money checkboxes and the day pager the markup carries.
+const filterRow = mountLogFilters({
+  onChange: () => loadLogs().catch(() => {}),
+  onReload: () => reload(),
+});
+const filters = () => filterRow.values();
+const apiParams = (f) => toApiParams(f);
 
 // Flags a row whose provider-reported sum sits away from our arithmetic —
 // same thresholds as the server-side filter (2% and a hundredth of a cent),
@@ -449,133 +423,17 @@ function openDeepLink() {
   if (id) openEntry(id);
 }
 
-// A filter select, keeping «все» first and whatever the URL had preselected.
-function fillFilter(id, rows) {
-  const select = $(id);
-  if (!select || !rows) return;
-  const chosen = select.value;
-  for (const [value, row] of Object.entries(rows)) {
-    const option = el('option', row.label || value);
-    option.value = value;
-    select.appendChild(option);
-  }
-  select.value = chosen;
-}
-
 function reload() {
   loadLogs({ force: true }).catch((e) => toast(`Ошибка: ${e.message}`, true));
 }
 
-// Values a filter box can take, from the log itself: the datalist offers the
-// labels the journal has actually seen, narrowed as the operator types.
-async function suggest(field, q, listId) {
-  try {
-    const answer = await api(`/logs/suggest${query({ field, q })}`);
-    const list = $(listId);
-    clear(list);
-    for (const value of answer.items) {
-      const option = el('option');
-      option.value = value;
-      list.appendChild(option);
-    }
-  } catch (_) { /* подсказки — удобство, не повод ронять журнал */ }
-}
-
-function debounce(fn, ms) {
-  let timer = null;
-  return (...args) => {
-    clearTimeout(timer);
-    timer = setTimeout(() => fn(...args), ms);
-  };
-}
-
-// Typing filters as it goes: the table narrows and the подсказки narrow with
-// it. Debounced so a fast typist is one request, not one per keystroke.
-const typeahead = debounce((field, inputId, listId) => {
-  suggest(field, $(inputId).value.trim(), listId);
-  loadLogs().catch(() => {});
-}, 300);
-
-$('f-user').addEventListener('input', () => typeahead('user', 'f-user', 'f-user-options'));
-$('f-model').addEventListener('input', () => typeahead('model', 'f-model', 'f-model-options'));
-$('f-app').addEventListener('input', () => typeahead('app', 'f-app', 'f-app-options'));
-
-// The day pager. From «все дни» either arrow steps into today — the newest day
-// is where the operator was looking anyway.
-function localDate(dt) {
-  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`
-    + `-${String(dt.getDate()).padStart(2, '0')}`;
-}
-
-function shiftDay(delta) {
-  const current = $('f-date').value;
-  let next = new Date();
-  if (current) {
-    const [y, m, d] = current.split('-').map(Number);
-    next = new Date(y, m - 1, d + delta);
-  }
-  $('f-date').value = localDate(next);
-  reload();
-}
-
-$('f-day-prev').addEventListener('click', () => shiftDay(-1));
-$('f-day-next').addEventListener('click', () => shiftDay(1));
-$('f-day-clear').addEventListener('click', () => {
-  $('f-date').value = '';
-  reload();
-});
-
-for (const id of ['f-user', 'f-provider', 'f-model', 'f-app', 'f-status', 'f-task',
-                  'f-modality', 'f-channel', 'f-date',
-                  'f-fallback', 'f-retries', 'f-unverified', 'f-mismatch']) {
-  $(id).addEventListener('change', () => loadLogs());
-}
-$('reload').addEventListener('click', reload);
 $('more').addEventListener('click', () => loadLogs({ append: true }));
 $('tz').textContent = timeZoneLabel();
 
-// Restore the filters the URL carries before the first load.
-const initial = readParams();
-if (initial.user) $('f-user').value = initial.user;
-if (initial.model) $('f-model').value = initial.model;
-if (initial.app) $('f-app').value = initial.app;
-if (initial.status) $('f-status').value = initial.status;
-if (initial.channel) $('f-channel').value = initial.channel;
-if (initial.date) $('f-date').value = initial.date;
-$('f-fallback').checked = initial.with_fallback === 'true';
-$('f-retries').checked = initial.with_retries === 'true';
-$('f-unverified').checked = initial.unverified_cost === 'true';
-$('f-mismatch').checked = initial.cost_mismatch === 'true';
-
-// The glossary comes from the server so one concept keeps one name across the
-// table, the inspector and the reports. The provider filter is asked of the
-// log itself, not the registry — a provider disabled yesterday still owns
-// yesterday's rows. Both must land before the first load: a deep link with
-// `provider=` selects an option that has to exist by then.
-Promise.allSettled([
-  api('/capabilities').then((caps) => {
-    labels = caps.labels;
-    // Both filter lists come from the server: spelled out in markup they went
-    // stale the moment a task or a group was added. The URL's choice is applied
-    // after the options exist — set earlier, a select silently drops it.
-    fillFilter('f-task', caps.labels.tasks);
-    fillFilter('f-modality', caps.labels.modalities);
-    if (initial.task) $('f-task').value = initial.task;
-    if (initial.modality) $('f-modality').value = initial.modality;
-  }),   // raw codes are ugly, never wrong
-  api(`/logs/suggest${query({ field: 'provider' })}`).then((answer) => {
-    for (const value of answer.items) {
-      const option = el('option', value);
-      option.value = value;
-      $('f-provider').appendChild(option);
-    }
-    if (initial.provider) $('f-provider').value = initial.provider;
-  }),
-]).then(() => {
+// The first load waits for the glossary and the provider list: a deep link
+// with `task=` or `provider=` selects an option that has to exist by then.
+filterRow.ready.then((glossary) => {
+  labels = glossary;
   reload();
   openDeepLink();
-  // Warm the datalists so the boxes offer recent labels on first focus.
-  suggest('user', $('f-user').value.trim(), 'f-user-options');
-  suggest('model', $('f-model').value.trim(), 'f-model-options');
-  suggest('app', $('f-app').value.trim(), 'f-app-options');
 });

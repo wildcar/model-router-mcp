@@ -684,16 +684,23 @@ async def api_logs(
 
 
 @api_router.get("/logs/images")
-async def api_log_images(cursor: int | None = None, limit: int = 40) -> dict[str, Any]:
+async def api_log_images(
+    filters: dict[str, Any] = Depends(log_filters),
+    cursor: int | None = None,
+    limit: int = 40,
+) -> dict[str, Any]:
     """Rows that carried a picture, newest first, one card per row.
 
-    Declared before `/logs/{log_id}` for the same reason as `/logs/suggest`.
-    `total` is None: counting means scanning every stored request snapshot for
-    a figure the gallery does not show. The cursor is the last row's id.
+    Takes the journal's filter set, so the gallery narrows exactly the way the
+    table does (the money and routing flags are accepted and simply select
+    nothing interesting). Declared before `/logs/{log_id}` for the same reason
+    as `/logs/suggest`. `total` is None: counting means scanning every stored
+    request snapshot for a figure the gallery does not show. The cursor is the
+    last row's id.
     """
     core = get_core()
     limit = max(1, min(limit, 100))
-    rows = await core.db.list_image_log_rows(before_id=cursor, limit=limit)
+    rows = await core.db.list_image_log_rows(before_id=cursor, limit=limit, **filters)
     # The SQL predicate is a coarse net (a mime in the snapshot, a suffix on a
     # ref); the card decides what is actually showable, and a row that turns
     # out to hold nothing showable is not a card.

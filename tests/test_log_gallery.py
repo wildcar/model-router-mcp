@@ -144,6 +144,19 @@ def test_gallery_pages_by_cursor(client):
     assert second["items"][0]["log_id"] < first["items"][0]["log_id"]
 
 
+def test_gallery_takes_the_journal_filters(client):
+    ids = lambda r: [item["log_id"] for item in r.json()["items"]]  # noqa: E731
+    assert ids(client.get(f"/api/v1/logs/images?user={USER}")) == [90002, 90001]
+    assert ids(client.get(f"/api/v1/logs/images?user={USER}&task=image-to-image")) == [90002]
+    assert ids(client.get(f"/api/v1/logs/images?user={USER}&status=error")) == []
+    assert ids(client.get(f"/api/v1/logs/images?user={USER}&model=image-2")) == [90002, 90001]
+    assert ids(client.get(f"/api/v1/logs/images?user={USER}&provider=replicate")) == []
+    assert ids(client.get(
+        f"/api/v1/logs/images?user={USER}&since=2026-09-11T08:01:00%2B00:00"
+        "&until=2026-09-11T08:01:59%2B00:00")) == [90002]
+    assert ids(client.get("/api/v1/logs/images?user=nobody-with-this-label")) == []
+
+
 def test_rows_without_a_picture_are_not_cards(client):
     ids = {item["log_id"] for item in client.get("/api/v1/logs/images?limit=100").json()["items"]}
     assert 90003 not in ids  # chat

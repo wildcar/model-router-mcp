@@ -9,6 +9,8 @@ import { api, ApiError, query } from '../core/api.js';
 import { el, clear, toast } from '../core/dom.js';
 import { localTime, timeZoneLabel } from '../core/format.js';
 import { SIDE_LABEL } from '../core/media.js';
+import { writeParams } from '../core/state.js';
+import { mountLogFilters } from '../components/log-filters.js';
 
 const $ = (id) => document.getElementById(id);
 const PAGE_SIZE = 40;
@@ -18,6 +20,13 @@ let shownPictures = 0;
 let shownEntries = 0;
 let loading = false;
 let exhausted = false;
+// Which filter set the pages on screen belong to: a change while a page is in
+// flight must not append that page to the new list.
+let generation = 0;
+
+// The journal's filter row, the same component: the feed narrows the same way
+// the table does, and the address keeps the choice.
+const filterRow = mountLogFilters({ onChange: () => restart(), onReload: () => restart() });
 
 function card(entry, image) {
   const figure = el('figure', undefined, { className: 'shot' });
@@ -65,11 +74,30 @@ function card(entry, image) {
   return figure;
 }
 
+// Start over with the current filters: the feed is a list from the head, so a
+// changed filter means a new head, not a narrower tail.
+function restart() {
+  generation += 1;
+  cursor = null;
+  shownPictures = 0;
+  shownEntries = 0;
+  exhausted = false;
+  loading = false;
+  clear($('gallery'));
+  $('count').textContent = '';
+  $('empty').hidden = true;
+  writeParams(filterRow.values());
+  loadMore();
+}
+
 async function loadMore() {
   if (loading || exhausted) return;
   loading = true;
+  const mine = generation;
   try {
-    const answer = await api(`/logs/images${query({ cursor, limit: PAGE_SIZE })}`);
+    const answer = await api(
+      `/logs/images${query({ ...filterRow.apiParams(), cursor, limit: PAGE_SIZE })}`);
+    if (mine !== generation) return;   // filters changed under this page
     const host = $('gallery');
     for (const entry of answer.items) {
       shownEntries += 1;
@@ -81,7 +109,7 @@ async function loadMore() {
     cursor = answer.next_cursor;
     exhausted = cursor === null;
     $('more').hidden = exhausted;
-    $('empty').hidden = shownPictures > 0;
+    $('empty').hidden = shownPictures > 0 || !exhausted;
     $('count').textContent = shownPictures
       ? `показано ${shownPictures} картинок из ${shownEntries} записей`
         + (exhausted ? ', это всё' : '')
@@ -92,7 +120,7 @@ async function loadMore() {
   } catch (e) {
     toast(e instanceof ApiError ? e.message : String(e), true);
   } finally {
-    loading = false;
+    if (mine === generation) loading = false;
   }
 }
 
@@ -110,4 +138,6 @@ if (typeof IntersectionObserver !== 'undefined') {
 $('more').addEventListener('click', () => loadMore());
 $('tz').textContent = timeZoneLabel();
 
-loadMore();
+// The first page waits for the glossary and the provider list, so a deep link
+// with `task=` or `provider=` is applied before anything is asked for.
+filterRow.ready.then(() => restart());

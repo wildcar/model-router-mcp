@@ -486,7 +486,8 @@ them, so «следующая» with `status=error` set is the next error. An un
 still gets an answer (the row may have been purged while the window was open).
 
 `GET /api/v1/logs/images?cursor=&limit=` — rows that carried a picture in or
-out, newest first, one card per row: who asked, the words asked (snapshot
+out, newest first, under the same filter set as `/logs` (one FastAPI
+dependency, `log_filters`, serves all three log reads), one card per row: who asked, the words asked (snapshot
 text, else the last user message, cut at 200 characters), and `images[]` with
 `side` (request/response), `role`, `ref`, `url` and `thumb_url`. Request
 pictures come from the snapshot's attachment list (a ref, or a plain http URL
@@ -818,7 +819,15 @@ per picture: the thumbnail (full size in a new tab), the entry number as a
 link into the journal's entry window, the side chip, the time, the user label
 and model, and the words that were asked. The next page loads as the bottom
 comes into view (IntersectionObserver, with an «Ещё» button as the fallback),
-and the counter says when the log is out of pictures.
+and the counter says when the log is out of pictures. The journal's filter
+row sits above the grid — user, provider, model, app, status, task, channel,
+day — minus the billing group (the task already tells drawn from edited) and
+the money and routing checkboxes, which say nothing about a picture. Any
+change restarts the feed from the head, and the choice lives in the address.
+Both screens mount the row from one component
+(`static/js/components/log-filters.js`): the set of boxes is whatever the
+template carries, the wiring (подсказки, day pager, glossary lists, restore
+from the address) is written once.
 
 One inspector component serves «Прогон» and «Журнал», over the single `Run`
 envelope, with five tabs — Запрос, Ответ, Шаги, JSON, Сырьё. «Ответ» opens

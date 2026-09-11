@@ -1503,17 +1503,18 @@ class Database:
         return f"({refs} OR {snapshot})"
 
     async def list_image_log_rows(
-        self, *, before_id: int | None = None, limit: int = 40
+        self, *, before_id: int | None = None, limit: int = 40, **filters: Any
     ) -> list[dict[str, Any]]:
-        """Rows that carried a picture in or out, newest first, cursor-paged.
+        """Rows that carried a picture in or out, newest first, cursor-paged,
+        under the journal's filters.
 
         No count goes with it on purpose: the predicate reads the snapshot
         column, and counting it means scanning every request ever logged for a
         number the page shows nowhere. The cursor query stops at `limit`
         matches.
         """
-        clauses = [self._image_rows_clause()]
-        params: list[Any] = []
+        clauses, params = self._log_filters(**filters)
+        clauses.append(self._image_rows_clause())
         if before_id is not None:
             clauses.append("id < ?")
             params.append(before_id)

@@ -253,7 +253,7 @@ await runPage('spend', 'spend', async (doc) => {
     (doc.getElementById('s-export').attributes.href || '').includes('/usage/export'));
 });
 
-await runPage('images', 'images', async (doc) => {
+await runPage('images', 'images', async (doc, calls, settleNow) => {
   const cards = doc.querySelectorAll('.shot');
   // Two entries, four pictures: one card per picture, not per row.
   check('картинки: карточка на каждую картинку', cards.length === 4, String(cards.length));
@@ -273,6 +273,25 @@ await runPage('images', 'images', async (doc) => {
   check('картинки: счётчик картинок и записей',
     text(doc, 'count').includes('4 картинок из 2 записей'), text(doc, 'count'));
   check('картинки: конец списка назван', text(doc, 'count').includes('это всё'));
+  // The journal's filter row, minus the money checkboxes and the group.
+  for (const id of ['f-user', 'f-provider', 'f-model', 'f-app', 'f-status', 'f-task',
+                    'f-channel', 'f-date', 'f-day-prev', 'reload']) {
+    check(`картинки: фильтр ${id} на месте`, doc.getElementById(id) !== null);
+  }
+  check('картинки: без денежных флажков и группы тарификации',
+    doc.getElementById('f-unverified') === null && doc.getElementById('f-fallback') === null
+      && doc.getElementById('f-modality') === null);
+  check('картинки: список задач из глоссария', doc.getElementById('f-task').children.length > 1);
+  check('картинки: поставщики из журнала', doc.getElementById('f-provider').children.length > 1);
+  const before = calls.length;
+  doc.getElementById('f-status').value = 'error';
+  doc.getElementById('f-status').dispatch('change');
+  await settleNow();
+  const asked = calls.slice(before).find((c) => c.url.startsWith('/api/v1/logs/images'));
+  check('картинки: смена фильтра перезапрашивает ленту с ним',
+    asked !== undefined && asked.url.includes('status=error') && !asked.url.includes('cursor='),
+    asked?.url);
+  check('картинки: лента перерисована с начала', doc.querySelectorAll('.shot').length === 4);
 });
 
 await runPage('models', 'models', async (doc, calls, settleNow) => {

@@ -9,8 +9,58 @@
   <h2>Картинки в запросах и ответах</h2>
   <p class="hint">Сначала новые. Номер записи ведёт в журнал, картинка открывается
     в полном размере в новой вкладке.</p>
+  {# The journal's filter row, minus what says nothing about a picture: the
+     billing group (the task already tells drawn from edited), and the money
+     and routing checkboxes. Same ids, same component (log-filters.js). #}
+  <div class="row">
+    <label>Метка пользователя
+      <input id="f-user" placeholder="(все)" list="f-user-options" autocomplete="off">
+    </label>
+    <datalist id="f-user-options"></datalist>
+    <label>Поставщик
+      <select id="f-provider"><option value="">все</option></select>
+    </label>
+    <label>Модель
+      <input id="f-model" placeholder="(все)" list="f-model-options" autocomplete="off">
+    </label>
+    <datalist id="f-model-options"></datalist>
+    <label>Приложение
+      <input id="f-app" placeholder="(все)" list="f-app-options" autocomplete="off">
+    </label>
+    <datalist id="f-app-options"></datalist>
+    <label>Статус
+      <select id="f-status">
+        <option value="">все</option>
+        <option value="ok">ok</option>
+        <option value="error">ошибка</option>
+        <option value="running">выполняется</option>
+        <option value="cancelled">прерван</option>
+        <option value="interrupted">оборван</option>
+      </select>
+    </label>
+    <label>Задача
+      <select id="f-task"><option value="">все</option></select>
+    </label>
+    <label>Канал
+      <select id="f-channel">
+        <option value="">все</option>
+        <option value="ui">консоль</option>
+        <option value="api">API</option>
+        <option value="mcp">MCP</option>
+      </select>
+    </label>
+    <label>День
+      <span class="day-nav">
+        <button id="f-day-prev" type="button" title="Предыдущий день">◀</button>
+        <input id="f-date" type="date">
+        <button id="f-day-next" type="button" title="Следующий день">▶</button>
+        <button id="f-day-clear" type="button" title="Все дни">×</button>
+      </span>
+    </label>
+    <button id="reload" type="button">Обновить</button>
+  </div>
   <div id="gallery" class="gallery"></div>
-  <p id="empty" class="hint" hidden>Картинок в журнале пока нет.</p>
+  <p id="empty" class="hint" hidden>Картинок под эти фильтры в журнале нет.</p>
   <div class="row">
     <span id="count" class="hint"></span>
     <span id="tz" class="hint"></span>
