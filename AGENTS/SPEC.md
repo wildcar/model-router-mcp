@@ -475,7 +475,33 @@ Filters: user, status, modality, model, provider, app, channel, since/until,
 `with_fallback`, `with_retries`, `unverified_cost`, `cost_mismatch`. `user`,
 `model` and `app` match by substring, case-insensitive («ort-bot» finds every
 ort-bot-XXXX); `model_id` stays the exact match. `GET /api/v1/logs/{id}`
-returns the full row as a `Run`.
+returns the full row as a `Run`; its attachments carry `kind` and `mime` read
+back from the blob ref's extension, so a picture drawn a month ago is a
+picture and not a «file» (`views._media_of`).
+
+`GET /api/v1/logs/{id}/neighbors` takes the same filter set and answers
+`{newer_id, older_id}` — the rows on either side of the entry *under those
+filters*, or null where the list ends. The entry window's ▲ ▼ step through
+them, so «следующая» with `status=error` set is the next error. An unknown id
+still gets an answer (the row may have been purged while the window was open).
+
+`GET /api/v1/logs/images?cursor=&limit=` — rows that carried a picture in or
+out, newest first, one card per row: who asked, the words asked (snapshot
+text, else the last user message, cut at 200 characters), and `images[]` with
+`side` (request/response), `role`, `ref`, `url` and `thumb_url`. Request
+pictures come from the snapshot's attachment list (a ref, or a plain http URL
+when the caller pointed at one; a data: URL cut to 200 characters is skipped);
+the answer's picture is the row's `response_ref` — only the first response
+file is on the row. `total` is null on purpose: the predicate reads the
+snapshot column, and counting it scans every request ever logged.
+
+`GET /blobs/{ref}/thumb` — a copy of a stored image no wider than 320 px, JPEG
+(PNG when there is transparency), made on demand with OpenCV when the `local`
+extra is installed and held in a small in-process cache; without OpenCV, for a
+format it cannot read or a picture already that small, the original bytes are
+served. Never written to disk: retention and the orphan sweep know one file
+per ref. Same immutable cache headers as the original; 404 for a ref that is
+not an image.
 
 `GET /api/v1/logs/suggest?field=user|model|provider|app&q=` — distinct values the
 log has seen for that column, freshest first, narrowed by `q` (substring).
@@ -744,9 +770,10 @@ context and modality updates. `revert_price` hands it back to the catalog.
 
 ### Screens
 
-Five: Обзор · Прогон · Модели · Журнал · Подключения. Filters, search, page,
-sorting, the selected row, the active tab and `?log=` live in the address; the
-live tail, collapsed nodes, the prompt draft and the theme do not.
+Seven: Обзор · Прогон · Модели · Журнал · Расход · Картинки · Подключения.
+Filters, search, page, sorting, the selected row, the active tab and `?log=`
+live in the address; the live tail, collapsed nodes, the prompt draft and the
+theme do not.
 
 The «Прогон» form is generated from capabilities, so a field is present exactly
 when the adapter behind the chosen pair reads it. Model choice has two modes
@@ -769,16 +796,36 @@ shows the provider column before the model, tokens split into four columns
 (Промпт / Кэш / Ответ / Рассужд.; a row billed by seconds, characters or
 images shows its measure in the first of them), and «Запрос» shows the words
 that were asked — when `request_text` holds a message list, the cell extracts
-the last user message and the JSON stays in the tooltip. «Расход» keeps the
-token total and splits the same four kinds into their own columns.
+the last user message and the JSON stays in the tooltip. The journal opens
+straight on the rows: there is no tab in front of them.
+
+An entry opens in a window over the table (a native `<dialog>`; `?log=` in the
+address opens it on load, Esc, «Закрыть» and a click on the backdrop close it
+and take `log` out of the address). The head is ▲ · «Запись #N» · ▼: the arrows
+and the ↑ ↓ keys step to the neighbouring rows under the page's filters
+(`/logs/{id}/neighbors`), the button at the end of the list is disabled and
+says so. Under the head, every picture the run carried as a strip of
+thumbnails labelled with its side (запрос / ответ, plus the role when there
+was one), each opening full size in a new tab.
+
+«Расход» is a screen of its own (`/spend`): the same rows as money, with the
+period and grouping in the address (`?period=7|30|1|all&group_by=`). It keeps
+the token total and splits the same four kinds into their own columns. The
+old `/logs?tab=spend` redirects to it (301).
+
+«Картинки» (`/images`) is every picture the log carried, newest first, one card
+per picture: the thumbnail (full size in a new tab), the entry number as a
+link into the journal's entry window, the side chip, the time, the user label
+and model, and the words that were asked. The next page loads as the bottom
+comes into view (IntersectionObserver, with an «Ещё» button as the fallback),
+and the counter says when the log is out of pictures.
 
 One inspector component serves «Прогон» and «Журнал», over the single `Run`
 envelope, with five tabs — Запрос, Ответ, Шаги, JSON, Сырьё. «Ответ» opens
 first; «Запрос» carries the prompt, the message history with roles, the
-attachment and the routing ask, and the JSON tab has a block per side. Its
-timeline has two
-levels: provider attempts, and the HTTP retries inside each one with the wait
-the provider asked for.
+attachment (a picture is shown, not only linked) and the routing ask, and the
+JSON tab has a block per side. Its timeline has two levels: provider attempts,
+and the HTTP retries inside each one with the wait the provider asked for.
 
 Frontend stack: native ES modules, no htmx, no Alpine, no build step — see
 ADR-0005, which supersedes §18 of the concept.
@@ -927,13 +974,15 @@ router_mcp/
                        static/{app.css, css/tokens.css,
                        js/core/{api,dom,format,state,keys,runs}.js,
                        js/components/{json-view,inspector,timeline}.js,
-                       js/pages/{run,models,logs,spend,overview,connections}.js}
+                       js/pages/{run,models,logs,spend,images,overview,connections}.js},
+                       thumbs (previews of stored images, on demand)
 scripts/               uvdoc_smoke.py (local UVDoc on photographs, with timings)
 deploy/                install.sh, deploy.sh, fetch-models.sh (local model weights,
                        sha256-pinned), the unit, the nginx template, DEPLOY.md
 tests/                 conftest (one app per session), test_smoke (chain),
                        test_web (app), test_web_views (envelope parity),
-                       test_api_filters (log filters/cursor), test_blobs
+                       test_api_filters (log filters/cursor), test_log_gallery
+                       (pictures feed, neighbours, thumbnails), test_blobs
                        (file-serving headers), test_escaping (no innerHTML),
                        test_capabilities (matrix matches the adapters),
                        test_plan (dry run stays offline), test_registry_patch

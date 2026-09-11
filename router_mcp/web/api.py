@@ -12,6 +12,7 @@ the cursor or the provenance of a price.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import csv
 import io
@@ -20,7 +21,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, File, Form, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Request, Response, UploadFile
 from pydantic import BaseModel
 
 from router_mcp.domain.errors import BadRequest, Conflict, NotFound
@@ -41,8 +42,8 @@ from router_mcp.domain.task import (
 from router_mcp.mcp_server.serialize import model_to_dict
 from router_mcp.registry.models import PriceSchedule, RegistryModel
 from router_mcp.runtime import get_core
-from router_mcp.web import capabilities, health, mcp_summary, public_blobs, retention
-from router_mcp.web.views import page, run_from_dispatch, run_from_log
+from router_mcp.web import capabilities, health, mcp_summary, public_blobs, retention, thumbs
+from router_mcp.web.views import image_card, page, run_from_dispatch, run_from_log
 
 api_router = APIRouter()
 blob_router = APIRouter()
@@ -617,8 +618,7 @@ async def api_upload_blob(file: UploadFile = File(...)) -> dict[str, Any]:
     }
 
 
-@api_router.get("/logs")
-async def api_logs(
+def log_filters(
     user: str | None = None,
     status: str | None = None,
     modality: str | None = None,
@@ -635,21 +635,16 @@ async def api_logs(
     with_retries: bool = False,
     unverified_cost: bool = False,
     cost_mismatch: bool = False,
-    cursor: int | None = None,
-    limit: int = 50,
 ) -> dict[str, Any]:
-    """One page of the log, newest first.
-
-    `cursor` is the id to page *before*: the log grows from the head, so an
-    offset would show part of page one again on page two.
+    """The log's filter set as query parameters, in the names the storage
+    layer uses. One dependency, so the page and a row's neighbours cannot
+    disagree about what «the same filters» means.
 
     `user`, `model` and `app` match by substring — the console's boxes are
     search fields, and «ort-bot» has to find every ort-bot-XXXX. `model_id`
     stays the exact match for callers that hold a full id.
     """
-    core = get_core()
-    limit = max(1, min(limit, 200))
-    filters = dict(
+    return dict(
         user_contains=user,
         status=status,
         modality=modality,
@@ -667,10 +662,44 @@ async def api_logs(
         unverified_cost=unverified_cost,
         cost_mismatch=cost_mismatch,
     )
+
+
+@api_router.get("/logs")
+async def api_logs(
+    filters: dict[str, Any] = Depends(log_filters),
+    cursor: int | None = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """One page of the log, newest first.
+
+    `cursor` is the id to page *before*: the log grows from the head, so an
+    offset would show part of page one again on page two.
+    """
+    core = get_core()
+    limit = max(1, min(limit, 200))
     rows = await core.db.list_request_logs(before_id=cursor, limit=limit, **filters)
     total = await core.db.count_request_logs(**filters)
     next_cursor = rows[-1]["id"] if len(rows) == limit else None
     return page(rows, total=total, next_cursor=next_cursor)
+
+
+@api_router.get("/logs/images")
+async def api_log_images(cursor: int | None = None, limit: int = 40) -> dict[str, Any]:
+    """Rows that carried a picture, newest first, one card per row.
+
+    Declared before `/logs/{log_id}` for the same reason as `/logs/suggest`.
+    `total` is None: counting means scanning every stored request snapshot for
+    a figure the gallery does not show. The cursor is the last row's id.
+    """
+    core = get_core()
+    limit = max(1, min(limit, 100))
+    rows = await core.db.list_image_log_rows(before_id=cursor, limit=limit)
+    # The SQL predicate is a coarse net (a mime in the snapshot, a suffix on a
+    # ref); the card decides what is actually showable, and a row that turns
+    # out to hold nothing showable is not a card.
+    items = [card for card in (image_card(row) for row in rows) if card["images"]]
+    next_cursor = rows[-1]["id"] if len(rows) == limit else None
+    return page(items, total=None, next_cursor=next_cursor)
 
 
 @api_router.get("/logs/suggest")
@@ -698,6 +727,17 @@ async def api_log(log_id: int) -> dict[str, Any]:
     if row is None:
         raise NotFound(f"No log entry {log_id}")
     return run_from_log(row)
+
+
+@api_router.get("/logs/{log_id}/neighbors")
+async def api_log_neighbors(
+    log_id: int, filters: dict[str, Any] = Depends(log_filters)
+) -> dict[str, Any]:
+    """The rows on either side of one entry under the page's filters — what
+    the entry window's «вверх» and «вниз» step to. `newer_id` is the row above
+    in the table (a higher id), `older_id` the row below; None means the list
+    ends there."""
+    return await get_core().db.neighbor_log_ids(log_id, **filters)
 
 
 @api_router.get("/retention")
@@ -1355,6 +1395,42 @@ async def serve_blob(ref: str, request: Request) -> Response:
         headers["Content-Range"] = f"bytes {start}-{end}/{len(data)}"
         return Response(content=chunk, status_code=206, media_type=mime, headers=headers)
     return Response(content=data, media_type=mime, headers=headers)
+
+
+@blob_router.get("/blobs/{ref}/thumb")
+async def serve_thumbnail(ref: str) -> Response:
+    """A small copy of a stored image, for the gallery and the entry window.
+
+    Same cache rule as the original: the ref names one immutable payload, so
+    the browser may keep the preview for as long as it likes. Falls back to the
+    original bytes when no preview can be made — see `web/thumbs.py`.
+    """
+    core = get_core()
+    if not core.blobs.exists(ref):
+        raise NotFound("Blob not found")
+    mime = core.blobs.mime_of(ref)
+    if not mime.startswith("image/"):
+        raise NotFound("Not an image")
+    thumb = thumbs.cached(ref)
+    if thumb is None:
+        try:
+            data = core.blobs.load(ref)
+        except ValueError as exc:
+            raise BadRequest(str(exc)) from exc
+        # Decoding a two-megabyte PNG is tens of milliseconds of CPU; the
+        # event loop has runs in flight and should not wait for it.
+        thumb = await asyncio.to_thread(thumbs.make, data) or (data, mime)
+        thumbs.remember(ref, thumb)
+    body, thumb_mime = thumb
+    return Response(
+        content=body,
+        media_type=thumb_mime,
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "Content-Disposition": f'inline; filename="{ref}"',
+            "Cache-Control": "public, max-age=31536000, immutable",
+        },
+    )
 
 
 def _parse_range(header: str | None, size: int) -> tuple[int | None, int]:

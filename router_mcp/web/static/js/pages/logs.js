@@ -1,16 +1,19 @@
-// "Журнал" screen: filters, cursor paging, the error opened in place.
+// "Журнал" screen: filters, cursor paging, the error opened in place, the
+// entry in a window over the table.
 //
 // Two things the old page could not do, both of which made it useless exactly
 // when it mattered: the error text was in the database and never on screen, and
-// times were shown in UTC for an operator sitting in UTC+5 (§13).
+// times were shown in UTC for an operator sitting in UTC+5 (§13). «Расход» used
+// to be a tab here; it is a screen of its own now (/spend), and this one opens
+// straight on the rows.
 
 import { api, ApiError, query } from '../core/api.js';
 import { el, row, clear, toast } from '../core/dom.js';
 import { costCell, count, localTime, money, timeZoneLabel, tokens, duration } from '../core/format.js';
+import { SIDE_LABEL, fullUrl, runImages, thumbUrl } from '../core/media.js';
 import { idempotencyKey, start, watch } from '../core/runs.js';
 import { readParams, writeParams } from '../core/state.js';
 import { inspector } from '../components/inspector.js';
-import { initSpend, loadSpend } from './spend.js';
 
 const $ = (id) => document.getElementById(id);
 const PAGE_SIZE = 50;
@@ -105,7 +108,16 @@ function errorRow(r, columns) {
   cell.colSpan = columns;
   cell.appendChild(el('span', r.error_message || 'ошибка без описания', { className: 'err' }));
   cell.appendChild(document.createTextNode(' '));
-  cell.appendChild(el('a', `подробности #${r.id}`, { href: `/logs?log=${r.id}` }));
+  cell.appendChild(el('a', `подробности #${r.id}`, {
+    href: `/logs?log=${r.id}`,
+    // The link stays a link (copyable, openable in a new tab); a plain click
+    // opens the window here instead of reloading the page under it.
+    onClick: (event) => {
+      event.preventDefault?.();
+      writeParams({ ...readParams(), log: r.id });
+      openEntry(r.id);
+    },
+  }));
   const tr = el('tr');
   tr.appendChild(cell);
   return tr;
@@ -282,14 +294,80 @@ function scheduleLiveRefresh(items) {
 // Opening a row uses the very same inspector the «Прогон» screen shows after a
 // send — same component, same envelope, so the log is not a lesser view of a
 // run. `?log=4821` in the address makes it a link a colleague can open.
+//
+// The entry is a window over the table (a native <dialog>): the row stays where
+// the operator found it, Esc closes, and ▲ ▼ next to the number step to the
+// neighbouring rows under the same filters — the server names them, so «next»
+// with `status=error` set is the next error, not the next row.
+let openId = null;
+
+function showDialog(dialog) {
+  if (typeof dialog.showModal === 'function') {
+    if (!dialog.open) dialog.showModal();
+  } else {
+    dialog.setAttribute('open', '');   // the node harness has no dialog element
+  }
+}
+
+function hideDialog(dialog) {
+  if (typeof dialog.close === 'function') {
+    if (dialog.open) dialog.close();
+  } else {
+    dialog.removeAttribute?.('open');
+  }
+}
+
+// The pictures a run carried, request side first, as a strip under the head:
+// «что рисовали» should not need a tab. Each opens full size in its own tab.
+function thumbStrip(run) {
+  const images = runImages(run);
+  if (!images.length) return null;
+  const strip = el('div', undefined, { className: 'thumbs' });
+  for (const image of images) {
+    const link = el('a', undefined, { href: fullUrl(image), className: 'thumb' });
+    link.setAttribute('target', '_blank');
+    link.setAttribute('rel', 'noopener');
+    const img = el('img');
+    img.src = thumbUrl(image);
+    img.setAttribute('loading', 'lazy');
+    img.setAttribute('alt', SIDE_LABEL[image.side] || image.side);
+    link.appendChild(img);
+    const side = SIDE_LABEL[image.side] || image.side;
+    link.appendChild(el('span', image.role ? `${side} · ${image.role}` : side, {
+      className: 'thumb-label',
+    }));
+    strip.appendChild(link);
+  }
+  return strip;
+}
+
 async function openEntry(id) {
+  const dialog = $('detail');
   try {
-    const run = await api(`/logs/${encodeURIComponent(id)}`);
-    const card = $('detail');
-    card.hidden = false;
-    clear(card);
-    const head = el('div', undefined, { className: 'row' });
+    const [run, neighbors] = await Promise.all([
+      api(`/logs/${encodeURIComponent(id)}`),
+      api(`/logs/${encodeURIComponent(id)}/neighbors${query(apiParams(filters()))}`)
+        .catch(() => ({ newer_id: null, older_id: null })),
+    ]);
+    openId = run.log_id;
+    clear(dialog);
+    const head = el('div', undefined, { className: 'row dialog-head' });
+    const step = (target, glyph, title) => {
+      const button = el('button', glyph, {
+        className: 'nav-btn',
+        title: target === null ? 'Дальше записей нет' : title,
+        onClick: () => {
+          if (target === null) return;
+          writeParams({ ...readParams(), log: target });
+          openEntry(target);
+        },
+      });
+      button.disabled = target === null;
+      return button;
+    };
+    head.appendChild(step(neighbors.newer_id, '▲', 'Предыдущая запись (выше в таблице, новее)'));
     head.appendChild(el('h2', `Запись #${run.log_id}`));
+    head.appendChild(step(neighbors.older_id, '▼', 'Следующая запись (ниже в таблице, старше)'));
     head.appendChild(el('span', undefined, { className: 'spacer' }));
     head.appendChild(el('button', 'Повторить в прогоне', {
       // Repeating is a button, never a keystroke: it spends money.
@@ -307,19 +385,46 @@ async function openEntry(id) {
         onClick: () => repeatTranscription(run).catch((e) => toast(e.message, true)),
       }));
     }
-    head.appendChild(el('button', 'Закрыть', {
-      onClick: () => {
-        card.hidden = true;
-        writeParams({ ...readParams(), log: undefined });
-      },
-    }));
-    card.appendChild(head);
-    card.appendChild(inspector(el('div'), run, { labels }));
-    card.scrollIntoView({ block: 'nearest' });
+    head.appendChild(el('button', 'Закрыть', { onClick: () => hideDialog(dialog) }));
+    dialog.appendChild(head);
+    const strip = thumbStrip(run);
+    if (strip) dialog.appendChild(strip);
+    dialog.appendChild(inspector(el('div'), run, { labels }));
+    showDialog(dialog);
+    dialog.scrollTop = 0;
   } catch (e) {
     toast(e instanceof ApiError ? e.message : String(e), true);
   }
 }
+
+// Closing by any route — the button, Esc, a click on the backdrop — takes the
+// entry out of the address, so a reload comes back to the table.
+$('detail').addEventListener('close', () => {
+  openId = null;
+  writeParams({ ...readParams(), log: undefined });
+});
+// A click on the backdrop closes too. The dialog's own padding also reports
+// the dialog as the target, so the click has to be outside its box.
+$('detail').addEventListener('click', (event) => {
+  const dialog = $('detail');
+  if (event.target !== dialog || typeof dialog.getBoundingClientRect !== 'function') return;
+  const box = dialog.getBoundingClientRect();
+  const outside = event.clientX < box.left || event.clientX > box.right
+    || event.clientY < box.top || event.clientY > box.bottom;
+  if (outside) hideDialog(dialog);
+});
+// ↑ ↓ walk the rows while the window is open; the buttons stay for the mouse.
+$('detail').addEventListener('keydown', (event) => {
+  if (openId === null) return;
+  const tag = (event.target?.tagName || '').toLowerCase();
+  if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+  if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+  const buttons = $('detail').querySelectorAll('.nav-btn');
+  const button = event.key === 'ArrowUp' ? buttons[0] : buttons[1];
+  if (!button || button.disabled) return;
+  event.preventDefault?.();
+  button.click?.();
+});
 
 async function repeatTranscription(run) {
   if (!confirm('Отправить тот же файл ещё раз? Это стоит денег.')) return;
@@ -442,21 +547,6 @@ $('f-retries').checked = initial.with_retries === 'true';
 $('f-unverified').checked = initial.unverified_cost === 'true';
 $('f-mismatch').checked = initial.cost_mismatch === 'true';
 
-// Which tab is open lives in the address, like every other bit of screen state.
-function showTab(name) {
-  const spend = name === 'spend';
-  $('pane-spend').hidden = !spend;
-  $('pane-requests').hidden = spend;
-  $('tab-spend').classList.toggle('active', spend);
-  $('tab-requests').classList.toggle('active', !spend);
-  writeParams({ ...readParams(), tab: spend ? 'spend' : undefined });
-  if (spend) loadSpend().catch((e) => toast(`Ошибка: ${e.message}`, true));
-}
-
-$('tab-requests').addEventListener('click', () => showTab('requests'));
-$('tab-spend').addEventListener('click', () => showTab('spend'));
-initSpend();
-
 // The glossary comes from the server so one concept keeps one name across the
 // table, the inspector and the reports. The provider filter is asked of the
 // log itself, not the registry — a provider disabled yesterday still owns
@@ -484,7 +574,6 @@ Promise.allSettled([
 ]).then(() => {
   reload();
   openDeepLink();
-  if (readParams().tab === 'spend') showTab('spend');
   // Warm the datalists so the boxes offer recent labels on first focus.
   suggest('user', $('f-user').value.trim(), 'f-user-options');
   suggest('model', $('f-model').value.trim(), 'f-model-options');

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Расход — Model Router{% endblock %}
+{% block content %}
+{# The same rows as «Журнал», rendered as money (§13.1). A screen of its own
+   now: the journal opens straight on the rows, and the period and grouping
+   here live in the address like every other filter. #}
+<section class="card">
+  <h2>Расход</h2>
+  <div class="row">
+    <label>Период
+      <select id="s-period">
+        <option value="1">сутки</option>
+        <option value="7">7 дней</option>
+        <option value="30" selected>30 дней</option>
+        <option value="">всё время</option>
+      </select>
+    </label>
+    <label>Группировка
+      <select id="s-group">
+        <option value="user">пользователь</option>
+        <option value="model">модель</option>
+        <option value="provider">поставщик</option>
+        <option value="channel">канал</option>
+        <option value="app">приложение</option>
+        <option value="day">день</option>
+      </select>
+    </label>
+    <span class="spacer"></span>
+    <a id="s-export" href="#" download>Выгрузить CSV</a>
+  </div>
+  <div id="s-totals" class="totals"></div>
+  <div id="s-spark" class="spark"></div>
+  <table id="spend"><thead><tr>
+    <th scope="col" id="s-bucket-head">Пользователь</th>
+    <th scope="col" class="num">Запросов</th>
+    <th scope="col" class="num">Токенов</th>
+    <th scope="col" class="num">Промпт</th>
+    <th scope="col" class="num">Кэш</th>
+    <th scope="col" class="num">Ответ</th>
+    <th scope="col" class="num">Рассужд.</th>
+    <th scope="col" class="num">$</th>
+    <th scope="col" class="num">подтверждено</th>
+  </tr></thead><tbody></tbody></table>
+</section>
+{% endblock %}

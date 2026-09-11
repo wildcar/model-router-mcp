@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-09-11 · журнал без закладок, запись в окне с ▲▼ и миниатюрами, экраны «Расход» и «Картинки»
+- What: `/logs` открывается на строках; запись — `<dialog>` с ▲ «Запись #N» ▼ (соседи по фильтрам через `GET /logs/{id}/neighbors`, клавиши ↑↓) и полоской миниатюр запроса/ответа; «Расход» стал `/spend` с периодом и группировкой в адресе (`/logs?tab=spend` → 301); новый `/images` — все картинки журнала, сначала новые, подгрузка по скроллу, `GET /logs/images`; `GET /blobs/{ref}/thumb` рисует превью до 320 px через OpenCV с кэшем в памяти; `run_from_log` читает kind/mime вложения из расширения ref.
+- Why: просьба оператора: журнал сразу на запросах, расход уровнем выше, детали отдельным окном с переходом по записям и миниатюрами, отдельная страница со всеми картинками.
+- Files: router_mcp/web/{api,pages,views,thumbs}.py, storage/database.py, web/templates/{base,logs,spend,images}.html, static/js/pages/{logs,spend,images}.js, static/js/core/media.js, static/js/components/inspector.js, static/app.css, tests/test_log_gallery.py, tests/test_web.py, tests/js/{run-pages.mjs,fixtures/*}, tests/test_acceptance.py, AGENTS/SPEC.md
+- Next: деплой и живая проверка окна записи и `/images` на проде.
+
 ## 2026-09-10 · codex image: журнал пишет, чем рисовал бэкенд
 - What: адаптер codex-oauth дочитывает поток картинки до `response.completed` (`_read_image_stream`, `DrawnImage`) и кладёт в `usage.raw` и `raw_meta` эхо бэкенда `backend_image_model`, `actual_size`, `actual_quality`; комментарии config/.env.example/SPEC говорят, что `CODEX_IMAGE_TOOL_MODEL` только имя строки реестра.
 - Why: проверка gpt-image-2.5 показала, что бэкенд игнорирует `model`/`size`/`quality` инструмента (выдуманный слаг рисует, эхо всегда `gpt-image-2-codex`/auto/auto); журнал писал нашу подпись, а не факт.

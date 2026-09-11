@@ -1,4 +1,4 @@
-// «Расход»: the tab where the console is most tempted to lie.
+// «Расход»: the screen where the console is most tempted to lie.
 //
 // Every rule here comes from §7. Confirmed rates, unconfirmed rates, notional
 // subscription money and requests nobody can price are four different facts, so
@@ -7,8 +7,9 @@
 // and each of those groups is a link into the log rows behind it.
 
 import { api, query } from '../core/api.js';
-import { el, row, clear, fill } from '../core/dom.js';
+import { el, row, clear, fill, toast } from '../core/dom.js';
 import { count as groupDigits, money } from '../core/format.js';
+import { readParams, writeParams } from '../core/state.js';
 
 const $ = (id) => document.getElementById(id);
 const BUCKET_HEADS = {
@@ -126,7 +127,12 @@ function renderRows(items) {
   }));
 }
 
-export async function loadSpend() {
+async function loadSpend() {
+  // The period and the grouping are the screen's state, so they live in the
+  // address: a link to «расход по моделям за неделю» must open exactly that.
+  // «всё время» is the empty option; spelled `all` in the address, because an
+  // empty value is dropped from it and would come back as the default.
+  writeParams({ period: $('s-period').value || 'all', group_by: $('s-group').value });
   const answer = await api(`/usage${query(params())}`);
   $('s-bucket-head').textContent = BUCKET_HEADS[answer.facets.group_by] || 'Группа';
   renderTotals(answer.facets.totals);
@@ -135,7 +141,15 @@ export async function loadSpend() {
   $('s-export').href = `/api/v1/usage/export${query(params())}`;
 }
 
-export function initSpend() {
-  $('s-period').addEventListener('change', () => loadSpend());
-  $('s-group').addEventListener('change', () => loadSpend());
+function reload() {
+  loadSpend().catch((e) => toast(`Ошибка: ${e.message}`, true));
 }
+
+const initial = readParams();
+if (initial.period !== undefined) {
+  $('s-period').value = initial.period === 'all' ? '' : initial.period;
+}
+if (initial.group_by && BUCKET_HEADS[initial.group_by]) $('s-group').value = initial.group_by;
+$('s-period').addEventListener('change', reload);
+$('s-group').addEventListener('change', reload);
+reload();

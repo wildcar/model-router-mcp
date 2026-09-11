@@ -13,6 +13,7 @@
 
 import { el, clear, toast } from '../core/dom.js';
 import { costCell, duration, localTime, money, tokens } from '../core/format.js';
+import { isAudioAttachment, isImageAttachment } from '../core/media.js';
 import { jsonBlock, jsonView } from './json-view.js';
 import { timeline } from './timeline.js';
 
@@ -168,11 +169,19 @@ function requestTab(run, labels) {
     const link = el('a', `${role}Скачать вложение (${att.mime || att.kind || 'файл'}${size})`, {
       href: att.download_url,
     });
-    if ((att.mime || '').startsWith('audio/')) {
+    if (isAudioAttachment(att)) {
       const player = el('audio');
       player.controls = true;
       player.src = att.download_url;
       pane.appendChild(player);
+    }
+    // The picture the caller sent, not only a link to it: an edit opened a
+    // week later is unreadable without the original next to the result.
+    if (isImageAttachment(att) && att.download_url) {
+      const img = el('img', undefined, { className: 'gen-image' });
+      img.src = att.download_url;
+      img.setAttribute('loading', 'lazy');
+      pane.appendChild(img);
     }
     if (att.download_url) pane.appendChild(el('div', undefined, { children: [link] }));
   }
@@ -215,9 +224,8 @@ function requestTab(run, labels) {
 
 function answerTab(run) {
   const pane = el('div');
-  const audio = (run.attachments || []).filter((a) => (a.mime || '').startsWith('audio/'));
-  const images = (run.attachments || []).filter(
-    (a) => a.kind === 'image' || (a.mime || '').startsWith('image/'));
+  const audio = (run.attachments || []).filter(isAudioAttachment);
+  const images = (run.attachments || []).filter(isImageAttachment);
   const others = (run.attachments || []).filter(
     (a) => !audio.includes(a) && !images.includes(a));
 

@@ -172,7 +172,35 @@ table.multi td { padding:3px 6px; border-bottom:1px solid var(--border); }
 .sync-report { border-top:1px solid var(--border); padding-top:8px; margin-top:8px; font-size:12px; }
 .sync-report h4 { margin:0 0 4px; }
 
-/* Spend tab: four different kinds of money, kept visibly apart. */
+/* The entry window over the journal. A native dialog: the table stays put
+   underneath, Esc closes, and the browser handles focus. */
+.detail-dialog { background:var(--card); color:var(--fg); border:1px solid var(--border);
+  border-radius:10px; padding:18px; width:min(1200px, 96vw); max-height:92vh; overflow:auto; }
+.detail-dialog::backdrop { background:rgba(0,0,0,.6); }
+.dialog-head { align-items:center; }
+.dialog-head h2 { margin:0; font-size:15px; }
+/* ▲ ▼ next to the number: small, square, obviously a pair. */
+.nav-btn { padding:4px 9px; font-size:12px; line-height:1; }
+/* The pictures a run carried, under the head: which side each came from is
+   written on it, because two photos of one run otherwise read the same. */
+.thumbs { display:flex; gap:10px; flex-wrap:wrap; margin:4px 0 10px; }
+.thumb { display:flex; flex-direction:column; gap:3px; text-decoration:none; color:var(--muted); font-size:11px; }
+.thumb img { height:96px; width:auto; max-width:200px; object-fit:cover; border-radius:6px; border:1px solid var(--border); background:#11141a; }
+.thumb:hover img { border-color:var(--accent); }
+
+/* «Картинки»: a grid of cards, one picture each, the entry under it. */
+.gallery { display:grid; gap:14px; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); }
+.shot { margin:0; background:#11141a; border:1px solid var(--border); border-radius:8px; overflow:hidden; display:flex; flex-direction:column; }
+.shot-pic { display:block; aspect-ratio:1 / 1; overflow:hidden; min-height:0; background:#0c0e12; }
+.shot-pic img { width:100%; height:100%; object-fit:contain; display:block; }
+.shot figcaption { padding:8px 10px; font-size:12px; display:flex; flex-direction:column; gap:3px; }
+.shot-head { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.shot-head .chip { font-size:11px; padding:1px 7px; }
+.shot-meta, .shot-text { overflow:hidden; text-overflow:ellipsis; }
+.shot-meta { white-space:nowrap; font-size:11px; }
+.shot-text { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; line-height:1.35; }
+
+/* Spend screen: four different kinds of money, kept visibly apart. */
 .totals-head { display:flex; gap:10px; align-items:baseline; margin-bottom:8px; }
 .totals-head b { font-size:20px; }
 .totals-list { list-style:none; padding:0; margin:0; font-size:12px; }

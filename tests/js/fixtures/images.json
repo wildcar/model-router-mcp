@@ -1,0 +1,65 @@
+{
+  "items": [
+    {
+      "log_id": 4821,
+      "created_at": "2026-07-26T10:15:00+00:00",
+      "external_user_id": "web-tester",
+      "app": null,
+      "provider": "codex-oauth",
+      "model_id": "gpt-image-2",
+      "task": "text-to-image",
+      "status": "ok",
+      "text": "рыжий кот на подоконнике, вертикальный кадр",
+      "images": [
+        {
+          "side": "response",
+          "role": null,
+          "ref": "cafe.png",
+          "mime": "image/png",
+          "url": "/blobs/cafe.png",
+          "thumb_url": "/blobs/cafe.png/thumb"
+        }
+      ]
+    },
+    {
+      "log_id": 4810,
+      "created_at": "2026-07-26T09:40:00+00:00",
+      "external_user_id": "bot-77",
+      "app": "https://wildcar.org",
+      "provider": "replicate",
+      "model_id": "idm-vton",
+      "task": "image-to-image",
+      "status": "ok",
+      "text": "",
+      "images": [
+        {
+          "side": "request",
+          "role": "person",
+          "ref": "a1.jpg",
+          "mime": "image/jpeg",
+          "url": "/blobs/a1.jpg",
+          "thumb_url": "/blobs/a1.jpg/thumb"
+        },
+        {
+          "side": "request",
+          "role": "garment",
+          "ref": "a2.jpg",
+          "mime": "image/jpeg",
+          "url": "/blobs/a2.jpg",
+          "thumb_url": "/blobs/a2.jpg/thumb"
+        },
+        {
+          "side": "response",
+          "role": null,
+          "ref": "out.webp",
+          "mime": "image/webp",
+          "url": "/blobs/out.webp",
+          "thumb_url": "/blobs/out.webp/thumb"
+        }
+      ]
+    }
+  ],
+  "total": null,
+  "next_cursor": null,
+  "facets": {}
+}

@@ -1179,18 +1179,18 @@ class Database:
     def _log_filters(
         self,
         *,
-        external_user_id: str | None,
-        status: str | None,
-        modality: str | None,
-        task: str | None,
-        model_id: str | None,
-        channel: str | None,
-        batch_id: str | None,
-        since: str | None,
-        until: str | None,
-        with_fallback: bool,
-        with_retries: bool,
-        unverified_cost: bool,
+        external_user_id: str | None = None,
+        status: str | None = None,
+        modality: str | None = None,
+        task: str | None = None,
+        model_id: str | None = None,
+        channel: str | None = None,
+        batch_id: str | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        with_fallback: bool = False,
+        with_retries: bool = False,
+        unverified_cost: bool = False,
         cost_mismatch: bool = False,
         user_contains: str | None = None,
         model_contains: str | None = None,
@@ -1455,6 +1455,75 @@ class Database:
         inspector needs and the list deliberately does not carry."""
         row = await self._fetchone("SELECT * FROM request_logs WHERE id = ?", (log_id,))
         return dict(row) if row is not None else None
+
+    async def neighbor_log_ids(self, log_id: int, **filters: Any) -> dict[str, int | None]:
+        """The rows on either side of `log_id` under the same filters.
+
+        «Вверх» and «вниз» in the entry window walk the list the operator was
+        looking at, not the whole table: with `status=error` set, the next row is
+        the next error. Missing neighbour is None, which the buttons read as
+        «дальше некуда».
+        """
+        clauses, params = self._log_filters(**filters)
+        where = " AND ".join(clauses + ["id > ?"])
+        newer = await self._fetchone(
+            f"SELECT id FROM request_logs WHERE {where} ORDER BY id ASC LIMIT 1",
+            (*params, log_id),
+        )
+        where = " AND ".join(clauses + ["id < ?"])
+        older = await self._fetchone(
+            f"SELECT id FROM request_logs WHERE {where} ORDER BY id DESC LIMIT 1",
+            (*params, log_id),
+        )
+        return {
+            "newer_id": int(newer["id"]) if newer else None,
+            "older_id": int(older["id"]) if older else None,
+        }
+
+    # What the gallery reads per row: the caption and the refs. `request_json`
+    # is here because the request's pictures live only in the snapshot.
+    IMAGE_LIST_COLUMNS = (
+        "id", "created_at", "external_user_id", "app", "service_provider_id",
+        "model_id", "task", "status", "request_text", "request_ref", "request_json",
+        "response_ref",
+    )
+
+    # A blob ref ends with the extension the store chose from the mime, so the
+    # kind of a stored payload is readable from the column itself.
+    IMAGE_REF_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp", ".gif")
+
+    def _image_rows_clause(self) -> str:
+        refs = " OR ".join(
+            f"response_ref LIKE '%{suffix}' OR request_ref LIKE '%{suffix}'"
+            for suffix in self.IMAGE_REF_SUFFIXES
+        )
+        # The snapshot names a picture the caller sent by URL (no ref of ours),
+        # and a picture that was not the first attachment.
+        snapshot = "instr(request_json, '\"mime\": \"image/') > 0"
+        return f"({refs} OR {snapshot})"
+
+    async def list_image_log_rows(
+        self, *, before_id: int | None = None, limit: int = 40
+    ) -> list[dict[str, Any]]:
+        """Rows that carried a picture in or out, newest first, cursor-paged.
+
+        No count goes with it on purpose: the predicate reads the snapshot
+        column, and counting it means scanning every request ever logged for a
+        number the page shows nowhere. The cursor query stops at `limit`
+        matches.
+        """
+        clauses = [self._image_rows_clause()]
+        params: list[Any] = []
+        if before_id is not None:
+            clauses.append("id < ?")
+            params.append(before_id)
+        params.append(limit)
+        rows = await self._fetchall(
+            f"SELECT {', '.join(self.IMAGE_LIST_COLUMNS)} FROM request_logs "
+            f"WHERE {' AND '.join(clauses)} ORDER BY id DESC LIMIT ?",
+            tuple(params),
+        )
+        return [dict(r) for r in rows]
 
     # What a spend row can be grouped by. A closed map, not string
     # interpolation: these go straight into GROUP BY.

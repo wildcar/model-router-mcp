@@ -1,4 +1,4 @@
-"""Jinja2-rendered pages: the five screens of the console.
+"""Jinja2-rendered pages: the seven screens of the console.
 
 Pages are frames only — markup plus which page module drives it. Behaviour lives
 in `static/js/pages/*.js`; no template contains logic in a `<script>` block
@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from router_mcp import __version__
@@ -57,8 +57,22 @@ async def page_models(request: Request) -> HTMLResponse:
 
 
 @pages_router.get("/logs", response_class=HTMLResponse)
-async def page_logs(request: Request) -> HTMLResponse:
+async def page_logs(request: Request) -> Response:
+    # «Расход» was a tab of this screen and lived in the address as `?tab=spend`;
+    # a bookmark from then lands on its own page now.
+    if request.query_params.get("tab") == "spend":
+        return RedirectResponse("/spend", status_code=301)
     return _page(request, "logs.html", "logs", "logs")
+
+
+@pages_router.get("/spend", response_class=HTMLResponse)
+async def page_spend(request: Request) -> HTMLResponse:
+    return _page(request, "spend.html", "spend", "spend")
+
+
+@pages_router.get("/images", response_class=HTMLResponse)
+async def page_images(request: Request) -> HTMLResponse:
+    return _page(request, "images.html", "images", "images")
 
 
 @pages_router.get("/connections", response_class=HTMLResponse)

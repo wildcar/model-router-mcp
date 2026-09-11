@@ -245,10 +245,9 @@ def test_price_states_are_distinguishable_in_the_log(page, live_server):
     assert page.locator("#logs tbody").inner_text().count("—") > 0 or unpriced
 
 
-def test_spend_tab_keeps_the_kinds_of_money_apart(page, live_server):
+def test_spend_screen_keeps_the_kinds_of_money_apart(page, live_server):
     base, _ = live_server
-    page.goto(f"{base}/logs?tab=spend")
-    page.get_by_role("tab", name="Расход").click()
+    page.goto(f"{base}/spend")
     totals = page.locator("#s-totals")
     totals.wait_for()
     text = totals.inner_text()

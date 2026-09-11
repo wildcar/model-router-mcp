@@ -62,7 +62,15 @@
       "error": "Unknown model_id: 'nope'"
     }
   ],
-  "attachments": [],
+  "attachments": [
+    {
+      "kind": "image",
+      "mime": "image/png",
+      "url": null,
+      "ref": "f00d.png",
+      "download_url": "/blobs/f00d.png"
+    }
+  ],
   "ignored_params": [],
   "error": {
     "code": null,

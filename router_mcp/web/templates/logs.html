@@ -1,55 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Логи — Model Router{% endblock %}
 {% block content %}
-{# Two tabs, not two screens: «Расход» is the same period and the same user
-   filter over the same rows, rendered differently (§13.1). #}
-<nav class="tabs" role="tablist">
-  <button type="button" id="tab-requests" class="tab active" role="tab">Запросы</button>
-  <button type="button" id="tab-spend" class="tab" role="tab">Расход</button>
-</nav>
-
-<div id="pane-spend" hidden>
-  <section class="card">
-    <div class="row">
-      <label>Период
-        <select id="s-period">
-          <option value="1">сутки</option>
-          <option value="7">7 дней</option>
-          <option value="30" selected>30 дней</option>
-          <option value="">всё время</option>
-        </select>
-      </label>
-      <label>Группировка
-        <select id="s-group">
-          <option value="user">пользователь</option>
-          <option value="model">модель</option>
-          <option value="provider">поставщик</option>
-          <option value="channel">канал</option>
-          <option value="app">приложение</option>
-          <option value="day">день</option>
-        </select>
-      </label>
-      <span class="spacer"></span>
-      <a id="s-export" href="#" download>Выгрузить CSV</a>
-    </div>
-    <div id="s-totals" class="totals"></div>
-    <div id="s-spark" class="spark"></div>
-    <table id="spend"><thead><tr>
-      <th scope="col" id="s-bucket-head">Пользователь</th>
-      <th scope="col" class="num">Запросов</th>
-      <th scope="col" class="num">Токенов</th>
-      <th scope="col" class="num">Промпт</th>
-      <th scope="col" class="num">Кэш</th>
-      <th scope="col" class="num">Ответ</th>
-      <th scope="col" class="num">Рассужд.</th>
-      <th scope="col" class="num">$</th>
-      <th scope="col" class="num">подтверждено</th>
-    </tr></thead><tbody></tbody></table>
-  </section>
-</div>
-
-<div id="pane-requests">
-<section class="card" id="detail" hidden></section>
+{# The entry opens in a window over the table, not in a block above it: the
+   row stays where the operator found it, and ▲ ▼ next to the number step to
+   the neighbouring rows under the same filters. `?log=` in the address still
+   opens it, so a link to one entry keeps working. Built by logs.js. #}
+<dialog id="detail" class="detail-dialog"></dialog>
 
 <section class="card">
   <h2>Журнал запросов</h2>
@@ -133,5 +89,4 @@
     <button id="more" type="button" hidden>Ещё 50</button>
   </div>
 </section>
-</div>
 {% endblock %}

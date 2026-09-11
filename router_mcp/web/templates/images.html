@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Картинки — Model Router{% endblock %}
+{% block content %}
+{# Every picture the log carried, in or out, newest first. One card per picture:
+   the number opens the entry in «Журнал», the picture opens full size. The next
+   page loads as the operator reaches the bottom; the button is for a browser
+   without IntersectionObserver and for the node harness. #}
+<section class="card">
+  <h2>Картинки в запросах и ответах</h2>
+  <p class="hint">Сначала новые. Номер записи ведёт в журнал, картинка открывается
+    в полном размере в новой вкладке.</p>
+  <div id="gallery" class="gallery"></div>
+  <p id="empty" class="hint" hidden>Картинок в журнале пока нет.</p>
+  <div class="row">
+    <span id="count" class="hint"></span>
+    <span id="tz" class="hint"></span>
+    <button id="more" type="button" hidden>Ещё</button>
+  </div>
+  <div id="sentinel"></div>
+</section>
+{% endblock %}

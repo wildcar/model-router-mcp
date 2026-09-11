@@ -28,7 +28,12 @@ const ROUTES = {
   '/api/v1/logs/suggest': { items: ['web-tester', 'bot-77'], total: 2,
     next_cursor: null, facets: {} },
   '/api/v1/logs/1': fixture('log-detail'),
+  '/api/v1/logs/2': fixture('log-detail'),
   '/api/v1/logs/4821': fixture('run-ok'),
+  // The entry window's ▲ ▼: row 1 is the newest, so «up» has nowhere to go.
+  '/api/v1/logs/1/neighbors': { newer_id: null, older_id: 2 },
+  '/api/v1/logs/2/neighbors': { newer_id: 1, older_id: 3 },
+  '/api/v1/logs/images': fixture('images'),
   '/api/v1/usage': fixture('usage'),
   '/api/v1/health/summary': fixture('health-summary'),
   '/api/v1/retention': { log_retention_days: 90, blob_retention_days: 30,
@@ -188,11 +193,22 @@ await runPage('logs', 'logs', async (doc, _calls, settleNow) => {
       && okDigits.includes('340') && okDigits.includes('64'), okDigits.slice(0, 160));
 
   // Opening an entry has to answer «что спросили», not only «что ответили»:
-  // before the «Запрос» tab the request was nowhere on this screen.
+  // before the «Запрос» tab the request was nowhere on this screen. It opens
+  // in a window over the table now, with the neighbours a click away.
   body.children[0].dispatch('click');
   await settleNow();
   const detail = doc.getElementById('detail');
-  check('журнал: подробности записи открываются', detail.hidden === false);
+  check('журнал: окно записи открывается', detail.getAttribute('open') !== null);
+  check('журнал: номер записи в заголовке окна', detail.textContent.includes('Запись #1'));
+  const arrows = detail.querySelectorAll('.nav-btn');
+  check('журнал: кнопки вверх и вниз рядом с номером', arrows.length === 2
+    && arrows[0].textContent === '▲' && arrows[1].textContent === '▼');
+  check('журнал: у самой новой записи «вверх» выключена', arrows[0].disabled === true);
+  check('журнал: миниатюра картинки ответа в окне',
+    detail.querySelectorAll('.thumb img').length === 1
+      && detail.querySelector('.thumb img').src === '/blobs/f00d.png/thumb',
+    detail.querySelector('.thumb img')?.src);
+  check('журнал: миниатюра подписана стороной', detail.textContent.includes('ответ'));
   const tabNames = detail.querySelectorAll('.tab').map((t) => t.textContent);
   check('журнал: закладка Запрос на месте', tabNames.includes('Запрос'), tabNames.join(' · '));
   detail.querySelectorAll('.tab').find((t) => t.textContent === 'Запрос').dispatch('click');
@@ -206,11 +222,19 @@ await runPage('logs', 'logs', async (doc, _calls, settleNow) => {
   check('журнал: в JSON есть и запрос, и ответ',
     detail.querySelector('.tab-pane').textContent.includes('JSON (запрос)')
       && detail.querySelector('.tab-pane').textContent.includes('JSON (ответ /api)'));
-
-  // The spend tab renders from the same page module, and loads asynchronously.
-  doc.getElementById('tab-spend').dispatch('click');
+  // «Вниз» asks for the older row and its own neighbours, under the same filters.
+  arrows[1].dispatch('click');
   await settleNow();
-  check('расход: вкладка открывается', doc.getElementById('pane-spend').hidden === false);
+  check('журнал: «вниз» открывает следующую запись',
+    _calls.some((c) => c.url === '/api/v1/logs/2')
+      && _calls.some((c) => c.url.startsWith('/api/v1/logs/2/neighbors')),
+    _calls.map((c) => c.url).slice(-3).join(' '));
+  // The money left this screen: no tab, no spend table.
+  check('журнал: закладки «Расход» больше нет',
+    doc.getElementById('tab-spend') === null && doc.getElementById('spend') === null);
+});
+
+await runPage('spend', 'spend', async (doc) => {
   const totals = text(doc, 's-totals');
   check('расход: подтверждённые и неподтверждённые ставки разведены',
     totals.includes('подтверждённые ставки') && totals.includes('неподтверждённые ставки'),
@@ -227,6 +251,28 @@ await runPage('logs', 'logs', async (doc, _calls, settleNow) => {
     spendHeader);
   check('расход: ссылка на выгрузку ведёт на CSV',
     (doc.getElementById('s-export').attributes.href || '').includes('/usage/export'));
+});
+
+await runPage('images', 'images', async (doc) => {
+  const cards = doc.querySelectorAll('.shot');
+  // Two entries, four pictures: one card per picture, not per row.
+  check('картинки: карточка на каждую картинку', cards.length === 4, String(cards.length));
+  check('картинки: сначала самая новая запись',
+    cards[0].textContent.includes('#4821') && cards[3].textContent.includes('#4810'));
+  const first = cards[0];
+  check('картинки: номер ведёт на запись журнала',
+    first.querySelectorAll('a').some((a) => a.attributes.href === '/logs?log=4821'));
+  check('картинки: текст запроса под картинкой',
+    first.textContent.includes('рыжий кот'), first.textContent.slice(0, 80));
+  check('картинки: картинка грузится миниатюрой и открывается полной',
+    first.querySelector('img').src === '/blobs/cafe.png/thumb'
+      && first.querySelector('.shot-pic').attributes.href === '/blobs/cafe.png');
+  check('картинки: сторона и роль подписаны',
+    cards[1].textContent.includes('запрос · person') && cards[3].textContent.includes('ответ'));
+  check('картинки: запись без текста так и названа', cards[1].textContent.includes('без текста'));
+  check('картинки: счётчик картинок и записей',
+    text(doc, 'count').includes('4 картинок из 2 записей'), text(doc, 'count'));
+  check('картинки: конец списка назван', text(doc, 'count').includes('это всё'));
 });
 
 await runPage('models', 'models', async (doc, calls, settleNow) => {

@@ -16,18 +16,27 @@ def test_health_is_status_only(client):
 
 
 def test_pages_render(client):
-    for path in ("/", "/overview", "/models", "/logs", "/connections"):
+    for path in ("/", "/overview", "/models", "/logs", "/spend", "/images", "/connections"):
         r = client.get(path)
         assert r.status_code == 200
         assert "Model Router" in r.text
 
 
-def test_navigation_has_five_items(client):
-    """Five, not seven: «Матрица» is a mode of «Прогон», «Расход» a tab of
-    «Журнал», MCP a tab of «Подключения» (§9)."""
+def test_navigation_has_seven_items(client):
+    """«Матрица» is a mode of «Прогон» and MCP a tab of «Подключения» (§9);
+    «Расход» and «Картинки» are screens of their own."""
     body = client.get("/").text
-    for item in ("Обзор", "Прогон", "Модели", "Журнал", "Подключения"):
+    for item in ("Обзор", "Прогон", "Модели", "Журнал", "Расход", "Картинки", "Подключения"):
         assert f">{item}</a>" in body
+    assert ">Расход</a>" not in client.get("/logs").text.split("<main>")[1]
+
+
+def test_old_spend_tab_link_lands_on_the_spend_screen(client):
+    """«Расход» was `?tab=spend` on the journal; the bookmark must not open an
+    empty journal."""
+    r = client.get("/logs?tab=spend", follow_redirects=False)
+    assert r.status_code == 301
+    assert r.headers["location"] == "/spend"
 
 
 def test_old_registry_link_still_resolves(client):

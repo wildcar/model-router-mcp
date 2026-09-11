@@ -12,13 +12,17 @@
 <body>
   <header>
     <h1>Model Router</h1>
-    {# Five items, not seven: «Матрица» became a mode of «Прогон», «Расход» a tab
-       of «Журнал», and MCP a tab of «Подключения» (§9). #}
+    {# «Матрица» is a mode of «Прогон» and MCP a tab of «Подключения» (§9).
+       «Расход» left «Журнал» and stands on its own: the journal opens on the
+       rows, and the money is a screen above it. «Картинки» is every picture the
+       log carried, newest first. #}
     <nav>
       <a href="/overview" class="{{ 'active' if active == 'overview' }}">Обзор</a>
       <a href="/" class="{{ 'active' if active == 'run' }}">Прогон</a>
       <a href="/models" class="{{ 'active' if active == 'models' }}">Модели</a>
       <a href="/logs" class="{{ 'active' if active == 'logs' }}">Журнал</a>
+      <a href="/spend" class="{{ 'active' if active == 'spend' }}">Расход</a>
+      <a href="/images" class="{{ 'active' if active == 'images' }}">Картинки</a>
       <a href="/connections" class="{{ 'active' if active == 'connections' }}">Подключения</a>
       <span class="spacer"></span>
       <a href="/mcp" title="MCP Streamable HTTP endpoint">/mcp</a>

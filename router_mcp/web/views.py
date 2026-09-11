@@ -14,6 +14,7 @@ See `docs/UI_CONCEPT_v2.md` §17.2 (envelope) and §17.3 (error contract).
 from __future__ import annotations
 
 import json
+import mimetypes
 from typing import Any
 
 from router_mcp.domain.errors import RouterError
@@ -167,6 +168,32 @@ def _model(provider: str | None, model_id: str | None, display_name: str | None 
     }
 
 
+# A stored payload is known to the row by its blob ref alone; the ref carries
+# the extension the store chose from the mime at save time (`store.save`), so
+# the type can be read back from the name. Without this a generated image read
+# from the log was a «file» with no mime, and the inspector offered a download
+# link where the «Прогон» screen had shown the picture.
+def _media_of(
+    ref: str | None, *, kind: str | None = None, mime: str | None = None
+) -> tuple[str, str | None]:
+    """(kind, mime) for a payload, filling what the row did not keep."""
+    if not mime and ref:
+        mime = mimetypes.guess_type(ref)[0]
+    if not kind or kind == "file":
+        if mime and mime.startswith("image/"):
+            kind = "image"
+        elif mime and mime.startswith("audio/"):
+            kind = "audio"
+        else:
+            kind = kind or "file"
+    return kind, mime
+
+
+def is_image(att: dict[str, Any]) -> bool:
+    kind, mime = _media_of(att.get("ref"), kind=att.get("kind"), mime=att.get("mime"))
+    return kind == "image" or bool(mime and mime.startswith("image/"))
+
+
 def _request(
     snapshot: dict[str, Any] | None,
     *,
@@ -184,11 +211,12 @@ def _request(
     attachments = []
     for att in snap.get("attachments") or []:
         att_ref = att.get("ref")
+        kind, mime = _media_of(att_ref, kind=att.get("kind"), mime=att.get("mime"))
         attachments.append(
             {
-                "kind": att.get("kind"),
+                "kind": kind,
                 "role": att.get("role"),
-                "mime": att.get("mime"),
+                "mime": mime,
                 "bytes": att.get("bytes"),
                 "url": att.get("url"),
                 "ref": att_ref,
@@ -198,11 +226,12 @@ def _request(
     # The uploaded payload is on the row as well; when the snapshot lists no
     # attachment (an old entry) the ref alone still gives the operator the file.
     if not attachments and ref:
+        kind, mime = _media_of(ref)
         attachments.append(
             {
-                "kind": "file",
+                "kind": kind,
                 "role": None,
-                "mime": None,
+                "mime": mime,
                 "bytes": None,
                 "url": None,
                 "ref": ref,
@@ -319,19 +348,18 @@ def run_from_log(row: dict[str, Any]) -> dict[str, Any]:
     breaking on a page that was merely paged in.
     """
     ref = row.get("response_ref")
-    attachments = (
-        [
+    attachments = []
+    if ref:
+        kind, mime = _media_of(ref)
+        attachments.append(
             {
-                "kind": "file",
-                "mime": None,
+                "kind": kind,
+                "mime": mime,
                 "url": None,
                 "ref": ref,
                 "download_url": f"/blobs/{ref}",
             }
-        ]
-        if ref
-        else []
-    )
+        )
     return _run(
         run_id=None,
         log_id=row.get("id"),
@@ -386,6 +414,136 @@ def run_from_log(row: dict[str, Any]) -> dict[str, Any]:
             else None
         ),
     )
+
+
+# The gallery caption is cut here, not in the browser: the column holds up to
+# 4000 characters and forty of those per page is a page of prompts, not pictures.
+_CAPTION_CHARS = 200
+
+
+def asked_words(row: dict[str, Any]) -> str:
+    """The words the caller typed, for a caption.
+
+    The snapshot's `text` first; failing that the last user message of the
+    history; failing that `request_text`, which for a chat call is the raw
+    message list — its last user message is pulled out the same way. The
+    console's table column does this in the browser; the gallery needs it on
+    the server because it never fetches the row.
+    """
+    snap = _json_or_empty(row.get("request_json"))
+    text = snap.get("text") if snap else None
+    if not text:
+        text = _last_user_words(snap.get("messages") if snap else None)
+    raw = row.get("request_text") or ""
+    if not text and raw.lstrip().startswith(("[", "{")):
+        text = _last_user_words(_json_or_empty(raw, default=[]))
+    if not text:
+        text = raw
+    text = " ".join(str(text).split())
+    return text[:_CAPTION_CHARS]
+
+
+def _last_user_words(messages: Any) -> str:
+    if isinstance(messages, dict):
+        messages = [messages]
+    if not isinstance(messages, list):
+        return ""
+
+    def words(message: Any) -> str:
+        if not isinstance(message, dict):
+            return ""
+        content = message.get("content", message.get("text"))
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return " ".join(
+                part if isinstance(part, str) else str((part or {}).get("text") or "")
+                for part in content
+            ).strip()
+        return ""
+
+    for message in reversed(messages):
+        if isinstance(message, dict) and message.get("role") == "user" and words(message):
+            return words(message)
+    for message in reversed(messages):
+        if words(message):
+            return words(message)
+    return ""
+
+
+def image_card(row: dict[str, Any]) -> dict[str, Any]:
+    """One log row as the gallery sees it: who asked what, and every picture
+    that travelled with the request or came back in the answer.
+
+    Request pictures come from the snapshot's attachment list (a ref each, or a
+    plain http URL when the caller pointed at one); the answer's picture is the
+    row's `response_ref`. Only the first response file is on the row — a call
+    that drew several keeps one in the log, and the card says as much as the
+    row knows.
+    """
+    images: list[dict[str, Any]] = []
+    snap = _json_or_empty(row.get("request_json"))
+    seen: set[str] = set()
+    for att in snap.get("attachments") or []:
+        if not is_image(att):
+            continue
+        ref = att.get("ref")
+        url = att.get("url")
+        if ref:
+            key, full, thumb = ref, f"/blobs/{ref}", f"/blobs/{ref}/thumb"
+        elif url and url.startswith(("http://", "https://")):
+            key, full, thumb = url, url, url
+        else:
+            continue  # a data: URL was cut to 200 characters — nothing to show
+        if key in seen:
+            continue
+        seen.add(key)
+        images.append(
+            {
+                "side": "request",
+                "role": att.get("role"),
+                "ref": ref,
+                "mime": _media_of(ref, mime=att.get("mime"))[1],
+                "url": full,
+                "thumb_url": thumb,
+            }
+        )
+    request_ref = row.get("request_ref")
+    if request_ref and request_ref not in seen and is_image({"ref": request_ref}):
+        images.append(
+            {
+                "side": "request",
+                "role": None,
+                "ref": request_ref,
+                "mime": _media_of(request_ref)[1],
+                "url": f"/blobs/{request_ref}",
+                "thumb_url": f"/blobs/{request_ref}/thumb",
+            }
+        )
+    response_ref = row.get("response_ref")
+    if response_ref and is_image({"ref": response_ref}):
+        images.append(
+            {
+                "side": "response",
+                "role": None,
+                "ref": response_ref,
+                "mime": _media_of(response_ref)[1],
+                "url": f"/blobs/{response_ref}",
+                "thumb_url": f"/blobs/{response_ref}/thumb",
+            }
+        )
+    return {
+        "log_id": row.get("id"),
+        "created_at": row.get("created_at"),
+        "external_user_id": row.get("external_user_id"),
+        "app": row.get("app"),
+        "provider": row.get("service_provider_id"),
+        "model_id": row.get("model_id"),
+        "task": row.get("task"),
+        "status": row.get("status"),
+        "text": asked_words(row),
+        "images": images,
+    }
 
 
 def _json_or_empty(value: Any, default: Any = None) -> Any:
