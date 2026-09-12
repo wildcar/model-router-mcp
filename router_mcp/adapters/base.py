@@ -20,6 +20,8 @@ import re
 
 from router_mcp.domain.errors import (
     AccessDenied,
+    ContentFiltered,
+    InsufficientCredits,
     ModelUnavailable,
     ProviderError,
     ProviderTimeout,
@@ -91,6 +93,45 @@ MODEL_GONE_RE = re.compile(
     r"|(not found|unknown|invalid|deprecated).{0,20}model",
     re.IGNORECASE | re.DOTALL,
 )
+
+
+# The safety filter, as each provider words it. Seen live in this log:
+# Replicate «The input or output was flagged as sensitive … (E005)» and «All
+# generated images contained NSFW content», OpenRouter HTTP 400 «The response
+# was filtered due to the prompt triggering our content management policy»,
+# plus the OpenAI-shaped `content_filter` / `moderation_blocked` codes.
+CONTENT_FILTER_RE = re.compile(
+    r"flagged as sensitive|\(E005\)|NSFW|content management policy"
+    r"|content_filter|content filter|moderation_blocked|safety (system|filter)"
+    r"|flagged by .{0,30}moderation|violat.{0,20}(usage|content) polic",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# An empty account. OpenRouter «Insufficient credits» (HTTP 402), DeepSeek
+# «Insufficient Balance» (402), the OpenAI-shaped `insufficient_quota`.
+NO_CREDITS_RE = re.compile(
+    r"insufficient[ _](credits?|balance|quota|funds)|exceeded your current quota"
+    r"|payment required|billing hard limit",
+    re.IGNORECASE,
+)
+
+
+def provider_error_for(
+    message: str, *, provider_status: int | None = None, **fields: Any
+) -> ProviderError:
+    """The right `ProviderError` subclass for an application-level refusal.
+
+    Every adapter used to raise the base class with the provider's sentence
+    inside, and the two failures an operator most needs told apart — «the
+    account is empty» and «this picture was refused» — were both a
+    `provider_error` with a different message. HTTP 402 is unambiguous; the
+    rest is matched on the text, because the text is all the providers give.
+    """
+    if provider_status == 402 or NO_CREDITS_RE.search(message):
+        return InsufficientCredits(message, provider_status=provider_status, **fields)
+    if CONTENT_FILTER_RE.search(message):
+        return ContentFiltered(message, provider_status=provider_status, **fields)
+    return ProviderError(message, provider_status=provider_status, **fields)
 
 
 def _int_or_none(value: Any) -> int | None:
@@ -303,6 +344,13 @@ class RetryClientMixin:
                 status = response.status_code
                 if status in (401, 403):
                     _record_try(at_ms=at_ms, status=status)
+                    # OpenRouter answers a moderation refusal with 403 too; the
+                    # body tells it from a bad key, and the two are worlds apart
+                    # for whoever reads the log.
+                    if status == 403 and CONTENT_FILTER_RE.search(response.text[:2000]):
+                        raise ContentFiltered(
+                            f"HTTP 403: {response.text[:500]}", provider_status=status
+                        )
                     raise AccessDenied(
                         f"Authorization failed ({status})", provider_status=status
                     )
@@ -338,7 +386,7 @@ class RetryClientMixin:
                         raise ModelUnavailable(
                             f"HTTP {status}: {body}", provider_status=status
                         )
-                    raise ProviderError(f"HTTP {status}: {body}", provider_status=status)
+                    raise provider_error_for(f"HTTP {status}: {body}", provider_status=status)
                 return response
             except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
                 logger.warning("HTTP network error attempt=%s url=%s: %s", attempt, url, exc)

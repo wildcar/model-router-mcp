@@ -164,6 +164,7 @@ async def test_the_new_columns_arrive(migrated):
         ("request_logs", "task"),
         ("request_logs", "compute_seconds"),
         ("request_logs", "provider_cost_usd"),
+        ("request_logs", "error_code"),
     ):
         rows = await db._fetchall(f"PRAGMA table_info({table})")
         assert column in {r["name"] for r in rows}, f"{table}.{column} missing"

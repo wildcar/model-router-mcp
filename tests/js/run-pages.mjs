@@ -42,6 +42,14 @@ const ROUTES = {
   'POST /api/v1/retention/purge': { deleted_logs: 12, deleted_blobs: 5,
     logs_to_delete: 12, blobs_to_delete: 4, orphan_blobs: 1, total_logs: 8213,
     log_retention_days: 90, blob_retention_days: 30 },
+  '/api/v1/notifications': { enabled: true,
+    channels: [{ name: 'telegram', targets: 1, detail: 'чатов: 1' }],
+    muted_codes: ['content_filter', 'response_truncated'], muted_apps: [], muted_users: [],
+    cooldown_seconds: 600, counts: { sent: 2, muted: 5, throttled: 1, failed: 0 },
+    recent: [{ at: '2026-09-12T10:00:00+00:00', log_id: 4821, code: 'content_filter',
+      provider: 'replicate', model_id: 'x/y', outcome: 'muted_code', detail: null }] },
+  'POST /api/v1/notifications/test': { ok: true,
+    results: [{ channel: 'telegram', status: 'ok', detail: null }] },
   '/api/v1/mcp/summary': fixture('mcp-summary'),
   'POST /api/v1/providers/openrouter/probe': { provider_id: 'openrouter', status: 'ok',
     detail: 'Каталог ответил, моделей 345', latency_ms: 210, age_seconds: 3 },
@@ -153,6 +161,13 @@ await runPage('overview', 'overview', (doc) => {
     doc.getElementById('retention').children.length === 4);
   check('обзор: файлы без записи посчитаны отдельно',
     doc.querySelector('#retention').textContent.includes('Файлов без записи'));
+  // Notifications: the channels in words, the muted codes, the last outcomes.
+  check('обзор: каналы оповещений названы',
+    text(doc, 'notify-state').includes('telegram'), text(doc, 'notify-state'));
+  check('обзор: коды в тишине перечислены',
+    doc.querySelector('#notify').textContent.includes('content_filter'));
+  check('обзор: судьба последних ошибок показана',
+    doc.querySelector('#notify').textContent.includes('код в тишине'));
 });
 
 await runPage('logs', 'logs', async (doc, _calls, settleNow) => {

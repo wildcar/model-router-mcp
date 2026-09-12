@@ -63,6 +63,11 @@ class RequestLogRecord:
     model_id: str | None = None
     status: str = "ok"
     error_message: str | None = None
+    # The stable `code` of the RouterError the run ended with (`content_filter`,
+    # `insufficient_credits`, …). `error_message` starts with the class name,
+    # which is the same fact for a human; this one is for SQL and for the
+    # notification filter, which mutes by code.
+    error_code: str | None = None
     request_text: str | None = None
     request_ref: str | None = None
     # The request as the router received it — model/tier hints, params, the
@@ -416,6 +421,7 @@ class Database:
                     task TEXT,
                     status TEXT NOT NULL DEFAULT 'ok',
                     error_message TEXT,
+                    error_code TEXT,
                     request_text TEXT,
                     request_ref TEXT,
                     request_json TEXT,
@@ -567,6 +573,10 @@ class Database:
             "return_code": "INTEGER",
             "plan_json": "TEXT",
             "finished_at": "DATETIME",
+            # The error's stable code, for the notification filter and for SQL.
+            # Null on every earlier row: the class name at the head of
+            # `error_message` is the nearest thing they have.
+            "error_code": "TEXT",
             # The request side of the inspector: rows written before this column
             # existed keep showing `request_text` alone.
             "request_json": "TEXT",
@@ -1158,7 +1168,7 @@ class Database:
     LOG_LIST_COLUMNS = (
         "id", "created_at", "external_user_id", "modality", "task", "service_provider_id",
         "model_provider", "model_id", "requested_model_id", "fallback_reason",
-        "status", "error_message", "channel", "tool", "client_id", "batch_id", "app",
+        "status", "error_message", "error_code", "channel", "tool", "client_id", "batch_id", "app",
         "prompt_tokens", "completion_tokens", "total_tokens", "cache_read_tokens",
         "reasoning_tokens", "audio_seconds", "compute_seconds", "images", "characters",
         "cost_usd", "cost_source", "pricing_mode", "provider_cost_usd",

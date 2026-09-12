@@ -11,6 +11,26 @@ it as a managed service on this host.
 
 ## Now
 
+- ⏳ Оповещения об ошибках в Telegram и на почту (2026-09-12). Роутер отдаёт
+  каждый сбой, закрывший строку прогона, в `notify.Notifier.failed` — не
+  ждёт доставки, ошибку канала только считает. Каналы из `.env`: Telegram
+  (`NOTIFY_TELEGRAM_BOT_TOKEN` + `NOTIFY_TELEGRAM_CHAT_IDS`) и почта
+  (`NOTIFY_EMAIL_TO` + `NOTIFY_SMTP_HOST`); без настроек ничего не шлётся.
+  Фильтры: `NOTIFY_MUTE_CODES` (по умолчанию content_filter,
+  response_truncated, bad_request, image_too_large), `NOTIFY_MUTE_APPS`,
+  `NOTIFY_MUTE_USERS`, окно повторов `NOTIFY_COOLDOWN_SECONDS=600` на связку
+  код + поставщик + модель. Два новых класса ошибок: `ContentFiltered`
+  (`content_filter`, 422) и `InsufficientCredits` (`insufficient_credits`,
+  402); распознаются в `adapters/base.provider_error_for` по HTTP 402 и по
+  формулировкам поставщиков из нашего журнала (Replicate sensitive/E005/NSFW,
+  OpenRouter content management policy / Insufficient credits, DeepSeek
+  Insufficient Balance), плюс `finish_reason=content_filter` у OpenRouter и
+  `stop_reason=refusal` у Anthropic. В журнале новая колонка
+  `request_logs.error_code`; `error.code` конверта читается из неё.
+  Ручки `GET /api/v1/notifications` и `POST /api/v1/notifications/test`,
+  карточка «Оповещения» на «Обзоре» с кнопкой «Отправить пробное».
+  Деплой — следующий шаг; на проде канал включится, когда оператор впишет
+  токен бота и chat id в `.env` (keeper не читает и не правит прод `.env`).
 - ✅ Фильтры на «Картинках» (2026-09-11, вторая итерация дня). Над лентой та
   же строка фильтров, что в журнале: метка, поставщик, модель, приложение,
   статус, задача, канал, день. Убраны группа тарификации (задача уже отличает

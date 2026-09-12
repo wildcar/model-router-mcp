@@ -18,7 +18,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from router_mcp.accounting.cost import (
     PER_UNIT_GROUPS,
@@ -54,6 +54,9 @@ from router_mcp.domain.modality import Modality
 from router_mcp.registry.models import RegistryModel
 from router_mcp.registry.service import RegistryService
 from router_mcp.storage.database import Database, RequestLogRecord
+
+if TYPE_CHECKING:  # the notifier is wired in bootstrap; routing only calls it
+    from router_mcp.notify.service import Notifier
 
 logger = logging.getLogger(__name__)
 
@@ -210,12 +213,16 @@ class ModelRouter:
         adapters: dict[str, ProviderAdapter],
         blobs: BlobStore,
         defaults: dict[Modality, str | None] | None = None,
+        notifier: "Notifier | None" = None,
     ) -> None:
         self._db = db
         self._registry = registry
         self._adapters = adapters
         self._blobs = blobs
         self._defaults = defaults or {}
+        # Who to tell when a run fails. Optional: the tests and a bare install
+        # run without one, and the router never waits for it (see notify/).
+        self._notifier = notifier
 
     async def resolve(self, request: RouterRequest) -> tuple[ProviderAdapter, RegistryModel]:
         """The model this request would run on right now (first planned attempt)."""
@@ -1163,6 +1170,7 @@ class ModelRouter:
             model_id=model.model_id if model else request.model_id,
             status="error",
             error_message=f"{type(exc).__name__}: {exc}"[:1000],
+            error_code=getattr(exc, "code", None),
             request_text=request_text,
             request_ref=request_ref,
             request_json=request_json,
@@ -1197,4 +1205,8 @@ class ModelRouter:
                 exc.provider = rec.service_provider_id
             if exc.model_id is None:
                 exc.model_id = rec.model_id
+        # Only the failure that closes the run's own row reaches the operator:
+        # an attempt a fallback recovered from is a line in the log, not news.
+        if self._notifier is not None and row_id is not None:
+            self._notifier.failed(exc, rec, log_id)
         return log_id

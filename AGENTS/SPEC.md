@@ -209,6 +209,22 @@ the ceiling and the tokens actually produced, so the caller knows to raise
 `max_tokens` instead of debugging the prompt. `request_logs.finish_reason` keeps
 the provider's stop reason for both successful and failed calls.
 
+`ContentFiltered(ProviderError)` — code `content_filter`, 422, not retriable —
+is the provider's safety filter refusing the input or withholding the output.
+`InsufficientCredits(ProviderError)` — code `insufficient_credits`, 402 — is an
+empty provider account, which only an operator can fix. Both are recognised in
+one place, `adapters/base.provider_error_for(message, provider_status)`: HTTP
+402 is credits outright, the rest is matched on the provider's own wording
+(`CONTENT_FILTER_RE`, `NO_CREDITS_RE`; the sentences come from this log —
+Replicate «flagged as sensitive» / E005 / «NSFW content», OpenRouter «filtered
+due to the prompt triggering our content management policy» and «Insufficient
+credits», DeepSeek «Insufficient Balance»). The retry mixin classifies every
+4xx through it and reads a 403 body before calling it a bad key; OpenRouter's
+`finish_reason=content_filter` and Anthropic's `stop_reason=refusal` on an
+empty answer raise `ContentFiltered` directly. Every failed row carries the
+code in `request_logs.error_code` (null on rows written before the column),
+and the run envelope's `error.code` is read from it.
+
 ### Catalog sync (15)
 
 - `ProviderAdapter.list_catalog()` returns `list[RegistryModel] | None`; `None`
@@ -453,6 +469,8 @@ provider_status, retry_after_s, hint}}`.
 | `unknown_model` | 404 | no registry row for the model id |
 | `model_retired` / `provider_disabled` / `model_unavailable` | 409 | the pair cannot serve the request |
 | `response_truncated` | 422 | output ceiling hit before any content |
+| `content_filter` | 422 | the provider's safety filter refused the input or withheld the output; not retriable |
+| `insufficient_credits` | 402 | the provider account has no balance; an operator tops it up |
 | `rate_limited` | 429 | provider refused; `retry_after_s` when it said so |
 | `not_configured` | 503 | no key/binary; `hint.env_var` names the variable |
 | `model_not_loaded` | 503 | a local model's weights are not on disk (`deploy/fetch-models.sh`); not retriable |
@@ -774,7 +792,9 @@ context and modality updates. `revert_price` hands it back to the catalog.
 Seven: Обзор · Прогон · Модели · Журнал · Расход · Картинки · Подключения.
 Filters, search, page, sorting, the selected row, the active tab and `?log=`
 live in the address; the live tail, collapsed nodes, the prompt draft and the
-theme do not.
+theme do not. «Обзор» carries, above the recent errors, an «Оповещения» card:
+channels or «выключены», the mute lists, the counters and the fate of the last
+five failures, and «Отправить пробное» (see Notifications (39)).
 
 The «Прогон» form is generated from capabilities, so a field is present exactly
 when the adapter behind the chosen pair reads it. Model choice has two modes
@@ -888,6 +908,47 @@ the log knows and the build no longer exposes are reported separately. There is
 no sessions screen: ADR-0003 makes the server stateless, so it would be empty by
 construction.
 
+### Notifications (39)
+
+A run that fails reaches the operator without the operator watching the log.
+The router hands every failure that closes a run's own row (not an attempt a
+fallback recovered from, not a cancellation) to `notify.Notifier.failed`,
+which never raises and never makes the request wait: delivery runs as a task
+of its own, and a channel error is logged and counted, not thrown.
+
+Channels come from `.env` and are on only when fully configured: Telegram
+(`NOTIFY_TELEGRAM_BOT_TOKEN` + `NOTIFY_TELEGRAM_CHAT_IDS`, comma separated,
+plain Bot API `sendMessage` in HTML parse mode with the first line bold and
+everything escaped) and e-mail (`NOTIFY_EMAIL_TO` + `NOTIFY_SMTP_HOST`, plus
+port/user/password/STARTTLS/from; stdlib `smtplib` in a worker thread). No
+channel configured means nothing is ever sent; the console says so.
+
+Three filters stand between a failure and a message, in this order:
+
+1. `NOTIFY_MUTE_CODES` — error codes that stay in the log. The default is
+   `content_filter,response_truncated,bad_request,image_too_large`: failures
+   that belong to the request, not to the service. `insufficient_credits` is
+   deliberately not muted — it is what the channel is for.
+2. `NOTIFY_MUTE_APPS` / `NOTIFY_MUTE_USERS` — `request_logs.app` values and
+   caller labels whose failures are not news (a test bench).
+3. One message per (code, provider, model) per `NOTIFY_COOLDOWN_SECONDS`
+   (default 600). Repeats inside the window are counted; the count rides on
+   the next message («Ещё N таких за последние 10 мин»).
+
+The message: `⛔ <SELF_APP_NAME>: <code>`, then provider · model · task, then
+приложение · метка · канал, then `HTTP <status> · <Type>: <message>`, then
+`Запись #<id>: <SELF_APP_URL>/logs?log=<id>`. The e-mail subject is
+`[<name>] <code> · provider · model · task`.
+
+`GET /api/v1/notifications` returns the channels, the three mute lists, the
+window, counters since start (sent / muted / throttled / failed) and the last
+twenty failures with what became of each (`sent`, `muted_code`, `muted_app`,
+`muted_user`, `no_channels`, `throttled`, `failed` + the channel's error text).
+`POST /api/v1/notifications/test` sends a test message naming the channels
+and the filters and answers per-channel results (200 even when a channel
+failed; 503 `not_configured` when there is no channel). «Обзор» shows all of
+it in a card above the recent errors, with the test button.
+
 ## Runs and retention (27–29)
 
 Wave 3 of `docs/UI_CONCEPT_v2.md`.
@@ -974,6 +1035,8 @@ router_mcp/
   storage/database.py  aiosqlite schema + CRUD + logging + usage
   blobs/store.py       on-disk blob store
   mcp_server/          tools (FastMCP), serialize
+  notify/              service (Notifier: mute lists, cooldown, wording),
+                       telegram (Bot API), email (smtplib) — failures reach the operator
   web/                 api (JSON, mounted at /api/v1 and /api), views (Run and
                        error envelopes), capabilities (matrix from adapters),
                        labels (the glossary), health (summary + key probes),

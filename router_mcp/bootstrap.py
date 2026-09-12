@@ -31,6 +31,7 @@ from router_mcp.blobs.store import BlobStore
 from router_mcp.config import Settings
 from router_mcp.domain.modality import Modality
 from router_mcp.domain.task import Task
+from router_mcp.notify.service import Notifier, build_notifier
 from router_mcp.registry.models import RegistryModel
 from router_mcp.registry.service import RegistryService
 from router_mcp.routing.router import ModelRouter
@@ -68,6 +69,9 @@ class AppCore:
     # Runs this process has in flight. Assigned right after construction,
     # because the registry needs the assembled core to dispatch through.
     runs: "RunRegistry | None" = None
+    # Who is told when a run fails. Always present; with no channel configured
+    # it only counts what it would have sent, which the console shows.
+    notifier: Notifier | None = None
     # When this process built its core. The console shows uptime, and a service
     # that restarted an hour ago explains a lot of otherwise odd numbers.
     started_at: float = field(default_factory=time.time)
@@ -75,6 +79,8 @@ class AppCore:
     async def aclose(self) -> None:
         if self.runs is not None:
             await self.runs.aclose()
+        if self.notifier is not None:
+            await self.notifier.aclose()
         for adapter in self.adapters.values():
             try:
                 await adapter.close()
@@ -480,8 +486,14 @@ async def build_core(settings: Settings) -> AppCore:
         Modality.STT: settings.default_stt_model,
         Modality.TTS: settings.default_tts_model,
     }
+    notifier = build_notifier(settings)
+    if notifier.enabled:
+        logger.info(
+            "Notifications on: %s", ", ".join(c["name"] for c in notifier.describe()["channels"])
+        )
     router = ModelRouter(
-        db=db, registry=registry, adapters=adapters, blobs=blobs, defaults=defaults
+        db=db, registry=registry, adapters=adapters, blobs=blobs, defaults=defaults,
+        notifier=notifier,
     )
 
     core = AppCore(
@@ -491,6 +503,7 @@ async def build_core(settings: Settings) -> AppCore:
         registry=registry,
         router=router,
         adapters=adapters,
+        notifier=notifier,
     )
     core.runs = RunRegistry(
         core,

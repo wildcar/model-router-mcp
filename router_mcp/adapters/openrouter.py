@@ -23,10 +23,16 @@ from router_mcp.adapters.base import (
     ProviderAdapter,
     RetryClientMixin,
     openai_shaped_usage,
+    provider_error_for,
     truncated_error,
 )
 from router_mcp.domain import progress
-from router_mcp.domain.errors import ModelUnavailable, ProviderError, ProviderUnavailable
+from router_mcp.domain.errors import (
+    ContentFiltered,
+    ModelUnavailable,
+    ProviderError,
+    ProviderUnavailable,
+)
 from router_mcp.domain.messages import Attachment, RouterRequest, RouterResponse, Usage
 from router_mcp.domain.task import Task
 from router_mcp.registry.models import RegistryModel
@@ -282,6 +288,11 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
                     max_tokens=payload.get("max_tokens"),
                     completion_tokens=(usage_block or {}).get("completion_tokens"),
                 )
+            if choice0.get("finish_reason") == "content_filter":
+                raise ContentFiltered(
+                    f"OpenRouter model {model.model_id} withheld the answer "
+                    "(finish_reason=content_filter)"
+                )
             logger.warning(
                 "OpenRouter parse miss model=%s sample=%s",
                 model.model_id,
@@ -360,7 +371,7 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
             message, code = top_error
             if code in (429, 500, 502, 503, 504):
                 raise ProviderUnavailable(f"OpenRouter temporarily unavailable: {message}")
-            raise ProviderError(message)
+            raise provider_error_for(message, provider_status=code if isinstance(code, int) else None)
 
         attachments: list[Attachment] = []
         entries = data.get("data") if isinstance(data, dict) else None
@@ -432,7 +443,7 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
             message, code = top_error
             if code in (429, 500, 502, 503, 504):
                 raise ProviderUnavailable(f"OpenRouter temporarily unavailable: {message}")
-            raise ProviderError(message)
+            raise provider_error_for(message, provider_status=code if isinstance(code, int) else None)
         return data if isinstance(data, dict) else {}
 
     async def _chat_with_web_search(

@@ -221,6 +221,43 @@ class Settings(BaseSettings):
         default=86400, alias="RETENTION_SWEEP_INTERVAL_SECONDS"
     )
 
+    # --- Notifications (a failed run reaches the operator) ---------------
+    # Telegram first: a bot token from @BotFather and the chat(s) to write to,
+    # comma separated (a personal chat id, or a group's negative id). Both empty
+    # means the channel is off and nothing is ever sent.
+    notify_telegram_bot_token: str | None = Field(default=None, alias="NOTIFY_TELEGRAM_BOT_TOKEN")
+    notify_telegram_chat_ids: str = Field(default="", alias="NOTIFY_TELEGRAM_CHAT_IDS")
+    notify_telegram_api_base: str = Field(
+        default="https://api.telegram.org", alias="NOTIFY_TELEGRAM_API_BASE"
+    )
+    # E-mail, the second channel: plain SMTP. On only when both a recipient and
+    # a host are set; STARTTLS on the usual submission port by default.
+    notify_email_to: str = Field(default="", alias="NOTIFY_EMAIL_TO")
+    notify_email_from: str | None = Field(default=None, alias="NOTIFY_EMAIL_FROM")
+    notify_smtp_host: str | None = Field(default=None, alias="NOTIFY_SMTP_HOST")
+    notify_smtp_port: int = Field(default=587, alias="NOTIFY_SMTP_PORT")
+    notify_smtp_user: str | None = Field(default=None, alias="NOTIFY_SMTP_USER")
+    notify_smtp_password: str | None = Field(default=None, alias="NOTIFY_SMTP_PASSWORD")
+    notify_smtp_starttls: bool = Field(default=True, alias="NOTIFY_SMTP_STARTTLS")
+    # Error codes (domain/errors.py `code`) that never page anyone: failures
+    # that are a property of the request, not of the service. A refused
+    # picture repeats for every retry of that picture and teaches the operator
+    # nothing; an empty account (`insufficient_credits`) is exactly what the
+    # channel exists for and is deliberately not in this list.
+    notify_mute_codes: str = Field(
+        default="content_filter,response_truncated,bad_request,image_too_large",
+        alias="NOTIFY_MUTE_CODES",
+    )
+    # Applications (`request_logs.app`) or callers (`external_user_id`) whose
+    # failures stay in the log only, comma separated — a test bench, a client
+    # known to send garbage. Empty means everyone's failures count.
+    notify_mute_apps: str = Field(default="", alias="NOTIFY_MUTE_APPS")
+    notify_mute_users: str = Field(default="", alias="NOTIFY_MUTE_USERS")
+    # The same failure (code + provider + model) is sent once per window; the
+    # repeats are counted and the count travels with the next message. 73 image
+    # refusals in a day must not be 73 messages.
+    notify_cooldown_seconds: int = Field(default=600, alias="NOTIFY_COOLDOWN_SECONDS")
+
     # --- Routing defaults (per modality) --------------------------------
     default_chat_model: str | None = Field(default=None, alias="DEFAULT_CHAT_MODEL")
     default_image_model: str | None = Field(default=None, alias="DEFAULT_IMAGE_MODEL")
@@ -233,6 +270,25 @@ class Settings(BaseSettings):
 
     def allowed_cwd_roots(self) -> list[str]:
         return [p.strip() for p in self.cli_allowed_cwd_roots.split(",") if p.strip()]
+
+    @staticmethod
+    def _csv(value: str | None) -> list[str]:
+        return [p.strip() for p in (value or "").split(",") if p.strip()]
+
+    def notify_chat_ids(self) -> list[str]:
+        return self._csv(self.notify_telegram_chat_ids)
+
+    def notify_recipients(self) -> list[str]:
+        return self._csv(self.notify_email_to)
+
+    def notify_muted_codes(self) -> set[str]:
+        return set(self._csv(self.notify_mute_codes))
+
+    def notify_muted_apps(self) -> set[str]:
+        return set(self._csv(self.notify_mute_apps))
+
+    def notify_muted_users(self) -> set[str]:
+        return set(self._csv(self.notify_mute_users))
 
 
 def load_settings() -> Settings:

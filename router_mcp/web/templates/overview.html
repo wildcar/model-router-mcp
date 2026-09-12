@@ -56,6 +56,20 @@
   </div>
 </section>
 
+{# Notifications sit right above the errors they are about: the operator who
+   wonders «почему мне не написали» sees the muted codes and the last outcomes
+   on the same screen as the failures themselves. #}
+<section class="card">
+  <h2>Оповещения</h2>
+  <p id="notify-state" class="hint">—</p>
+  <table class="kv"><tbody id="notify"></tbody></table>
+  <div class="row actions">
+    <button id="notify-test" type="button">Отправить пробное</button>
+    <span class="hint">Каналы и фильтры задаются в .env
+      (NOTIFY_TELEGRAM_*, NOTIFY_EMAIL_*, NOTIFY_MUTE_CODES).</span>
+  </div>
+</section>
+
 <section class="card">
   <h2>Последние ошибки</h2>
   <table id="errors"><thead><tr>

@@ -68,6 +68,56 @@ async function renderRetention() {
     !(state.logs_to_delete || state.blobs_to_delete || state.orphan_blobs);
 }
 
+// Why a failure sent nothing, in the operator's words. The keys are what
+// Notifier._note writes into `recent`.
+const OUTCOMES = {
+  sent: 'отправлено',
+  muted_code: 'код в тишине',
+  muted_app: 'приложение в тишине',
+  muted_user: 'метка в тишине',
+  no_channels: 'каналы не настроены',
+  throttled: 'повтор, в окне тишины',
+  failed: 'канал не ответил',
+};
+
+function kv(pairs) {
+  return pairs.map(([key, value]) => {
+    const tr = el('tr');
+    tr.appendChild(el('th', key));
+    tr.appendChild(el('td', value));
+    return tr;
+  });
+}
+
+async function renderNotifications() {
+  const state = await api('/notifications');
+  const channels = state.channels.map((c) => `${c.name} (${c.detail})`).join(', ');
+  $('notify-state').textContent = state.enabled
+    ? `Включены: ${channels}. Одна и та же ошибка — не чаще раза в `
+      + `${Math.round(state.cooldown_seconds / 60)} мин.`
+    : 'Выключены: ни один канал не настроен. Ошибки остаются только в журнале.';
+  const recent = state.recent.slice(0, 5).map((r) =>
+    `#${r.log_id} ${r.code} — ${OUTCOMES[r.outcome] || r.outcome}`
+    + (r.detail ? ` (${r.detail})` : ''));
+  fill($('notify'), kv([
+    ['Не шлются коды', state.muted_codes.join(', ') || 'все коды шлются'],
+    ['Не шлются приложения', state.muted_apps.join(', ') || '—'],
+    ['Не шлются метки', state.muted_users.join(', ') || '—'],
+    ['С запуска', `отправлено ${state.counts.sent} · в тишине ${state.counts.muted}`
+      + ` · повторов ${state.counts.throttled} · не доставлено ${state.counts.failed}`],
+    ['Последние', recent.join('\n') || 'ошибок с запуска не было'],
+  ]));
+  $('notify-test').disabled = !state.enabled;
+}
+
+async function sendTestNotification() {
+  const result = await api('/notifications/test', { method: 'POST' });
+  const detail = result.results
+    .map((r) => `${r.channel}: ${r.status === 'ok' ? 'доставлено' : r.detail}`).join('; ');
+  toast(result.ok ? `Пробное ушло — ${detail}` : `Не везде дошло — ${detail}`, !result.ok);
+  await renderNotifications();
+}
+
 async function purge() {
   const state = await api('/retention');
   const total = state.logs_to_delete + state.blobs_to_delete + state.orphan_blobs;
@@ -135,6 +185,7 @@ async function boot() {
   }
 
   await renderRetention();
+  await renderNotifications();
 
   // Nothing configured and nothing logged means this is a fresh install.
   if (!summary.models_active || (!summary.providers_usable && !day.requests)) {
@@ -151,5 +202,7 @@ async function boot() {
 
 $('purge').addEventListener('click',
   () => purge().catch((error) => toast(error.message, true)));
+$('notify-test').addEventListener('click',
+  () => sendTestNotification().catch((error) => toast(error.message, true)));
 
 boot().catch((error) => toast(`Не удалось собрать обзор: ${error.message}`, true));

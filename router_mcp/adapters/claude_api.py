@@ -16,8 +16,13 @@ from typing import Any
 
 import httpx
 
-from router_mcp.adapters.base import ProviderAdapter, RetryClientMixin, truncated_error
-from router_mcp.domain.errors import ProviderError, ProviderUnavailable
+from router_mcp.adapters.base import (
+    ProviderAdapter,
+    RetryClientMixin,
+    provider_error_for,
+    truncated_error,
+)
+from router_mcp.domain.errors import ContentFiltered, ProviderError, ProviderUnavailable
 from router_mcp.domain.messages import RouterRequest, RouterResponse, Usage
 from router_mcp.domain.task import Task
 from router_mcp.registry.models import RegistryModel
@@ -179,7 +184,7 @@ class ClaudeApiAdapter(RetryClientMixin, ProviderAdapter):
             raise ProviderError("Anthropic returned an unexpected payload")
         if data.get("type") == "error":
             err = data.get("error") or {}
-            raise ProviderError(str(err.get("message") or "Anthropic returned an error"))
+            raise provider_error_for(str(err.get("message") or "Anthropic returned an error"))
         blocks = data.get("content") or []
         parts = [
             b.get("text", "")
@@ -195,6 +200,8 @@ class ClaudeApiAdapter(RetryClientMixin, ProviderAdapter):
                     max_tokens=max_tokens,
                     completion_tokens=raw_usage.get("output_tokens"),
                 )
+            if data.get("stop_reason") == "refusal":
+                raise ContentFiltered("Anthropic declined to answer (stop_reason=refusal)")
             raise ProviderError("Anthropic returned an empty response")
         # Anthropic reports cache reads and writes *outside* `input_tokens`,
         # unlike the OpenAI-shaped providers. Usage's contract is that

@@ -208,3 +208,31 @@ class ModelUnavailable(ProviderError):
 
     code = "model_unavailable"
     http_status = 409
+
+
+class ContentFiltered(ProviderError):
+    """The provider's safety filter refused the input or withheld the output.
+
+    A property of the request, not of the service: the same picture gets the
+    same refusal from the same model, so `retriable` stays False, and the
+    operator is not paged about it by default (it is in `NOTIFY_MUTE_CODES`).
+    Replicate says «flagged as sensitive» / E005, OpenRouter «filtered due to
+    the prompt triggering our content management policy», Anthropic ends with
+    `stop_reason="refusal"`.
+    """
+
+    code = "content_filter"
+    http_status = 422
+
+
+class InsufficientCredits(ProviderError):
+    """The provider account has no balance left. An operator has to top it up.
+
+    The one provider error that no retry, fallback or prompt change fixes and
+    that every following request of the provider will repeat — which is why it
+    is the textbook case for a notification. OpenRouter answers HTTP 402
+    «Insufficient credits», DeepSeek 402 «Insufficient Balance».
+    """
+
+    code = "insufficient_credits"
+    http_status = 402

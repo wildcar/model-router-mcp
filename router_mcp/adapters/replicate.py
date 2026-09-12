@@ -31,7 +31,12 @@ from urllib.parse import urlparse
 
 import httpx
 
-from router_mcp.adapters.base import ProviderAdapter, RetryClientMixin, merge_params
+from router_mcp.adapters.base import (
+    ProviderAdapter,
+    RetryClientMixin,
+    merge_params,
+    provider_error_for,
+)
 from router_mcp.domain import progress
 from router_mcp.domain.errors import (
     AccessDenied,
@@ -370,7 +375,7 @@ class ReplicateAdapter(RetryClientMixin, ProviderAdapter):
         if status == "failed":
             tail = self._log_tail(prediction)
             detail = f"{error or 'no reason given'}"
-            raise ProviderError(
+            raise provider_error_for(
                 f"Replicate prediction failed: {detail[:300]}"
                 + (f" (log: {tail})" if tail else "")
             )

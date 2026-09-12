@@ -60,7 +60,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from router_mcp.adapters.base import MODEL_GONE_RE, ProviderAdapter
+from router_mcp.adapters.base import MODEL_GONE_RE, ProviderAdapter, provider_error_for
 from router_mcp.domain import progress
 from router_mcp.domain.errors import (
     AccessDenied,
@@ -761,7 +761,7 @@ class CodexOAuthAdapter(ProviderAdapter):
                                     "action": "choose an active model of codex-oauth",
                                 },
                             )
-                        raise ProviderError(message, provider_status=response.status_code)
+                        raise provider_error_for(message, provider_status=response.status_code)
                     return await read(response)
             except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError) as exc:
                 if attempt > self._retries:

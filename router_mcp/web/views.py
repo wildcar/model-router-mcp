@@ -406,7 +406,7 @@ def run_from_log(row: dict[str, Any]) -> dict[str, Any]:
         ignored_params=[],
         error=(
             {
-                "code": None,
+                "code": row.get("error_code"),
                 "message": row.get("error_message"),
                 "log_id": row.get("id"),
             }

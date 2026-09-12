@@ -24,7 +24,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, Form, Request, Response, UploadFile
 from pydantic import BaseModel
 
-from router_mcp.domain.errors import BadRequest, Conflict, NotFound
+from router_mcp.domain.errors import BadRequest, Conflict, NotConfigured, NotFound
 from router_mcp.domain.messages import (
     ATTACHMENT_ROLES,
     Attachment,
@@ -762,6 +762,29 @@ async def api_retention_purge(orphans: bool = True) -> dict[str, Any]:
     operator's back to soften a deletion they did not mean.
     """
     return await retention.purge(get_core(), orphans_too=orphans)
+
+
+@api_router.get("/notifications")
+async def api_notifications() -> dict[str, Any]:
+    """Which channels are on, what is muted, and what became of recent failures."""
+    notifier = get_core().notifier
+    if notifier is None:  # pragma: no cover - bootstrap always builds one
+        return {"enabled": False, "channels": [], "muted_codes": [], "recent": []}
+    return notifier.describe()
+
+
+@api_router.post("/notifications/test")
+async def api_notifications_test() -> dict[str, Any]:
+    """Send a test message to every channel and say how each one answered.
+
+    Answers 200 even when a channel failed: the point of the button is to see
+    the failure text next to the channel name, not a bare 502.
+    """
+    notifier = get_core().notifier
+    if notifier is None:  # pragma: no cover
+        raise NotConfigured("Оповещения не собраны")
+    results = await notifier.send_test()
+    return {"results": results, "ok": all(r["status"] == "ok" for r in results)}
 
 
 @api_router.get("/usage")
