@@ -8,7 +8,7 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 - What: `views.error_from_log(row, replayed=)` собирает ошибку из строки журнала (код из `error_code`, на старых строках из имени класса в `error_message`; тип, поставщик, модель, `provider_status`, `retriable`, флаг `replayed`); `RunRegistry` при повторе `client_request_id` из журнала отдаёт её вместо `code: replayed`; `run_from_log` использует тот же сборщик.
 - Why: приложение при повторе ключа получало `replayed` и теряло исходный код, из-за чего не могло перейти на ветвление по `code` и держало разбор по словам.
 - Files: router_mcp/web/{views,runs}.py, tests/test_runs.py, tests/test_web_views.py, AGENTS/SPEC.md
-- Next: деплой; проверить повтором ключа `replay-check-20260912`, посеянного до рестарта, что код `unknown_model` приходит с `replayed: true`.
+- Next: прод обновлён (`4c39ac1`): повтор ключа `replay-check-20260912` после рестарта вернул `unknown_model` + `replayed: true` без второй строки (23617); сказать приложению, что ветвление по `code` теперь держится и на повторе.
 
 ## 2026-09-12 · оповещения об ошибках: Telegram + почта, фильтр по кодам
 - What: пакет `notify/` (Notifier с mute-списками по коду/приложению/метке и окном повторов, каналы Telegram Bot API и SMTP); роутер зовёт `notifier.failed` из `_log_error` для сбоя, закрывшего строку; новые ошибки `ContentFiltered`/`InsufficientCredits` и `provider_error_for` в base + адаптерах (replicate, openrouter, codex-oauth, claude_api); колонка `request_logs.error_code`; ручки `/notifications` и `/notifications/test`; карточка «Оповещения» на «Обзоре»; настройки `NOTIFY_*`.
