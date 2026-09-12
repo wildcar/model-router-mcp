@@ -480,7 +480,9 @@ provider_status, retry_after_s, hint}}`.
 | `provider_error` / `provider_unavailable` / `access_denied` | 502 | upstream failure |
 
 `log_id` is written before the exception leaves the router and travels on the
-exception, so "open this failure in the log" works from every screen. MCP tools
+exception, so "open this failure in the log" works from every screen. A
+failure read back from the log (the run envelope's `error`, a replayed
+`client_request_id`) carries the same keys plus `replayed`. MCP tools
 get the same facts appended to the message text, since FastMCP hands clients
 `str(exception)`.
 
@@ -980,7 +982,14 @@ cancelled or interrupted run never records a cost of zero: the provider may have
 executed and billed the work, and zero is a claim.
 
 `client_request_id` is the idempotency key — looked up in the registry first and
-then in the log, so it still holds after a restart or an eviction. `batch_id`
+then in the log, so it still holds after a restart or an eviction. A repeated
+key answers with the stored outcome: the result envelope for a run that
+succeeded, and for one that failed the *original* error — `code`, `type`,
+`provider`, `model_id`, `provider_status`, `retriable` rebuilt from the row by
+`views.error_from_log` (the code from `error_code`; on rows older than that
+column, from the class name at the head of `error_message`) — with
+`replayed: true` added. There is no `replayed` code: a client that branches on
+`content_filter` must see it on the second submit as on the first. `batch_id`
 groups the N runs one operator action fanned out into; it is a log filter too.
 Concurrency is capped by `MAX_CONCURRENT_RUNS` (3): one SQLite connection behind
 one write lock serves the whole service.

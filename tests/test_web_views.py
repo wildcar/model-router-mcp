@@ -206,3 +206,36 @@ def test_model_row_keys_are_a_client_contract():
     } <= set(row)
     assert row["input_map"] == {"image": "input_image", "mask": "mask"}
     assert row["extra_params"] == ["scale"]
+
+
+# --- a stored failure is typed again -----------------------------------------
+
+from router_mcp.web.views import error_from_log  # noqa: E402
+
+
+def test_a_stored_failure_reads_its_code_from_the_column():
+    error = error_from_log({
+        "id": 7, "status": "error", "error_code": "insufficient_credits",
+        "error_message": "InsufficientCredits: HTTP 402: no money",
+        "service_provider_id": "openrouter", "model_id": "x", "provider_status": 402,
+    })
+    assert error["code"] == "insufficient_credits"
+    assert error["type"] == "InsufficientCredits"
+    assert error["retriable"] is False and error["replayed"] is False
+    assert error["provider"] == "openrouter" and error["provider_status"] == 402
+
+
+def test_a_row_from_before_the_column_is_typed_by_its_message():
+    error = error_from_log({
+        "id": 8, "status": "error", "error_code": None,
+        "error_message": "ContentFiltered: HTTP 400: filtered",
+    }, replayed=True)
+    assert error["code"] == "content_filter" and error["type"] == "ContentFiltered"
+    assert error["replayed"] is True
+    transient = error_from_log({"id": 9, "error_message": "RateLimited: HTTP 429"})
+    assert transient["code"] == "rate_limited" and transient["retriable"] is True
+
+
+def test_an_unrecognised_message_falls_back_to_provider_error():
+    error = error_from_log({"id": 10, "error_message": "something odd happened"})
+    assert error["code"] == "provider_error" and error["type"] == "ProviderError"

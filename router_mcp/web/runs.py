@@ -230,7 +230,7 @@ class RunRegistry:
         # The run happened, but not in this process (or long enough ago to have
         # been evicted). Rebuild enough of it from the log to answer with the
         # stored result instead of running the request a second time.
-        from router_mcp.web.views import run_from_log
+        from router_mcp.web.views import error_from_log, run_from_log
 
         run = Run(
             id=uuid.uuid4().hex,
@@ -249,15 +249,11 @@ class RunRegistry:
         if row.get("status") == "ok":
             run.result = envelope
         else:
-            run.error = {
-                "error": {
-                    "type": "Replayed",
-                    "code": "replayed",
-                    "message": row.get("error_message") or "",
-                    "log_id": row.get("id"),
-                    "retriable": False,
-                }
-            }
+            # The original code, not a «replayed» one: the client that repeats
+            # a key wants to know what happened to its request, and «it was
+            # answered from the log» is a flag on that answer, not a failure
+            # kind of its own.
+            run.error = {"error": error_from_log(row, replayed=True)}
         self._runs[run.id] = run
         self._by_key[client_request_id] = run.id
         self._evict()

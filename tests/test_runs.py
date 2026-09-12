@@ -187,6 +187,34 @@ async def test_the_same_idempotency_key_does_not_run_twice(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_a_replayed_failure_keeps_its_code(tmp_path):
+    """The client that repeats a key gets the failure it had, not «replayed»."""
+    adapter = SlowAdapter(fail=ProviderError("провайдер отказал", provider_status=400))
+    db, runs = await _setup(tmp_path, adapter)
+    try:
+        first = await runs.submit(_request(client_request_id="k-err"), label="m1")
+        await asyncio.wait_for(adapter.started.wait(), timeout=2)
+        adapter.gate.set()
+        await asyncio.wait_for(first.runner, timeout=2)
+        assert first.status == "error"
+
+        runs._runs.clear()
+        runs._by_key.clear()
+        again = await runs.submit(_request(client_request_id="k-err"), label="m1")
+        error = again.error["error"]
+        assert error["code"] == "provider_error"
+        assert error["type"] == "ProviderError"
+        assert error["message"].startswith("ProviderError: провайдер отказал")
+        assert error["log_id"] == first.error["error"]["log_id"]
+        assert error["provider"] == "vendor" and error["model_id"] == "m1"
+        assert error["provider_status"] == 400
+        assert error["replayed"] is True
+        assert first.error["error"].get("replayed") in (None, False)
+    finally:
+        await db.close()
+
+
+@pytest.mark.asyncio
 async def test_a_failed_run_closes_its_own_row(tmp_path):
     adapter = SlowAdapter(fail=ProviderError("провайдер отказал"))
     db, runs = await _setup(tmp_path, adapter)

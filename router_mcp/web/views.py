@@ -404,16 +404,54 @@ def run_from_log(row: dict[str, Any]) -> dict[str, Any]:
         steps=_json_or_empty(row.get("plan_json"), default=[]),
         attachments=attachments,
         ignored_params=[],
-        error=(
-            {
-                "code": row.get("error_code"),
-                "message": row.get("error_message"),
-                "log_id": row.get("id"),
-            }
-            if row.get("status") == "error"
-            else None
-        ),
+        error=error_from_log(row) if row.get("status") == "error" else None,
     )
+
+
+def _error_classes() -> dict[str, type[RouterError]]:
+    """Every error class by name, so a stored failure can be typed again."""
+    found: dict[str, type[RouterError]] = {}
+    pending = [RouterError]
+    while pending:
+        cls = pending.pop()
+        found[cls.__name__] = cls
+        pending.extend(cls.__subclasses__())
+    return found
+
+
+_ERROR_CLASSES = _error_classes()
+
+
+def error_from_log(row: dict[str, Any], *, replayed: bool = False) -> dict[str, Any]:
+    """The error half of the envelope, rebuilt from a failed row.
+
+    Same keys as `error_envelope`, so a caller that branches on `code` reads a
+    stored failure the way it read the live one. The code comes from
+    `error_code`; rows written before that column existed still start
+    `error_message` with the class name, which names the code just as well.
+    `replayed` marks an answer served from the log for a repeated
+    `client_request_id` — it used to *be* the code, and the original was lost.
+    """
+    message = str(row.get("error_message") or "")
+    type_name, sep, _ = message.partition(": ")
+    cls = _ERROR_CLASSES.get(type_name) if sep else None
+    code = row.get("error_code") or (cls.code if cls else None) or "provider_error"
+    if cls is None:
+        cls = next((c for c in _ERROR_CLASSES.values() if c.code == code), RouterError)
+        type_name = cls.__name__
+    return {
+        "type": type_name,
+        "code": code,
+        "message": message,
+        "provider": row.get("service_provider_id"),
+        "model_id": row.get("model_id"),
+        "log_id": row.get("id"),
+        "retriable": cls.retriable,
+        "provider_status": row.get("provider_status"),
+        "retry_after_s": None,
+        "hint": None,
+        "replayed": replayed,
+    }
 
 
 # The gallery caption is cut here, not in the browser: the column holds up to
