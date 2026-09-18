@@ -13,15 +13,20 @@ it as a managed service on this host.
 
 - ✅ GPT Image 2.5 заведён на проде, codex-oauth выключен (2026-09-18, просьба
   пользователя, без правок кода). Две manual-строки через консоль: openrouter,
-  `openai/gpt-image-2.5-sunburst` и `openai/gpt-image-2.5-flare`, задача
-  text-to-image, capability `images_api`, `image_price=0.04` как оценка
-  (`estimate`; каталожная ставка по `/models/{id}/endpoints` — image_output
-  $0.00003/токен, в GET /models моделей нет, поэтому сверка их не подтянет —
-  тот же случай, что meta/muse-image). `POST /api/plan` для sunburst даёт
-  `will_call` = сама модель, оценка $0.04 за картинку. Поставщик `codex-oauth`
+  `openai/gpt-image-2.5-sunburst` и `openai/gpt-image-2.5-flare`, задачи
+  text-to-image + image-to-image, capability `images_api`. В GET /models
+  моделей нет, сверка их не подтянет — тот же случай, что meta/muse-image;
+  `/models/{id}/endpoints` обе знает (image_output $0.00003/токен). Цена
+  сверена живьём: прогон 26172 на sunburst (маяк на закате, 1312×1199,
+  15,5 с) — провайдер списал $0.006605 (215 токенов картинки + 31 промпта),
+  первая оценка $0.04 была завышена в 6 раз. Теперь `image_price=0.0066`:
+  у sunburst manual по замеру (`price_is_verified`), у flare estimate по той
+  же каталожной ставке. Биллинг потокенный, сумма плавает с размером
+  картинки — расхождения ловить фильтром cost_mismatch; flare проверить
+  своим прогоном. `POST /api/plan` для image-to-image на sunburst даёт
+  `will_call` = сама модель, $0.0066 computed. Поставщик `codex-oauth`
   выключен тумблером (`enabled: false`), его строка `gpt-image-2` осталась в
-  реестре. Уточнить цену замером по первым прогонам (cost_mismatch); обе
-  модели умеют и image-to-image — задачу можно дописать, если понадобится.
+  реестре. Строка 26172 под `gpt-image-check` — моя проверочная, остаётся.
 - ✅ Повтор по `client_request_id` отдаёт исходный код ошибки (2026-09-12,
   вторая итерация дня). Раньше повтор, восстановленный из журнала, отвечал
   `code: replayed` и терял, чем именно упал прогон, поэтому приложение не

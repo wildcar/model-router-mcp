@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-09-18 · sunburst живьём: цена замером $0.0066, обеим GPT Image добавлен image-to-image
+- What: живой прогон text-to-image на `openai/gpt-image-2.5-sunburst` (строка 26172, 15,5 с, 1312×1199): провайдер списал $0.006605 (215 токенов картинки × $0.00003 + промпт), оценка $0.04 была завышена в 6 раз; обе строки перезаписаны upsert'ом (`POST /api/registry/models`) — задачи text-to-image + image-to-image, `image_price=0.0066` (sunburst — manual по замеру, flare — estimate по той же ставке).
+- Why: просьба пользователя сверить цену живьём и включить правку картинок.
+- Files: AGENTS/STATE.md, AGENTS/HISTORY.md
+- Next: биллинг потокенный — сумма плавает с размером картинки, смотреть cost_mismatch; flare проверить своим прогоном.
+
 ## 2026-09-18 · GPT Image 2.5 Sunburst и Flare заведены на проде, codex-oauth выключен
 - What: две manual-строки через консоль (`POST /api/registry/models`): openrouter, `openai/gpt-image-2.5-sunburst` и `openai/gpt-image-2.5-flare`, задача text-to-image, capability `images_api`, `image_price=0.04` как оценка (`price_source_kind=estimate`); поставщик `codex-oauth` выключен тумблером (`PATCH /api/registry/providers/codex-oauth`). Кода не трогали.
 - Why: просьба пользователя — роутер отказывал незнакомой модели, сверка с OpenRouter читает GET /models, где GPT Image нет (как в своё время meta/muse-image); `/models/{id}/endpoints` обе модели знает.
