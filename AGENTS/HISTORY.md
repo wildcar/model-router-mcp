@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-09-18 · GPT Image 2.5 Sunburst и Flare заведены на проде, codex-oauth выключен
+- What: две manual-строки через консоль (`POST /api/registry/models`): openrouter, `openai/gpt-image-2.5-sunburst` и `openai/gpt-image-2.5-flare`, задача text-to-image, capability `images_api`, `image_price=0.04` как оценка (`price_source_kind=estimate`); поставщик `codex-oauth` выключен тумблером (`PATCH /api/registry/providers/codex-oauth`). Кода не трогали.
+- Why: просьба пользователя — роутер отказывал незнакомой модели, сверка с OpenRouter читает GET /models, где GPT Image нет (как в своё время meta/muse-image); `/models/{id}/endpoints` обе модели знает.
+- Files: AGENTS/STATE.md, AGENTS/HISTORY.md
+- Next: уточнить $0.04 замером по первым прогонам (фильтр cost_mismatch); при надобности добавить задачу image-to-image — обе модели умеют править картинки.
+
 ## 2026-09-12 · повтор по ключу отдаёт исходный код ошибки
 - What: `views.error_from_log(row, replayed=)` собирает ошибку из строки журнала (код из `error_code`, на старых строках из имени класса в `error_message`; тип, поставщик, модель, `provider_status`, `retriable`, флаг `replayed`); `RunRegistry` при повторе `client_request_id` из журнала отдаёт её вместо `code: replayed`; `run_from_log` использует тот же сборщик.
 - Why: приложение при повторе ключа получало `replayed` и теряло исходный код, из-за чего не могло перейти на ветвление по `code` и держало разбор по словам.

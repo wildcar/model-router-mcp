@@ -11,6 +11,17 @@ it as a managed service on this host.
 
 ## Now
 
+- ✅ GPT Image 2.5 заведён на проде, codex-oauth выключен (2026-09-18, просьба
+  пользователя, без правок кода). Две manual-строки через консоль: openrouter,
+  `openai/gpt-image-2.5-sunburst` и `openai/gpt-image-2.5-flare`, задача
+  text-to-image, capability `images_api`, `image_price=0.04` как оценка
+  (`estimate`; каталожная ставка по `/models/{id}/endpoints` — image_output
+  $0.00003/токен, в GET /models моделей нет, поэтому сверка их не подтянет —
+  тот же случай, что meta/muse-image). `POST /api/plan` для sunburst даёт
+  `will_call` = сама модель, оценка $0.04 за картинку. Поставщик `codex-oauth`
+  выключен тумблером (`enabled: false`), его строка `gpt-image-2` осталась в
+  реестре. Уточнить цену замером по первым прогонам (cost_mismatch); обе
+  модели умеют и image-to-image — задачу можно дописать, если понадобится.
 - ✅ Повтор по `client_request_id` отдаёт исходный код ошибки (2026-09-12,
   вторая итерация дня). Раньше повтор, восстановленный из журнала, отвечал
   `code: replayed` и терял, чем именно упал прогон, поэтому приложение не
