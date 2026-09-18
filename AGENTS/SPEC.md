@@ -538,8 +538,10 @@ comparison is lexicographic.
 (OpenRouter's `usage.cost`; lifted out of the usage JSON, backfilled by
 migration). `cost_mismatch=true` selects rows where it sits more than 2% *and*
 more than $0.0001 away from `cost_usd` — excluding sources where the two are
-one number by construction (`provider`, `provider_notional`, `amortized`).
-The console marks such rows `≠` in the log table, the inspector prints the
+one number by construction (`provider`, `provider_notional`, `amortized`) —
+which since 2026-09-19 includes OpenRouter image tasks, booked at `usage.cost`
+(see «OpenRouter images endpoint»). The console marks such rows `≠` in the log
+table, the inspector prints the
 provider figure beside ours, and «Обзор» counts the last week's divergences as
 a work-list line. Both pricing gaps found so far (the web-search fee, the
 cache rates) had exactly this signature; the point of the filter is that the
@@ -615,8 +617,17 @@ the model is gone. Reference images ride in `input_references` in the same
 content-part shape as chat image parts, which is what makes `image-to-image`
 (declared by the adapter since this requirement) work: editing, composition,
 reference conditioning. App-identity headers (36) apply on this path as on
-the chat path. Billing: the answer carries `usage.cost`; the registry rate is
-`image_price` per image, entered by hand from a confirmed run.
+the chat path. Billing: the answer carries `usage.cost`, and for image tasks
+(`text-to-image`, `image-to-image`) on either endpoint the adapter hands it to
+accounting as `cost_override_usd`, so the row books the provider's sum with
+`cost_source='provider'`. The reason is that these models bill by token (the
+prompt and the input photo at one rate, the output image at another), so one
+`image_price` per picture cannot fit both drawing and editing: an edit on
+gpt-image-2.5 booked $0.005 against the provider's $0.016921 (log 26200). The
+registry's `image_price`, entered by hand from a confirmed run, remains the
+fallback for an answer without `usage.cost` and the figure the dry run quotes.
+Text tasks keep the registry arithmetic: there the per-token rate is real and
+the gap against `usage.cost` is the staleness signal reconciliation looks for.
 
 ### Models computed on this host (38)
 

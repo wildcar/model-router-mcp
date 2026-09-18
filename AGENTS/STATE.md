@@ -11,6 +11,20 @@ it as a managed service on this host.
 
 ## Now
 
+- ✅ Картинки OpenRouter считаются по сумме поставщика (2026-09-19, задача от
+  agentish). Адаптер OpenRouter для задач text-to-image и image-to-image в
+  обоих путях (`/chat/completions` и `/images`) кладёт `usage.cost` в
+  `RouterResponse.cost_override_usd`; `compute_cost` берёт её первым правилом,
+  строка получает `cost_source: provider`, отметка «≠» пропадает сама (фильтр
+  cost_mismatch исключает источник `provider`). Без `usage.cost` в ответе —
+  прежний расчёт по `image_price`. Текстовые задачи не тронуты: там ставка
+  реестра честная потокенная, и расхождение с суммой поставщика — сигнал
+  устаревшей цены, ради которого сверка и заведена. Причина: линейка
+  gpt-image-2.5 биллится по знакам (вход $8/1М, выход $30/1М), одной цены за
+  картинку нет — правка (строка 26200) записалась $0,005 против списанных
+  $0,016921, потолок расходов в agentish врал втрое. Строки реестра не
+  менялись. Тесты: `tests/test_openrouter_images.py` (пять новых, включая
+  сквозной через `ModelRouter.dispatch` и фильтр cost_mismatch).
 - ✅ GPT Image 2.5 заведён на проде, codex-oauth выключен (2026-09-18, просьба
   пользователя, без правок кода). Две manual-строки через консоль: openrouter,
   `openai/gpt-image-2.5-sunburst` и `openai/gpt-image-2.5-flare`, задачи

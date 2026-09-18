@@ -307,12 +307,13 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
             usage.images = len(image_urls)
 
         raw_usage = data.get("usage") if isinstance(data, dict) else None
+        provider_cost = self._reported_cost(raw_usage)
         raw_meta: dict[str, Any] = {
             "finish_reason": choice0.get("finish_reason"),
             "provider_request_id": data.get("id") if isinstance(data, dict) else None,
             # Kept beside the registry-based figure rather than replacing it:
             # the difference between the two is the staleness signal.
-            "provider_cost_usd": self._reported_cost(raw_usage),
+            "provider_cost_usd": provider_cost,
         }
         if web_search:
             # What was asked for and what actually ran. The ladder may have
@@ -328,6 +329,7 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
             text=text or None,
             attachments=attachments,
             raw_meta=raw_meta,
+            cost_override_usd=self._image_cost_override(request, provider_cost),
         )
 
     async def _generate_image(
@@ -403,6 +405,7 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
             images=len(attachments),
             raw=raw_usage,
         )
+        provider_cost = self._reported_cost(raw_usage)
         return RouterResponse(
             task=request.task,
             provider=self.name,
@@ -411,9 +414,10 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
             attachments=attachments,
             raw_meta={
                 "provider_request_id": data.get("id") if isinstance(data, dict) else None,
-                "provider_cost_usd": self._reported_cost(raw_usage),
+                "provider_cost_usd": provider_cost,
                 "endpoint": "/images",
             },
+            cost_override_usd=self._image_cost_override(request, provider_cost),
         )
 
     async def _chat_data(
@@ -718,6 +722,31 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
             return float(value) if value is not None else None
         except (TypeError, ValueError):
             return None
+
+    @staticmethod
+    def _image_cost_override(
+        request: RouterRequest, provider_cost: float | None
+    ) -> float | None:
+        """The provider's sum as the booked cost — for image tasks only.
+
+        An image row carries one `image_price` per picture, but OpenRouter's
+        image models are billed by token (prompt text and input photo at one
+        rate, the output image at another), so no single figure fits both
+        drawing and editing: an edit on gpt-image-2.5 was booked at a third of
+        what the provider charged (log 26200). The sum OpenRouter reports is
+        what was actually charged, so for images it is booked as-is, with
+        `cost_source: "provider"`. The registry rate remains the fallback for
+        an answer without `usage.cost`.
+
+        Text tasks are deliberately left alone: there the registry rate is a
+        real per-token price, and the gap between it and the provider's sum is
+        the staleness signal the reconciliation filter exists to catch.
+        """
+        if request.task not in IMAGE_TASKS:
+            return None
+        if provider_cost is None or provider_cost < 0:
+            return None
+        return provider_cost
 
     @staticmethod
     def _extract_top_level_error(payload: Any) -> tuple[str, int | str | None] | None:
