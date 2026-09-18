@@ -8,7 +8,7 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 - What: `OpenRouterAdapter._image_cost_override` — для задач text-to-image/image-to-image в обоих путях (`/chat/completions`, `/images`) `usage.cost` идёт в `RouterResponse.cost_override_usd`; строка журнала получает `cost_source: provider`, «≠» пропадает; без `usage.cost` — прежний расчёт по `image_price`; текстовые задачи не тронуты.
 - Why: задача от agentish: gpt-image-2.5 биллится по знакам, одной цены за картинку нет — правка (строка 26200) записалась $0,005 против списанных $0,016921, потолок расходов семьи в agentish врал втрое.
 - Files: router_mcp/adapters/openrouter.py, tests/test_openrouter_images.py, AGENTS/SPEC.md
-- Next: деплой и живая правка на sunburst — cost_usd в строке должен совпасть с usage.cost.
+- Next: прод обновлён 22:03 UTC (`e755443`); живая правка на sunburst (строка 26201) записала `cost_usd=0.032361 provider` = usage.cost, cost_mismatch пуст, /usage по пользователю сходится. Сказать agentish: потолок по total_usd теперь честный, старые строки 26199–26200 не пересчитаны.
 
 ## 2026-09-18 · sunburst живьём: цена замером $0.0066, обеим GPT Image добавлен image-to-image
 - What: живой прогон text-to-image на `openai/gpt-image-2.5-sunburst` (строка 26172, 15,5 с, 1312×1199): провайдер списал $0.006605 (215 токенов картинки × $0.00003 + промпт), оценка $0.04 была завышена в 6 раз; обе строки перезаписаны upsert'ом (`POST /api/registry/models`) — задачи text-to-image + image-to-image, `image_price=0.0066` (sunburst — manual по замеру, flare — estimate по той же ставке).

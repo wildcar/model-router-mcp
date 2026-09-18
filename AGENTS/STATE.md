@@ -24,7 +24,14 @@ it as a managed service on this host.
   картинку нет — правка (строка 26200) записалась $0,005 против списанных
   $0,016921, потолок расходов в agentish врал втрое. Строки реестра не
   менялись. Тесты: `tests/test_openrouter_images.py` (пять новых, включая
-  сквозной через `ModelRouter.dispatch` и фильтр cost_mismatch).
+  сквозной через `ModelRouter.dispatch` и фильтр cost_mismatch). Прод
+  обновлён 2026-09-18 22:03 UTC (`e755443`); живая правка на sunburst
+  (строка 26201, пользователь `gpt-image-cost-check`, тот же входной снимок,
+  что в 26200): 1485 знаков входа + 686 картинки, поставщик списал
+  $0.032361 — в строке `cost_usd=0.032361`, `cost_source=provider`, фильтр
+  cost_mismatch пуст, `/api/v1/usage?user=gpt-image-cost-check` даёт
+  `total_usd=0.032361`. Строка 26201 моя проверочная, остаётся. Строки
+  26199–26200 остались с прежними $0,005 — пересчёта старых строк не было.
 - ✅ GPT Image 2.5 заведён на проде, codex-oauth выключен (2026-09-18, просьба
   пользователя, без правок кода). Две manual-строки через консоль: openrouter,
   `openai/gpt-image-2.5-sunburst` и `openai/gpt-image-2.5-flare`, задачи
