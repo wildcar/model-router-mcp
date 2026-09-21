@@ -31,8 +31,18 @@ it as a managed service on this host.
   `cost_override` не ставится, это текстовая задача. Строки в dev-реестре
   заведены как manual, цена скопирована из ответа `/endpoints`. Тесты:
   `tests/test_openrouter_decisions.py` (24). Живая проверка на dev: строки 5-9
-  локальной базы, в том числе вызов через MCP `tools/call`. Прод: см.
-  следующую итерацию.
+  локальной базы, в том числе вызов через MCP `tools/call`. Прод обновлён
+  2026-09-21 08:55 UTC (`522dc5e`), обе строки заведены через
+  `POST /api/v1/registry/models` (manual, вендор typesafe, задача
+  `text-to-decisions`). Живая проверка под пользователем `jev-deploy-check`:
+  строка 26747 (`typesafe/jev-1.13`, структурный state, три вопроса, 460
+  входных токенов, $0,00001932, у поставщика та же сумма, 508 мс) и строка
+  26748 (`~typesafe/jev-latest`, ответил `typesafe/jev-1.13-20260917`,
+  $0,000011844, 275 мс). Фильтр cost_mismatch по ним пуст, `/usage` даёт
+  `total_usd=0.000031164`. В инвентаре MCP на проде `decide` виден. Строки
+  26747-26748 мои проверочные, остаются. Что сказать agentish: инструмент
+  `decide(external_user_id, questions, state|text, model_id?)`, ответы в
+  `answers`, псевдоним свежего выпуска `~typesafe/jev-latest`.
 - ✅ Картинки OpenRouter считаются по сумме поставщика (2026-09-19, задача от
   agentish). Адаптер OpenRouter для задач text-to-image и image-to-image в
   обоих путях (`/chat/completions` и `/images`) кладёт `usage.cost` в

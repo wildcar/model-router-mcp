@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-09-21 · Jev на проде: строки заведены, decide проверен живьём
+- What: прод обновлён 08:55 UTC (`522dc5e`); строки `typesafe/jev-1.13` и `~typesafe/jev-latest` заведены через `POST /api/v1/registry/models` (manual, задача text-to-decisions, вход $0,042 за 1M, выход $0, 32K); живой `POST /api/v1/decide` под `jev-deploy-check`: строка 26747 (jev-1.13, три вопроса, $0,00001932, у поставщика столько же, 508 мс) и 26748 (псевдоним, ответил `jev-1.13-20260917`, $0,000011844, 275 мс); cost_mismatch пуст, `decide` в инвентаре MCP.
+- Why: закрыть просьбу пользователя добавить модель в роутинг и убедиться, что деньги сходятся с поставщиком.
+- Files: AGENTS/STATE.md, AGENTS/HISTORY.md
+- Next: рассказать agentish про `decide` и про имя `~typesafe/jev-latest`; при выходе нового Jev сверить цену псевдонима с `/models/{id}/endpoints`.
+
 ## 2026-09-21 · модель решений Jev: задача text-to-decisions и инструмент decide
 - What: новая задача `text-to-decisions` (текст на входе, JSON с ответами на выходе, группа chat). `OpenRouterAdapter._decide` шлёт `{model, state, questions}` на `POST /systemone` (тот же вызов, что `/api/alpha/decisions`), проверяет форму вопросов (noul, choice, score) до запроса, возвращает `answers` и `served_model_id`. Инструмент MCP `decide`, ручка `POST /api/v1/decide`, шорткат `questions` и `state` на `/runs`, в консоли JSON-поля (тип `json` рисуется как textarea). Каталожный разбор понимает `text->decisions`, вендор берётся без тильды. Строки `typesafe/jev-1.13` и `~typesafe/jev-latest` заведены как manual (вход $0,042 за 1M, выход $0, контекст 32K).
 - Why: просьба пользователя добавить typesafe/jev-1.13 и jev-latest. `/chat/completions` их отвергает с 400, а «typesafe/jev-latest» у OpenRouter не существует, псевдоним пишется `~typesafe/jev-latest`.
