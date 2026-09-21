@@ -221,6 +221,24 @@ PARAM_SPECS: dict[str, dict[str, Any]] = {
         "Передаётся движку как есть; пусто — модель по умолчанию у движка",
         default=None,
     ),
+    # The decisions call (TypeSafe Jev through OpenRouter). `questions` is the
+    # whole point of the task, so it is a parameter only in the sense that the
+    # form has nowhere else to put a JSON object; `state` is optional and
+    # replaces the prompt when the context is structured rather than prose.
+    "questions": _param(
+        "questions", "json", "Вопросы",
+        "JSON-объект, где ключ - имя вопроса, а значение - {type, instructions, "
+        "criteria}. type бывает noul (да или нет), choice (criteria - объект, "
+        "где ключ - вариант, значение - его описание) и score (criteria - список "
+        "ступеней шкалы по порядку)",
+        default=None,
+    ),
+    "state": _param(
+        "state", "json", "Контекст как JSON",
+        "Объект или массив вместо текста слева, модель судит его целиком. "
+        "Пусто - судит текст",
+        default=None,
+    ),
 }
 
 

@@ -30,6 +30,7 @@ uvicorn router_mcp.main:app --host 127.0.0.1 --port 8000
 |------|---------|
 | `list_models(modality?, tier?, provider?)` | List registered models |
 | `chat(external_user_id, text?/messages?, model_id?, tier?, provider?, params?)` | Route a chat request; returns text + usage + cost |
+| `decide(external_user_id, questions, state?/text?, model_id?, provider?)` | Typed questions about a text (TypeSafe Jev via OpenRouter); returns `answers` with probabilities + cost |
 | `generate_image(external_user_id, prompt, model_id?, provider?, params?)` | Generate an image; returns base64/URLs + cost |
 | `transcribe(external_user_id, audio_b64, mime?, model_id?, provider?)` | Speech-to-text |
 | `synthesize_speech(external_user_id, text, voice?, model_id?, provider?)` | Text-to-speech; returns base64 audio |

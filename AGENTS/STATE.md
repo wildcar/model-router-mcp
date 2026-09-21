@@ -11,6 +11,28 @@ it as a managed service on this host.
 
 ## Now
 
+- ✅ Модель решений Jev заведена в роутинг (2026-09-21, просьба пользователя
+  добавить `typesafe/jev-1.13` и `jev-latest`). Модель необычная. Ручка
+  `/chat/completions` её отвергает с кодом 400 («is a decisions model … Use
+  the /api/alpha/decisions endpoint»), в `GET /models` её нет (как и GPT
+  Image), а `/models/{id}/endpoints` знает: модальность `text->decisions`,
+  вход $0,042 за 1M, выход бесплатный, контекст 32K. Правильное имя для
+  «latest» у OpenRouter пишется с тильдой, `~typesafe/jev-latest` (псевдоним на
+  свежий выпуск Jev); `typesafe/jev-latest` без тильды отвечает «does not
+  exist». Сделано: задача `text-to-decisions` (текст на входе, JSON с ответами
+  на выходе, группа chat), в адаптере OpenRouter путь `POST /systemone` (тот же
+  вызов, что `/api/alpha/decisions`, но под базовым URL v1; ответы, id и цена
+  живьём совпадают), проверка формы вопросов до запроса (типы noul, choice,
+  score; instructions; criteria), инструмент MCP `decide(state|text,
+  questions)`, ручка `POST /api/v1/decide`, шорткат на `/runs`, в консоли поля
+  `questions` и `state` типа json (textarea). Деньги считаются по реестру,
+  входные токены на ставку, и с суммой поставщика сходятся точно: 476 токенов
+  по $0,042 за 1M дают $0,000019992, столько же назвал OpenRouter.
+  `cost_override` не ставится, это текстовая задача. Строки в dev-реестре
+  заведены как manual, цена скопирована из ответа `/endpoints`. Тесты:
+  `tests/test_openrouter_decisions.py` (24). Живая проверка на dev: строки 5-9
+  локальной базы, в том числе вызов через MCP `tools/call`. Прод: см.
+  следующую итерацию.
 - ✅ Картинки OpenRouter считаются по сумме поставщика (2026-09-19, задача от
   agentish). Адаптер OpenRouter для задач text-to-image и image-to-image в
   обоих путях (`/chat/completions` и `/images`) кладёт `usage.cost` в

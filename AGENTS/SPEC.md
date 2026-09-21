@@ -57,7 +57,7 @@ on it; adapters never touch storage/mcp directly.
 4. ✅ Routing: explicit `model_id`, or task + tier/provider hints, or a per-billing-group default. A configured `DEFAULT_*_MODEL` outranks the price scan when the request carries no hints at all (any hint returns the request to the scan; a default that cannot do the task is ignored).
 5. ✅ Per-request/response logging by `external_user_id` with token usage and cost.
 6. ✅ Cost computation from registry prices; amortized-subscription hook (table + field).
-7. ✅ MCP tools over Streamable HTTP: `list_models`, `chat`, `generate_image`, `transcribe`, `synthesize_speech`, `run_cli`, `get_usage`.
+7. ✅ MCP tools over Streamable HTTP: `list_models`, `chat`, `decide`, `generate_image`, `edit_image`, `transcribe`, `synthesize_speech`, `run_cli`, `get_usage`.
 8. ✅ Web UI: test console (chat/image/stt/tts) + registry admin (providers: `enabled` admin toggle + live `configured` state, manual models) + logs/usage.
 9. ✅ Modality breadth: image (Codex OAuth), STT (Deepgram), TTS (ElevenLabs). [Phase 2]
 10. ✅ Direct adapters: DeepSeek (OpenAI-compatible), Claude API (Anthropic Messages). [Phase 3]
@@ -89,6 +89,7 @@ on it; adapters never touch storage/mcp directly.
 36. ✅ Application identity per request (`app_url` / `app_name`): the site the app runs on wins, a plain name is the fallback, and the effective identity is logged, filterable in the journal and forwarded to providers that have such a parameter (OpenRouter's `HTTP-Referer` / `X-Title`). A request with no identity is made as the router itself: `https://mr.wildcar.org` (`SELF_APP_URL`).
 37. ✅ OpenRouter's dedicated images endpoint (`POST /images`): rows marked with the `images_api` capability — models absent from `GET /models` entirely, meta/muse-image first — generate and edit images there (`input_references` for reference photos), and an unmarked row follows the chat endpoint's own «use /api/v1/images» 404 instead of dying on it. The adapter now declares `image-to-image`.
 38. ✅ A provider whose models are computed in this process (`local`): an adapter that calls a Python function instead of an endpoint and is otherwise indistinguishable — the same `runs`, the same error envelope, a `usage` row at exactly zero. Inference runs in a thread pool behind a semaphore (`LOCAL_MAX_CONCURRENCY`), under a deadline (`timeout`, retriable); missing weights are `model_not_loaded`. First model: UVDoc, straightening a photographed page (`local/uvdoc`). [ADR-0009]
+40. ✅ Decision models (`text-to-decisions`): typed questions about a text — `noul` (yes/no), `choice` (one of N), `score` (an ordered scale) — answered with probabilities on OpenRouter's `POST /systemone` (the same call as `/api/alpha/decisions`). First model: TypeSafe Jev (`typesafe/jev-1.13`, alias `~typesafe/jev-latest`), absent from `GET /models` like GPT Image, rows typed in. Billed as `chat`: input tokens at the registry rate, output free. MCP tool `decide`, HTTP `POST /api/v1/decide`, the same shorthand on `/runs`.
 
 ## Tasks, media and billing groups (30)
 
@@ -112,6 +113,7 @@ and belongs to exactly one billing group:
 | `text-to-audio` | text | | audio | `audio` |
 | `text-to-video` | text | | video | `video` |
 | `image-to-video` | image | text | video | `video` |
+| `text-to-decisions` | text | | text | `chat` |
 | `cli` | text | | text | `cli` |
 
 `domain/task.py` owns the table. `validate_task_inputs()` is the single check that
@@ -629,6 +631,43 @@ fallback for an answer without `usage.cost` and the figure the dry run quotes.
 Text tasks keep the registry arithmetic: there the per-token rate is real and
 the gap against `usage.cost` is the staleness signal reconciliation looks for.
 
+### Decisions: typed questions about a text (40)
+
+A decision model is not a chat model with a stricter prompt. TypeSafe's Jev
+(`architecture.modality = "text->decisions"`) takes a *state* — a string, or
+a JSON object/array of related context — and a set of named, typed
+questions, and answers each with probabilities: `noul` → `{noul: 0.96}`,
+`choice` → `{choice, confidence, probabilities}`, `score` →
+`{score, confidence, probabilities, legend}`. A question is
+`{type, instructions, criteria}`; `criteria` is `{true, false}` (optional)
+for `noul`, `option → description` for `choice`, an ordered list of scale
+steps for `score`. `/chat/completions` refuses these models with 400 («is a
+decisions model … Use the /api/alpha/decisions endpoint instead»); the call
+lives under v1 as `POST /systemone` (TypeSafe's own shape, identical answers
+and cost — checked live 2026-09-21), which is the path the adapter uses.
+
+The task is `text-to-decisions`: requires text, produces text (the answers
+as JSON in `response.text`, and in their own shape in `raw_meta.answers`),
+billed in `chat`. The state is `request.text` when it is a string and
+`params["state"]` when it is structured (the log then shows its JSON text);
+`params["questions"]` is the object or its JSON text, checked for shape in
+the adapter before any money moves, because the provider's own 400 is a zod
+dump. Pinning a chat row for this task is refused by the router as a task
+mismatch, like every other task (30). Entry points: MCP `decide(state |
+text, questions, …)`, `POST /api/v1/decide`, and `questions` / `state` as
+top-level shorthand on `/runs` (the console sends them inside `params`,
+drawn as JSON fields from `SUPPORTED_PARAMS`).
+
+Money: the endpoint prices input tokens and gives the output away
+(`pricing.completion = 0`), so the registry arithmetic is exact — 476 input
+tokens × $0.042/M = the provider's own `usage.cost` of $0.000019992 — and
+stays in force; `usage.cost` is kept as `provider_cost_usd`, the staleness
+check, like every text task. The rows are `manual` (the sync cannot see
+them: `GET /models` omits the family, `/models/{id}/endpoints` knows it), the
+price copied from that endpoints answer. `~typesafe/jev-latest` is
+OpenRouter's alias for the newest Jev release (its endpoints list is empty —
+it redirects); the dated id that answered comes back as `served_model_id`.
+
 ### Models computed on this host (38)
 
 Contract for requirement 38. Reasoning: `docs/adr/0009-local-provider.md`.
@@ -1142,7 +1181,7 @@ See `AGENTS/STATE.md` for the live Now / Next snapshot.
 
 ## Data sources & dependencies
 
-- OpenRouter `/models` + `/chat/completions` (requires `OPENROUTER_API_KEY`).
+- OpenRouter `/models` + `/chat/completions` + `/images` + `/systemone` (decisions) (requires `OPENROUTER_API_KEY`).
 - Reused connection patterns originate in sibling repos: `ort_bot` (OpenRouter,
   Deepgram, ElevenLabs, Codex-image, model cache, DB/config patterns),
   `telecodex_bot` (Codex CLI runner), `openai-auth-sync` (OAuth token sync).

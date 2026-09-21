@@ -106,6 +106,25 @@ class ChatBody(BaseModel):
     app_name: str | None = None
 
 
+class DecideBody(BaseModel):
+    """Typed questions about a text (`text-to-decisions`, TypeSafe Jev).
+
+    `state` is what the model judges: a string, or a JSON object/array of
+    related context; `text` is accepted as an alias for a string state.
+    `questions` is name → {type: noul|choice|score, instructions, criteria}.
+    """
+
+    external_user_id: str = "web-tester"
+    questions: dict[str, Any]
+    state: str | dict[str, Any] | list[Any] | None = None
+    text: str | None = None
+    model_id: str | None = None
+    provider: str | None = None
+    fallback: dict[str, Any] | str | None = None
+    app_url: str | None = None
+    app_name: str | None = None
+
+
 class ImageBody(BaseModel):
     external_user_id: str = "web-tester"
     prompt: str
@@ -324,6 +343,54 @@ async def api_chat(body: ChatBody, http_request: Request) -> dict[str, Any]:
     )
 
 
+def _decision_inputs(
+    state: str | dict[str, Any] | list[Any] | None,
+    text: str | None,
+    params: dict[str, Any],
+) -> str:
+    """Fold a decisions request's state into (`text`, `params["state"]`).
+
+    A string state is the prompt; a structured one travels to the provider in
+    `params["state"]` and is written to the log as its JSON text, so the
+    journal shows what was judged either way.
+    """
+    if state is None or state == "":
+        state = text
+    if state is None or state == "":
+        raise BadRequest("Provide the text to judge in `state` (or `text`)")
+    if isinstance(state, str):
+        return state
+    params["state"] = state
+    return json.dumps(state, ensure_ascii=False)
+
+
+@api_router.post("/decide")
+async def api_decide(body: DecideBody, http_request: Request) -> dict[str, Any]:
+    channel, client_id = _channel(http_request)
+    params: dict[str, Any] = {"questions": body.questions}
+    prompt = _decision_inputs(body.state, body.text, params)
+    request = RouterRequest(
+        task=Task.TEXT_TO_DECISIONS,
+        external_user_id=body.external_user_id,
+        model_id=body.model_id,
+        provider_hint=body.provider,
+        text=prompt,
+        params=params,
+        fallback=parse_fallback(body.fallback),
+        channel=channel,
+        client_id=client_id,
+        app_url=body.app_url,
+        app_name=body.app_name,
+    )
+    result = await get_core().router.dispatch(request)
+    return run_from_dispatch(result, request) | {
+        # The Run envelope carries the answers as `text`; the parsed shape is
+        # what an application actually reads.
+        "answers": result.response.raw_meta.get("answers"),
+        "served_model_id": result.response.raw_meta.get("served_model_id"),
+    }
+
+
 @api_router.post("/image")
 async def api_image(body: ImageBody, http_request: Request) -> dict[str, Any]:
     channel, client_id = _channel(http_request)
@@ -453,6 +520,10 @@ class RunBody(BaseModel):
     tier: str | None = None
     provider: str | None = None
     voice: str | None = None           # tts shorthand, as on /api/tts
+    # decisions shorthand, as on /api/decide: the console sends both inside
+    # `params`, an API caller may name them at the top level.
+    questions: dict[str, Any] | None = None
+    state: str | dict[str, Any] | list[Any] | None = None
     engine: str | None = None          # cli: "codex" | "claude"
     cwd: str | None = None
     timeout_sec: int | None = None
@@ -505,6 +576,14 @@ def _router_request(body: RunBody, http_request: Request | None) -> RouterReques
     provider = body.provider
     if task is Task.TEXT_TO_SPEECH and body.voice:
         params["voice"] = body.voice
+    text = body.text if body.text is not None else body.prompt
+    if task is Task.TEXT_TO_DECISIONS:
+        if body.questions is not None:
+            params["questions"] = body.questions
+        state = body.state if body.state is not None else params.get("state")
+        if state is not None or text:
+            params.pop("state", None)
+            text = _decision_inputs(state, text, params)
     if task is Task.CLI:
         engine = (body.engine or "codex").strip().lower()
         if engine not in ("codex", "claude"):
@@ -522,7 +601,6 @@ def _router_request(body: RunBody, http_request: Request | None) -> RouterReques
         refs.append((body.attachment_ref, body.attachment_kind, None))
     attachments = [_attachment_from_ref(ref, kind, role) for ref, kind, role in refs]
 
-    text = body.text if body.text is not None else body.prompt
     # One check for every task, from the task's own signature. The old hard-coded
     # "распознавание needs a file" left image-to-image with no message at all.
     try:

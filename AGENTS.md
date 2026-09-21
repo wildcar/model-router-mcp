@@ -113,8 +113,8 @@ router_mcp/
   accounting/  compute_cost (per-request / amortized hook)
   storage/     aiosqlite Database (service_providers, registry_models, subscriptions, request_logs)
   blobs/       on-disk blob store (binary payloads)
-  mcp_server/  FastMCP tools (list_models, chat, generate_image, transcribe,
-               synthesize_speech, run_cli, get_usage) + serialize
+  mcp_server/  FastMCP tools (list_models, chat, decide, generate_image, edit_image,
+               transcribe, synthesize_speech, run_cli, get_usage) + serialize
   web/         JSON API (/api/*), Jinja2 pages (/, /registry, /logs), static, /blobs
 ```
 

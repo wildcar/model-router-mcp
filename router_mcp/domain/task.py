@@ -60,6 +60,13 @@ class Task(str, Enum):
     TEXT_TO_AUDIO = "text-to-audio"  # music and sound effects, not speech
     TEXT_TO_VIDEO = "text-to-video"
     IMAGE_TO_VIDEO = "image-to-video"
+    # Typed answers about a text: yes/no, one of N labels, a point on an
+    # ordered scale. Not in HuggingFace's vocabulary — the nearest tags there
+    # (`text-classification`, `zero-shot-classification`) name one question
+    # each, while a decision model answers a *set* of differently typed
+    # questions in one call. Spelled the way OpenRouter names the modality
+    # (`text->decisions`); the first model is TypeSafe's Jev.
+    TEXT_TO_DECISIONS = "text-to-decisions"
     # The outlier: running a local agent CLI is not a media transform at all.
     # Kept in the same enum because it is a thing a caller asks for and a thing
     # a model row declares; `is_media_transform=False` marks it so anything
@@ -155,6 +162,10 @@ TASKS: dict[Task, TaskSignature] = {
     Task.TEXT_TO_AUDIO: _sig([Media.TEXT], [Media.AUDIO], Modality.AUDIO),
     Task.TEXT_TO_VIDEO: _sig([Media.TEXT], [Media.VIDEO], Modality.VIDEO),
     Task.IMAGE_TO_VIDEO: _sig([Media.IMAGE], [Media.VIDEO], Modality.VIDEO, [Media.TEXT]),
+    # The state under judgement is text (a string, or JSON the caller hands
+    # over structured); the answers come back as JSON text. Billed like chat:
+    # the provider prices input tokens and gives the output away.
+    Task.TEXT_TO_DECISIONS: _sig([Media.TEXT], [Media.TEXT], Modality.CHAT),
     Task.CLI: _sig([Media.TEXT], [Media.TEXT], Modality.CLI, is_media_transform=False),
 }
 

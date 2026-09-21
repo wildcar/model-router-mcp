@@ -1,4 +1,4 @@
-"""OpenRouter adapter (chat + image-in-chat).
+"""OpenRouter adapter (chat, image-in-chat, images endpoint, decisions).
 
 Ports the response-parsing helpers from ort_bot/services/openrouter.py
 (text extraction, image-output collection) and adds token-usage capture, which
@@ -28,6 +28,7 @@ from router_mcp.adapters.base import (
 )
 from router_mcp.domain import progress
 from router_mcp.domain.errors import (
+    BadRequest,
     ContentFiltered,
     ModelUnavailable,
     ProviderError,
@@ -71,6 +72,20 @@ IMAGES_ONLY_RE = re.compile(r"images endpoint", re.IGNORECASE)
 # "wrong endpoint" rather than "model gone".
 IMAGE_TASKS = (Task.TEXT_TO_IMAGE, Task.IMAGE_TO_IMAGE)
 
+# Decision models (TypeSafe's Jev, `architecture.modality = "text->decisions"`)
+# answer on neither endpoint above: `/chat/completions` refuses them with 400
+# «is a decisions model … Use the /api/alpha/decisions endpoint instead». The
+# same call also lives under v1 as `POST /systemone`, TypeSafe's own request
+# shape — `model`, `state` (string | object | array), `questions` (name →
+# typed question) in; `answers`, `usage.{input_tokens,output_tokens,cost}`
+# out. Used from here because it sits under the client's base URL and carries
+# no «alpha» in its path. Checked live 2026-09-21: identical answers, ids and
+# cost on both paths. Like GPT Image, these models are absent from
+# `GET /models`; `/models/{id}/endpoints` knows them, and the rows are typed in.
+DECISIONS_PATH = "/systemone"
+# What one question may be. Validated here rather than left to the provider
+# because its 400 comes back as a zod dump the caller cannot read.
+DECISION_QUESTION_TYPES = ("noul", "choice", "score")
 
 
 def _escape_non_ascii(value: str) -> str:
@@ -135,6 +150,14 @@ def _title_safe(value: str) -> str:
     return _escape_non_ascii("".join(chars))
 
 
+def _right_side_has(modality: str, medium: str) -> bool:
+    """Whether the legacy `"a+b->c"` modality string names `medium` as output."""
+    if "->" not in modality:
+        return False
+    _, _, right = modality.partition("->")
+    return medium in (part.strip() for part in right.split("+"))
+
+
 def _image_part(att: Attachment) -> dict[str, Any] | None:
     """One image as an OpenAI-shaped content part, or None if it is not an image.
 
@@ -159,9 +182,10 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
     # chat endpoint refuses with its "use /api/v1/images" 404) go to the
     # dedicated images endpoint, which is also what makes editing an image
     # (`image-to-image`, reference photos in `input_references`) reachable here.
+    # Decision models (`text-to-decisions`) go to `POST /systemone`.
     supported_tasks = {
         Task.TEXT_TO_TEXT, Task.IMAGE_TO_TEXT, Task.TEXT_TO_IMAGE,
-        Task.IMAGE_TO_IMAGE,
+        Task.IMAGE_TO_IMAGE, Task.TEXT_TO_DECISIONS,
     }
     # A market of four hundred ids, five of which were ever addressed from here.
     # Fetched on demand, stored on adoption or on a confirmed answer (ADR-0008).
@@ -172,6 +196,9 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
     # model is simply not sent on (and vice versa) — the task-level declaration
     # below is the union, because one task can travel either path.
     _IMAGE_PARAMS = ("aspect_ratio", "resolution", "n", "quality", "output_format", "seed")
+    # What POST /systemone reads besides the model. `questions` is the call;
+    # `state` is the structured alternative to `request.text`.
+    _DECISION_PARAMS = ("questions", "state")
     # `web_search` is normalized, not a passthrough field: the caller says a
     # boolean, this adapter translates it into whatever OpenRouter accepts
     # today. That keeps MCP clients unaware of OpenRouter's tool vocabulary and
@@ -181,6 +208,7 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
         Task.IMAGE_TO_TEXT: _CHAT_PARAMS + ("web_search",),
         Task.TEXT_TO_IMAGE: _CHAT_PARAMS + _IMAGE_PARAMS,
         Task.IMAGE_TO_IMAGE: _IMAGE_PARAMS,
+        Task.TEXT_TO_DECISIONS: _DECISION_PARAMS,
     }
 
     def __init__(
@@ -231,6 +259,8 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
         return headers
 
     async def generate(self, request: RouterRequest, model: RegistryModel) -> RouterResponse:
+        if request.task is Task.TEXT_TO_DECISIONS:
+            return await self._decide(request, model)
         if request.task in IMAGE_TASKS and IMAGES_API_CAPABILITY in model.capabilities:
             return await self._generate_image(request, model)
         messages = self._build_messages(request)
@@ -420,6 +450,126 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
             cost_override_usd=self._image_cost_override(request, provider_cost),
         )
 
+    async def _decide(self, request: RouterRequest, model: RegistryModel) -> RouterResponse:
+        """POST /systemone: typed questions about a state, probabilities back.
+
+        The state is `params["state"]` when the caller handed over structure
+        (an object or array the model judges as a whole), else `request.text`.
+        `questions` is a JSON object, or that object as a string — the console
+        types it into a field, and an MCP client may well serialize it — and
+        it is checked here for shape because the provider's own 400 is a zod
+        dump. The answers are returned as JSON text (`response.text`) and, in
+        their original shape, as `raw_meta["answers"]`.
+
+        Money: the provider prices input tokens and gives the output away
+        (`completion` is $0 on the endpoint), so the registry arithmetic is
+        exact and stays in force; `usage.cost` is kept beside it as the
+        staleness check, like every other text task here.
+        """
+        state = request.params.get("state")
+        if state is None or state == "":
+            state = request.text
+        if state is None or state == "":
+            raise BadRequest(
+                "A decisions request needs the text to judge: `text`, or a "
+                "structured `state` in params"
+            )
+        questions = self._parse_questions(request.params.get("questions"))
+        payload: dict[str, Any] = {
+            "model": model.model_id,
+            "state": state,
+            "questions": questions,
+        }
+        response = await self._request_with_retry(
+            "POST", DECISIONS_PATH, json=payload, headers=self._app_headers(request)
+        )
+        try:
+            data = response.json()
+        except json.JSONDecodeError as exc:
+            raise ProviderUnavailable("OpenRouter returned invalid JSON") from exc
+        top_error = self._extract_top_level_error(data)
+        if top_error is not None:
+            message, code = top_error
+            if code in (429, 500, 502, 503, 504):
+                raise ProviderUnavailable(f"OpenRouter temporarily unavailable: {message}")
+            raise provider_error_for(message, provider_status=code if isinstance(code, int) else None)
+
+        answers = data.get("answers") if isinstance(data, dict) else None
+        if not isinstance(answers, dict) or not answers:
+            logger.warning(
+                "OpenRouter %s parse miss model=%s sample=%s",
+                DECISIONS_PATH, model.model_id, json.dumps(data, ensure_ascii=False)[:600],
+            )
+            raise ProviderError("Model returned no answers")
+
+        raw_usage = data.get("usage") if isinstance(data, dict) else None
+        raw_usage = raw_usage if isinstance(raw_usage, dict) else {}
+        prompt_tokens = raw_usage.get("input_tokens")
+        completion_tokens = raw_usage.get("output_tokens")
+        total = (
+            (prompt_tokens or 0) + (completion_tokens or 0)
+            if prompt_tokens is not None or completion_tokens is not None
+            else None
+        )
+        return RouterResponse(
+            task=request.task,
+            provider=self.name,
+            model_id=model.model_id,
+            usage=Usage(
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total,
+                raw=raw_usage,
+            ),
+            text=json.dumps(answers, ensure_ascii=False),
+            raw_meta={
+                "provider_request_id": data.get("id"),
+                "provider_cost_usd": self._reported_cost(raw_usage),
+                "endpoint": DECISIONS_PATH,
+                "answers": answers,
+                # The id that actually served: `~typesafe/jev-latest` is an
+                # alias, and the reply names the dated release behind it.
+                "served_model_id": data.get("model"),
+            },
+        )
+
+    @staticmethod
+    def _parse_questions(raw: Any) -> dict[str, Any]:
+        """The `questions` object, from an object or its JSON text.
+
+        Shape only — name → {type, instructions, criteria?} with a known
+        `type` — so a caller hears «question 'x' has no type» from here and
+        not a zod dump from the provider. What a criterion may contain is the
+        provider's business and is passed through untouched.
+        """
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                raise BadRequest(f"`questions` is not valid JSON: {exc.msg}") from exc
+        if not isinstance(raw, dict) or not raw:
+            raise BadRequest(
+                "`questions` must be a non-empty JSON object: name → "
+                "{type: noul|choice|score, instructions, criteria}"
+            )
+        for name, question in raw.items():
+            if not isinstance(question, dict):
+                raise BadRequest(f"Question {name!r} must be an object")
+            kind = question.get("type")
+            if kind not in DECISION_QUESTION_TYPES:
+                raise BadRequest(
+                    f"Question {name!r} has type {kind!r}; expected one of "
+                    f"{', '.join(DECISION_QUESTION_TYPES)}"
+                )
+            if not question.get("instructions"):
+                raise BadRequest(f"Question {name!r} has no `instructions`")
+            if kind != "noul" and not question.get("criteria"):
+                raise BadRequest(
+                    f"Question {name!r} of type {kind!r} needs `criteria` "
+                    f"({'an object option → description' if kind == 'choice' else 'a list of scale steps'})"
+                )
+        return raw
+
     async def _chat_data(
         self, payload: dict[str, Any], headers: dict[str, str] | None = None
     ) -> dict[str, Any]:
@@ -542,8 +692,10 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
 
     @staticmethod
     def _extract_provider(model_id: str) -> str:
+        # `~vendor/model-latest` is OpenRouter's alias for a family's newest
+        # release; the tilde marks the alias, not the vendor.
         if "/" in model_id:
-            return model_id.split("/", 1)[0]
+            return model_id.split("/", 1)[0].lstrip("~") or "other"
         return "other"
 
     @staticmethod
@@ -581,6 +733,13 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
             outputs |= cls._media_set(right.split("+"))
 
         tasks: list[Task] = []
+        # Decision models produce neither text nor images: their output
+        # modality is literally "decisions", and `_media_set` knows no such
+        # medium — checked on the raw lists so it is not mistaken for a chat
+        # model with an empty architecture block.
+        raw_outputs = [str(x).lower() for x in architecture.get("output_modalities") or []]
+        if "decisions" in raw_outputs or _right_side_has(legacy, "decisions"):
+            return (Task.TEXT_TO_DECISIONS,)
         if "image" in outputs:
             tasks.append(Task.TEXT_TO_IMAGE)
         # Text out, or nothing declared at all: this is a chat model, and the

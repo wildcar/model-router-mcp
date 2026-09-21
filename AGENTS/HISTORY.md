@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-09-21 · модель решений Jev: задача text-to-decisions и инструмент decide
+- What: новая задача `text-to-decisions` (текст на входе, JSON с ответами на выходе, группа chat). `OpenRouterAdapter._decide` шлёт `{model, state, questions}` на `POST /systemone` (тот же вызов, что `/api/alpha/decisions`), проверяет форму вопросов (noul, choice, score) до запроса, возвращает `answers` и `served_model_id`. Инструмент MCP `decide`, ручка `POST /api/v1/decide`, шорткат `questions` и `state` на `/runs`, в консоли JSON-поля (тип `json` рисуется как textarea). Каталожный разбор понимает `text->decisions`, вендор берётся без тильды. Строки `typesafe/jev-1.13` и `~typesafe/jev-latest` заведены как manual (вход $0,042 за 1M, выход $0, контекст 32K).
+- Why: просьба пользователя добавить typesafe/jev-1.13 и jev-latest. `/chat/completions` их отвергает с 400, а «typesafe/jev-latest» у OpenRouter не существует, псевдоним пишется `~typesafe/jev-latest`.
+- Files: router_mcp/domain/task.py, adapters/openrouter.py, mcp_server/tools.py, web/{api,capabilities,labels}.py, web/static/js/pages/run.js, tests/test_openrouter_decisions.py, AGENTS/SPEC.md, README.md, AGENTS.md
+- Next: выкатить на прод, завести обе строки через `POST /api/registry/models`, живая проверка `decide`, рассказать agentish про инструмент.
+
 ## 2026-09-19 · картинки OpenRouter считаются по сумме поставщика
 - What: `OpenRouterAdapter._image_cost_override` — для задач text-to-image/image-to-image в обоих путях (`/chat/completions`, `/images`) `usage.cost` идёт в `RouterResponse.cost_override_usd`; строка журнала получает `cost_source: provider`, «≠» пропадает; без `usage.cost` — прежний расчёт по `image_price`; текстовые задачи не тронуты.
 - Why: задача от agentish: gpt-image-2.5 биллится по знакам, одной цены за картинку нет — правка (строка 26200) записалась $0,005 против списанных $0,016921, потолок расходов семьи в agentish врал втрое.

@@ -150,6 +150,15 @@ function renderParams() {
       // same as an empty field, so the parameter simply stays out of the call.
       field = el('input');
       field.type = 'checkbox';
+    } else if (spec.type === 'json') {
+      // A JSON object typed in by hand (the questions of a decisions call): a
+      // one-line input cannot hold it. Parsed in `collectParams`.
+      field = el('textarea');
+      field.rows = 6;
+      field.spellcheck = false;
+      if (spec.default !== null && spec.default !== undefined) {
+        field.placeholder = JSON.stringify(spec.default);
+      }
     } else {
       field = el('input');
       field.type = spec.type === 'text' ? 'text' : 'number';
@@ -181,6 +190,16 @@ function collectParams() {
     }
     const raw = field.value;
     if (raw === '' || raw === null) continue;
+    if (field.dataset.kind === 'json') {
+      // Sent parsed when it parses; otherwise as the text itself, and the
+      // adapter names the syntax error — the form has no place to show one.
+      try {
+        out[field.dataset.param] = JSON.parse(raw);
+      } catch (_err) {
+        out[field.dataset.param] = raw;
+      }
+      continue;
+    }
     out[field.dataset.param] =
       field.dataset.kind === 'text' || field.dataset.kind === 'select'
         ? raw

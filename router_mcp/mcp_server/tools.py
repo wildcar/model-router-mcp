@@ -12,6 +12,7 @@ are JSON.
 from __future__ import annotations
 
 import base64
+import json
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -67,7 +68,8 @@ async def list_models(
 
     `task` is what a model can be asked to do: `text-to-text`, `image-to-text`,
     `text-to-image`, `image-to-image`, `speech-to-text`, `text-to-speech`,
-    `text-to-audio`, `text-to-video`, `image-to-video`, `cli`. `modality` is the
+    `text-to-audio`, `text-to-video`, `image-to-video`, `text-to-decisions`,
+    `cli`. `modality` is the
     coarser billing group (`chat`/`image`/`stt`/`tts`/`audio`/`video`/`cli`) and
     is kept for callers written before tasks existed.
     """
@@ -149,6 +151,69 @@ async def chat(
     # it from an answer that cites nothing.
     if "web_search_mode" in result.response.raw_meta:
         out["web_search_mode"] = result.response.raw_meta["web_search_mode"]
+    return out
+
+
+@mcp.tool()
+async def decide(
+    external_user_id: str,
+    questions: dict[str, Any],
+    state: str | dict[str, Any] | list[Any] | None = None,
+    text: str | None = None,
+    model_id: str | None = None,
+    provider: str | None = None,
+    fallback: dict[str, Any] | str | None = None,
+    app_url: str | None = None,
+    app_name: str | None = None,
+) -> dict[str, Any]:
+    """Ask a decision model typed questions about a text (`text-to-decisions`).
+
+    Not a chat: the model (TypeSafe Jev via OpenRouter, ~0.25 s, input tokens
+    only are billed) returns probabilities, not prose. Give it the `state` to
+    judge — a string, or a JSON object/array of related context — and a
+    `questions` object, name → question. Three question types:
+
+      {"type": "noul", "instructions": "Is the customer asking for a refund?",
+       "criteria": {"true": "...", "false": "..."}}          # criteria optional
+      {"type": "choice", "instructions": "Which team owns this?",
+       "criteria": {"billing": "Charges and refunds", "tech": "Bugs"}}
+      {"type": "score", "instructions": "How urgent?",
+       "criteria": ["Can wait", "This week", "Blocking revenue"]}  # ordered
+
+    The reply carries `answers`, name → {type, noul: 0.96} | {type, choice,
+    confidence, probabilities} | {type, score, confidence, probabilities,
+    legend}, plus the usual usage and cost. `text` is accepted as an alias for
+    a string `state`. `fallback` and `app_url`/`app_name` work as in `chat`.
+    """
+    if state is None or state == "":
+        state = text
+    if state is None or state == "":
+        raise BadRequest("Provide the text to judge in `state` (or `text`)")
+    params: dict[str, Any] = {"questions": questions}
+    if isinstance(state, str):
+        prompt = state
+    else:
+        # The structure travels to the provider as-is; the log gets it as text.
+        params["state"] = state
+        prompt = json.dumps(state, ensure_ascii=False)
+    request = RouterRequest(
+        task=Task.TEXT_TO_DECISIONS,
+        external_user_id=external_user_id,
+        model_id=model_id,
+        provider_hint=provider,
+        text=prompt,
+        params=params,
+        fallback=FallbackPolicy.parse(fallback),
+        channel="mcp",
+        tool="decide",
+        app_url=app_url,
+        app_name=app_name,
+    )
+    result = await dispatch_tool(request)
+    out = dispatch_summary(result)
+    out["answers"] = result.response.raw_meta.get("answers")
+    # `~typesafe/jev-latest` is an alias; this is the dated release that answered.
+    out["served_model_id"] = result.response.raw_meta.get("served_model_id")
     return out
 
 
