@@ -861,6 +861,7 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
             completion_tokens=raw.get("completion_tokens"),
             total_tokens=raw.get("total_tokens"),
             cache_read_tokens=details["cache_read"],
+            cache_write_tokens=details["cache_write"],
             reasoning_tokens=details["reasoning"],
             web_searches=int(searches) if searches else None,
             raw=raw,

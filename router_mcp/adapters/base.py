@@ -147,7 +147,8 @@ def openai_shaped_usage(raw: Any) -> dict[str, int | None]:
     OpenAI, OpenRouter and DeepSeek all put the same facts in different places —
     `prompt_tokens_details.cached_tokens` for the first two,
     `prompt_cache_hit_tokens` for the third. Reading whichever arrived beats a
-    branch per provider at each call site.
+    branch per provider at each call site. Cache writes likewise:
+    OpenRouter reports them as `prompt_tokens_details.cache_write_tokens`.
 
     Note that in all three the cached count is *inside* `prompt_tokens`, which
     is the contract `Usage` normalizes to (see domain/messages.py).
@@ -159,12 +160,15 @@ def openai_shaped_usage(raw: Any) -> dict[str, int | None]:
     cache_read = raw.get("prompt_cache_hit_tokens")
     if cache_read is None and isinstance(prompt_details, dict):
         cache_read = prompt_details.get("cached_tokens")
+    cache_write = raw.get("prompt_cache_write_tokens")
+    if cache_write is None and isinstance(prompt_details, dict):
+        cache_write = prompt_details.get("cache_write_tokens")
     reasoning = None
     if isinstance(completion_details, dict):
         reasoning = completion_details.get("reasoning_tokens")
     return {
         "cache_read": _int_or_none(cache_read),
-        "cache_write": _int_or_none(raw.get("prompt_cache_write_tokens")),
+        "cache_write": _int_or_none(cache_write),
         "reasoning": _int_or_none(reasoning),
     }
 

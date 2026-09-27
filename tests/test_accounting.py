@@ -187,6 +187,33 @@ def test_openai_shaped_reasoning_tokens_are_picked_up():
     assert details["reasoning"] == 512
 
 
+def test_openrouter_cache_writes_are_priced_at_their_own_rate():
+    """OpenRouter puts cache writes in `prompt_tokens_details.cache_write_tokens`.
+    Missing them priced a GPT-5.6 write at the plain prompt rate — prod row
+    31157 recorded $0.042544 against the $0.045022 OpenRouter charged."""
+    from router_mcp.adapters.openrouter import OpenRouterAdapter
+
+    usage = OpenRouterAdapter._parse_usage({
+        "prompt_tokens": 9272,
+        "completion_tokens": 400,
+        "total_tokens": 9672,
+        "cost": 0.045022,
+        "prompt_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 4956},
+        "completion_tokens_details": {"reasoning_tokens": 186},
+        "server_tool_use_details": {"web_search_requests": 2},
+    })
+    assert usage.cache_write_tokens == 4956
+    model = _model(
+        prompt_price=2e-6,
+        completion_price=1e-5,
+        cache_write_price=2.5e-6,
+        web_search_price=0.01,
+        price_source_kind="api",
+    )
+    result = compute_cost(model, Modality.CHAT, usage)
+    assert result.cost_usd == pytest.approx(0.045022)
+
+
 # --- the compute-second unit (Replicate and anything hosted like it) ------
 def test_compute_seconds_are_their_own_term():
     """A hosted model bills for how long its hardware ran. That is a different
