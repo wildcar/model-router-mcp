@@ -160,6 +160,7 @@ async def test_the_new_columns_arrive(migrated):
         ("registry_models", "web_search_price"),
         ("registry_models", "input_map"),
         ("registry_models", "extra_params"),
+        ("registry_models", "provider_routing"),
         ("registry_models", "retired_by"),
         ("request_logs", "task"),
         ("request_logs", "compute_seconds"),

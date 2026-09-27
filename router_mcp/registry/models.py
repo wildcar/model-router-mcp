@@ -239,6 +239,14 @@ class RegistryModel:
     # a passthrough — a name the model's schema has no property for is dropped
     # and reported, exactly like a declared one.
     extra_params: tuple[str, ...] = ()
+    # OpenRouter's `provider` routing object, sent as-is with every request to
+    # this model, e.g. `{"only": ["novita/fp8", "phala/fp8"]}`. OpenRouter
+    # spreads a model across every host that serves it, and the hosts' prices
+    # differ several times over (GLM 5.3 Flash: $0.14-$1.00 per 1M out) while
+    # its catalog shows only the cheapest. Pinning the hosts is how the price on
+    # this row becomes the price actually charged. Human-only, like the two
+    # above: no catalog knows which hosts an operator trusts.
+    provider_routing: dict[str, Any] = field(default_factory=dict)
     # What this model does and, more usefully, does not: "one sheet in frame,
     # edges visible; a two-page spread is unpredictable". Free text for the
     # console and for the applications that let a user pick a model. Written

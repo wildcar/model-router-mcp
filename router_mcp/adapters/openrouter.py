@@ -274,6 +274,10 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
         for key in self._CHAT_PARAMS:
             if key in request.params:
                 payload[key] = request.params[key]
+        if model.provider_routing:
+            # The hosts this row is priced for; without it OpenRouter spreads
+            # the model across every host at whatever each one charges.
+            payload["provider"] = dict(model.provider_routing)
 
         # Only for tasks that declare it: on text-to-image the flag stays out of
         # the payload and the router names it in `ignored_params` instead.
@@ -331,6 +335,11 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
             raise ProviderError("Model returned an empty response")
 
         attachments = [Attachment(kind="image", mime="image/png", url=u) for u in image_urls]
+        served_by = data.get("provider") if isinstance(data, dict) else None
+        if served_by:
+            # Which host OpenRouter picked. The price differs per host, so this
+            # is what explains a cost that does not match the row.
+            progress.emit("upstream", f"хост: {served_by}", host=served_by)
 
         usage = self._parse_usage(data.get("usage") if isinstance(data, dict) else None)
         if image_urls:

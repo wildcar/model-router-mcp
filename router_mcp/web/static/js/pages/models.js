@@ -297,6 +297,47 @@ function extraParamsField(model) {
   return box;
 }
 
+// Which OpenRouter hosts may serve the model. OpenRouter spreads a model across
+// every host that runs it, at prices several times apart, while its catalog
+// shows only the cheapest; pinning the hosts is what makes the row's price the
+// one actually charged. Sent to OpenRouter as its `provider` object, as typed.
+function providerRoutingField(model) {
+  const box = el('div', undefined, { className: 'input-map' });
+  box.appendChild(el('h3', 'Хосты OpenRouter'));
+  box.appendChild(el('p',
+    'Объект provider из API OpenRouter в JSON, например '
+    + '{"only": ["novita/fp8", "phala/fp8"]}. Пустое поле: OpenRouter сам '
+    + 'выбирает из всех хостов, по их ценам. Цену строки при этом ставьте '
+    + 'вручную по самому дорогому из закреплённых.',
+    { className: 'hint' }));
+  const wrap = el('label', undefined, { className: 'price-field' });
+  const input = el('textarea', undefined, { id: 'edit-provider-routing' });
+  const routing = model.provider_routing || {};
+  input.value = Object.keys(routing).length ? JSON.stringify(routing, null, 2) : '';
+  input.placeholder = '{"only": ["novita/fp8"]}';
+  input.rows = 4;
+  wrap.appendChild(input);
+  box.appendChild(wrap);
+  return box;
+}
+
+function readProviderRouting() {
+  const field = $('edit-provider-routing');
+  if (!field) return null;
+  const text = field.value.trim();
+  if (!text) return {};
+  let value;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    throw new Error('Хосты OpenRouter: это не JSON');
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Хосты OpenRouter: нужен объект {...}');
+  }
+  return value;
+}
+
 // What the model cannot do, in words. A catalog never says «one sheet in frame,
 // a two-page spread is unpredictable»; the operator who found out does, here,
 // and the applications where a user picks a model show it next to the name.
@@ -455,6 +496,7 @@ function select(model) {
 
   if (takesImages(model)) card.appendChild(inputMapFields(model));
   card.appendChild(extraParamsField(model));
+  if (model.service_provider === 'openrouter') card.appendChild(providerRoutingField(model));
   card.appendChild(descriptionField(model));
 
   const origin = caps.labels.price_source_kinds[model.price_source_kind];
@@ -641,6 +683,7 @@ async function save(model) {
   const compute = computeField && computeField.value !== ''
     ? Number(computeField.value) : null;
   const extra = readExtraParams();
+  const routing = readProviderRouting();
   const schedule = readPriceSchedule(model);
   const descriptionBox = $('edit-description');
   if (!confirmJump('Промпт', model.prompt_price * 1e6, prompt)) return;
@@ -657,6 +700,8 @@ async function save(model) {
       // a map the operator never saw.
       ...($('edit-role-image') ? { input_map: readInputMap() } : {}),
       ...(extra === null ? {} : { extra_params: extra }),
+      // Only when drawn (OpenRouter rows); an empty field clears the pinning.
+      ...(routing === null ? {} : { provider_routing: routing }),
       // Only when the field was drawn; an empty field clears the text.
       ...(descriptionBox ? { description: descriptionBox.value.trim() } : {}),
       // Same rule as the roles: only when the operator could see the field, and

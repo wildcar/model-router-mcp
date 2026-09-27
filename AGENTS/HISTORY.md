@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-09-27 · хосты OpenRouter закрепляются в строке реестра
+- What: поле `provider_routing` в `registry_models` (ручное, переживает синхронизацию), адаптер шлёт его как `provider`, PATCH с проверкой ключей, поле в карточке модели, хост ответа в ленте прогона; GLM 5.3 Flash закреплён за gmicloud/novita/morph/phala (fp8), цена ручная по Morph.
+- Why: GLM раскидывался по ~30 хостам с разницей цен до 7 раз, журнал занижал расход.
+- Files: router_mcp/{registry/models,storage/database,adapters/openrouter,web/api,mcp_server/serialize}.py, web/static/js/pages/models.js, tests/test_openrouter_routing.py, tests/test_registry_patch.py, AGENTS/SPEC.md
+- Next: через день сверить cost_mismatch и хосты в ленте у news-evaluator.
+
 ## 2026-09-27 · запись в кэш у OpenRouter по своей ставке
 - What: `openai_shaped_usage` читает `prompt_tokens_details.cache_write_tokens`, `OpenRouterAdapter._parse_usage` передаёт `cache_write_tokens`; пересчёт 41 прод-строки GPT-5.6 Sol/Luna сошёлся с OpenRouter точно.
 - Why: сверка журнала: запись в кэш шла по входной ставке, суммы занижались на 5–12%; у GLM 5.3 Flash причина другая (разброс цен провайдеров внутри OpenRouter), кода не трогали.

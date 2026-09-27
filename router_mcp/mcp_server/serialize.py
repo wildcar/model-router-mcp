@@ -63,6 +63,8 @@ def model_to_dict(m: RegistryModel) -> dict[str, Any]:
         "input_map": dict(m.input_map),
         # Knobs this model accepts beyond the adapter's declared set.
         "extra_params": list(m.extra_params),
+        # OpenRouter hosts this model is pinned to; empty means the default spread.
+        "provider_routing": dict(m.provider_routing),
         # What it does and does not do, in the operator's words. Applications
         # that let a user pick a model show this next to the name.
         "description": m.description,

@@ -311,6 +311,54 @@ async def test_a_malformed_role_map_loads_as_empty(db):
     assert row.input_map == {}
 
 
+def test_api_patch_pins_openrouter_hosts(client):
+    """OpenRouter spreads a model across every host at the host's own price;
+    the pinning is stored as typed, minus empties and repeats, and `{}` undoes it."""
+    client.post(
+        "/api/v1/registry/models",
+        json={"service_provider_id": "openrouter", "model_id": "demo/pinned",
+              "modalities": ["chat"]},
+    )
+    url = "/api/v1/registry/models/openrouter/demo/pinned"
+    patched = client.patch(url, json={"provider_routing": {
+        "only": ["novita/fp8", " phala/fp8 ", "novita/fp8", ""],
+        "allow_fallbacks": False,
+    }})
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["provider_routing"] == {
+        "only": ["novita/fp8", "phala/fp8"], "allow_fallbacks": False,
+    }
+    cleared = client.patch(url, json={"provider_routing": {}})
+    assert cleared.json()["provider_routing"] == {}
+
+
+def test_api_patch_refuses_a_routing_key_openrouter_would_ignore(client):
+    """OpenRouter drops an unknown key without a word, so `onyl` would leave the
+    model on every host at every price while the row looked pinned."""
+    client.post(
+        "/api/v1/registry/models",
+        json={"service_provider_id": "openrouter", "model_id": "demo/typo",
+              "modalities": ["chat"]},
+    )
+    url = "/api/v1/registry/models/openrouter/demo/typo"
+    r = client.patch(url, json={"provider_routing": {"onyl": ["novita"]}})
+    assert r.status_code == 400
+    assert "onyl" in r.json()["error"]["message"]
+    r = client.patch(url, json={"provider_routing": {"only": "novita"}})
+    assert r.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_a_sync_never_erases_pinned_hosts(db):
+    await db.update_registry_model(
+        "openrouter", "openai/gpt-4o-mini",
+        {"provider_routing": '{"only": ["novita/fp8"]}'},
+    )
+    await db.upsert_registry_model(_catalog_row(display_name="GPT-4o mini (2026)"))
+    row = await db.get_registry_model("openrouter", "openai/gpt-4o-mini")
+    assert row.provider_routing == {"only": ["novita/fp8"]}
+
+
 def test_api_patch_unknown_pair_is_404(client):
     r = client.patch("/api/v1/registry/models/openrouter/nope/nope", json={"tier": "cheap"})
     assert r.status_code == 404

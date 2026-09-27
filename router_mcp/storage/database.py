@@ -200,7 +200,8 @@ def _model_to_row(m: RegistryModel) -> dict[str, Any]:
         # garment, that this upscaler's `scale` is worth exposing, or that the
         # rate doubles between 01:00 and 04:00 UTC — no catalog publishes any of
         # it, so a sync writing the empty defaults here would erase it on every
-        # refresh. All three are set by `update_registry_model` alone.
+        # refresh. All three are set by `update_registry_model` alone, and so
+        # is `provider_routing`, which hosts an operator pinned the model to.
     }
 
 
@@ -258,6 +259,7 @@ def _row_to_model(row: aiosqlite.Row) -> RegistryModel:
             for part in str(_col(row, "extra_params") or "").split(",")
             if part.strip()
         ),
+        provider_routing=_json_object(_col(row, "provider_routing")),
         price_schedule=_price_schedule(_col(row, "price_schedule")),
         description=str(_col(row, "description") or ""),
     )
@@ -295,6 +297,22 @@ def _json_map(raw: Any) -> dict[str, str]:
     if not isinstance(value, dict):
         return {}
     return {str(k): str(v) for k, v in value.items() if k and v}
+
+
+def _json_object(raw: Any) -> dict[str, Any]:
+    """A JSON object column kept as parsed, or empty for anything else.
+
+    `_json_map` flattens values to strings; the routing object holds lists and
+    booleans, so it needs the structure intact. Same bargain otherwise: a broken
+    column loads as "no routing", which is OpenRouter's default behaviour.
+    """
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
 
 
 class Database:
@@ -394,6 +412,10 @@ class Database:
                     -- the adapter's declared set. An allowlist, never a
                     -- passthrough; also human-only.
                     extra_params TEXT NOT NULL DEFAULT '',
+                    -- JSON: OpenRouter's `provider` routing object for this
+                    -- model (which hosts may serve it). Human-only; empty
+                    -- means OpenRouter's default spread.
+                    provider_routing TEXT NOT NULL DEFAULT '{}',
                     -- JSON: the UTC windows in which every rate on this row is
                     -- multiplied, and by how much (DeepSeek's peak hours).
                     -- Empty means the row costs the same round the clock.
@@ -536,6 +558,9 @@ class Database:
             # Which of its own knobs this model lets through. Empty everywhere,
             # which is the adapter-only set every existing row had.
             "extra_params": "TEXT NOT NULL DEFAULT ''",
+            # Which OpenRouter hosts may serve the model. Empty everywhere,
+            # which is OpenRouter's default spread every existing row had.
+            "provider_routing": "TEXT NOT NULL DEFAULT '{}'",
             # Peak-hour pricing. Empty on every existing row, which is the flat
             # round-the-clock rate they were all billed at, so the migration
             # changes no historical number.
@@ -769,6 +794,7 @@ class Database:
         row = _model_to_row(model)
         row["input_map"] = json.dumps(model.input_map, ensure_ascii=False)
         row["extra_params"] = ",".join(model.extra_params)
+        row["provider_routing"] = json.dumps(model.provider_routing, ensure_ascii=False)
         row["description"] = model.description
         cols = list(row.keys())
         conn = await self._get_conn()
@@ -971,6 +997,9 @@ class Database:
             # And for this model's own knobs: `scale` on an upscaler is real and
             # useful, and reaching it used to require editing the adapter.
             "extra_params",
+            # And for which hosts serve it: OpenRouter's catalog lists them all
+            # and never says which one an operator is willing to pay.
+            "provider_routing",
             # And for the peak hours: a provider announces them in a mail, not in
             # a catalog, so the only way in is an operator typing them.
             "price_schedule",

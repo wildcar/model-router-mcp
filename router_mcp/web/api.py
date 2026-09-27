@@ -52,6 +52,41 @@ blob_router = APIRouter()
 # stored in a comma-joined column and ends up as a key in a provider's JSON body.
 _PARAM_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
+# The keys of OpenRouter's `provider` routing object this console lets an
+# operator set, by the shape each must have. A typo such as `onyl` would be
+# ignored by OpenRouter without a word, and the model would go on being served
+# by every host at every price, so an unknown key is refused here instead.
+_ROUTING_LIST_KEYS = frozenset({"only", "order", "ignore", "quantizations"})
+_ROUTING_BOOL_KEYS = frozenset({"allow_fallbacks", "require_parameters"})
+_ROUTING_STR_KEYS = frozenset({"sort", "data_collection"})
+
+
+def _clean_provider_routing(raw: dict[str, Any]) -> dict[str, Any]:
+    known = _ROUTING_LIST_KEYS | _ROUTING_BOOL_KEYS | _ROUTING_STR_KEYS
+    unknown = sorted(set(raw) - known)
+    if unknown:
+        raise BadRequest(
+            f"Неизвестные ключи маршрутизации: {', '.join(unknown)}; допустимые: "
+            f"{', '.join(sorted(known))}"
+        )
+    cleaned: dict[str, Any] = {}
+    for key, value in raw.items():
+        if key in _ROUTING_LIST_KEYS:
+            if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+                raise BadRequest(f"`{key}` должен быть списком строк")
+            items = list(dict.fromkeys(v.strip() for v in value if v.strip()))
+            if items:
+                cleaned[key] = items
+        elif key in _ROUTING_BOOL_KEYS:
+            if not isinstance(value, bool):
+                raise BadRequest(f"`{key}` должен быть true или false")
+            cleaned[key] = value
+        else:
+            if not isinstance(value, str) or not value.strip():
+                raise BadRequest(f"`{key}` должен быть непустой строкой")
+            cleaned[key] = value.strip()
+    return cleaned
+
 
 def parse_fallback(value: Any) -> FallbackPolicy | None:
     """A bad policy name is the caller's mistake, so answer 400, not 502."""
@@ -1259,6 +1294,9 @@ class ModelPatch(BaseModel):
     # This model's own knobs, on top of the adapter's declared set. `[]` clears
     # it, for the same reason `input_map: {}` does.
     extra_params: list[str] | None = None
+    # OpenRouter's `provider` routing object, e.g. `{"only": ["novita/fp8"]}`.
+    # `{}` clears it back to OpenRouter's default spread across hosts.
+    provider_routing: dict[str, Any] | None = None
     # What the model cannot do, in words. `""` clears it.
     description: str | None = None
     # Peak-hour pricing: `{"windows": ["01:00-04:00"], "multiplier": 2.0,
@@ -1377,6 +1415,13 @@ async def api_patch_model(
                 f"модели: латиница, цифры и подчёркивание"
             )
         fields["extra_params"] = ",".join(dict.fromkeys(n for n in names if n))
+
+    if body.provider_routing is not None:
+        if body.provider_routing and model.service_provider_id != "openrouter":
+            raise BadRequest("Маршрутизация по хостам есть только у OpenRouter")
+        fields["provider_routing"] = json.dumps(
+            _clean_provider_routing(body.provider_routing), ensure_ascii=False
+        )
 
     if not fields:
         raise BadRequest("Nothing to update")

@@ -834,6 +834,18 @@ that it ignored it, and `GET /api/v1/registry/tree` carries it on the variant so
 the «Прогон» form can draw a field the pair-level matrix cannot know about.
 Adding an upscaler is then a registry edit, not an adapter change.
 
+`provider_routing` (OpenRouter rows only) is OpenRouter's `provider` routing
+object, sent as-is with every chat request to that model, e.g.
+`{"only": ["gmicloud/fp8", "novita/fp8"]}`. OpenRouter otherwise spreads a
+model across every host serving it at each host's own price, while its catalog
+shows only the cheapest, so an unpinned row can run well under the charge. The
+PATCH accepts `only`, `order`, `ignore`, `quantizations` (string lists),
+`allow_fallbacks`, `require_parameters` (booleans), `sort`, `data_collection`
+(strings) and refuses any other key, since OpenRouter ignores unknown keys
+silently. Human-only like `input_map`; `{}` clears it. The host OpenRouter
+picked is recorded in the run timeline as an `upstream` step («хост: Novita»).
+A pinned row is priced by hand at the dearest pinned host.
+
 Price protection is keyed on the origin of the **price**, not of the row. A
 number a human vouched for (`price_source_kind` of `manual` or `page`) survives
 synchronisation while the row stays a catalog row and keeps receiving name,
