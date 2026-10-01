@@ -3,7 +3,7 @@
 Rows used to be built by interpolating log fields into `innerHTML`. Those fields
 are untrusted: `external_user_id` is free-form caller input (a stats key, never a
 trust boundary), `request_text` is the caller's prompt and `fallback_reason`
-quotes a provider's error message. The console sits behind HTTP Basic auth, which
+quotes a provider's error message. The console sits behind a session cookie, which
 the browser replays automatically, so a stored payload would run with the
 operator's credentials against every /api route.
 

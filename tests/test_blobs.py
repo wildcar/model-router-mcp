@@ -1,7 +1,7 @@
 """Serving response files safely.
 
 A caller controls what a provider returns, and response payloads are served from
-the same origin as the console — behind the Basic-auth session the browser
+the same origin as the console — behind the login session the browser
 replays automatically. Anything that is not an image or audio therefore
 downloads instead of rendering, and nothing is ever sniffed (§16.3).
 """

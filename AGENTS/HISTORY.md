@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-10-01 · вход в консоль на странице /login вместо Basic
+- What: `web/auth.py` (htpasswd apr1/{SHA}/bcrypt, HMAC-cookie, троттлинг), `WebAuthMiddleware`, шаблон `login.html`, кнопка «Выйти», 401 в api.js ведёт на /login; nginx-шаблон без auth_basic.
+- Why: окно Basic менеджер паролей заполнял не всегда.
+- Files: router_mcp/{config,app}.py, router_mcp/web/{auth.py,templates/login.html,templates/base.html,static/app.css,static/js/core/api.js}, deploy/{nginx-model-router.conf,DEPLOY.md}, tests/test_web_login.py, AGENTS/SPEC.md
+- Next: оператор включает `WEB_AUTH_HTPASSWD` на проде и снимает auth_basic в nginx.
+
 ## 2026-09-27 · хосты OpenRouter закрепляются в строке реестра
 - What: поле `provider_routing` в `registry_models` (ручное, переживает синхронизацию), адаптер шлёт его как `provider`, PATCH с проверкой ключей, поле в карточке модели, хост ответа в ленте прогона; GLM 5.3 Flash закреплён за gmicloud/novita/morph/phala (fp8), цена ручная по Morph.
 - Why: GLM раскидывался по ~30 хостам с разницей цен до 7 раз, журнал занижал расход.

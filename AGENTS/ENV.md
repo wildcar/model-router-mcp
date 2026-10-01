@@ -26,7 +26,8 @@ Update whenever a new tool, credential, or host-specific quirk is learned.
   Never commit `.env` (gitignored).
 - `OPENROUTER_API_KEY` — required for the live catalog and chat.
 - `AUTH_TOKEN` — Bearer token required on `/mcp` when set (generate: `openssl rand -hex 32`).
-- nginx HTTP Basic for the web console: `/etc/nginx/model-router.htpasswd`.
+- Web console users: htpasswd file `/etc/nginx/model-router.htpasswd`, read by the
+  app (`WEB_AUTH_HTPASSWD`) for the `/login` page. nginx does no Basic auth.
 - Prod git access: a read-only GitHub **deploy key** for user `modelrouter`
   (`/home/modelrouter/.ssh/id_ed25519`) so it can `git pull` autonomously.
 

@@ -1490,7 +1490,7 @@ async def api_delete_model(service_provider_id: str, model_id: str) -> dict[str,
 # --- blob serving -------------------------------------------------------
 # Only these render in the browser. Everything else downloads: a caller can put
 # an `.html` payload into a response, and serving it inline would run it on the
-# same origin as the console, behind the operator's Basic-auth session.
+# same origin as the console, behind the operator's login session.
 INLINE_MIME_PREFIXES = ("image/", "audio/")
 
 

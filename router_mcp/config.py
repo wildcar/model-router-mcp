@@ -26,8 +26,22 @@ class Settings(BaseSettings):
     db_path: str = Field(default=str(DATA_DIR / "router.db"), alias="DB_PATH")
     blob_dir: str = Field(default=str(DATA_DIR / "blobs"), alias="BLOB_DIR")
     # When set, requests to /mcp must carry `Authorization: Bearer <AUTH_TOKEN>`.
-    # The web console/API is guarded separately (nginx Basic auth); /health is open.
+    # The web console/API is guarded separately (WEB_AUTH_* below); /health is open.
     auth_token: str | None = Field(default=None, alias="AUTH_TOKEN")
+
+    # --- Web console login ------------------------------------------------
+    # An htpasswd file (apr1 / bcrypt / {SHA} lines) whose users may sign in to
+    # the console on /login. Unset means the console is not gated by the app at
+    # all — local dev, or an nginx in front that still does Basic auth.
+    web_auth_htpasswd: str | None = Field(default=None, alias="WEB_AUTH_HTPASSWD")
+    # Signs the session cookie. Unset: a random key is generated once and kept
+    # next to the database, so sessions survive a restart.
+    web_auth_secret: str | None = Field(default=None, alias="WEB_AUTH_SECRET")
+    web_auth_session_days: int = Field(default=30, alias="WEB_AUTH_SESSION_DAYS")
+    # A request that reaches the app straight on loopback, without the
+    # X-Real-IP that nginx adds, is a neighbouring service on this host (they
+    # call 127.0.0.1:8088/api directly); it was never behind Basic auth either.
+    web_auth_trust_loopback: bool = Field(default=True, alias="WEB_AUTH_TRUST_LOOPBACK")
 
     # --- HTTP defaults --------------------------------------------------
     http_timeout_seconds: float = Field(default=60.0, alias="HTTP_TIMEOUT_SECONDS")

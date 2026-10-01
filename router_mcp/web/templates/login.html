@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Вход — Model Router</title>
+  <link rel="stylesheet" href="/static/css/tokens.css?v={{ version }}">
+  <link rel="stylesheet" href="/static/app.css?v={{ version }}">
+</head>
+<body class="login-page">
+  {# A real form with name/autocomplete on both fields: that is what lets a
+     password manager recognise and fill it, which the Basic dialog did not. #}
+  <main>
+    <form class="card login-card" method="post" action="/login">
+      <h1>Model Router</h1>
+      <input type="hidden" name="next" value="{{ next }}">
+      <label>Имя
+        <input type="text" name="username" id="username" value="{{ user }}"
+               autocomplete="username" autocapitalize="none" spellcheck="false"
+               required {{ 'autofocus' if not user }}>
+      </label>
+      <label>Пароль
+        <input type="password" name="password" id="password"
+               autocomplete="current-password" required {{ 'autofocus' if user }}>
+      </label>
+      {% if error %}<p class="err" role="alert">{{ error }}</p>{% endif %}
+      <button type="submit" class="primary">Войти</button>
+    </form>
+  </main>
+</body>
+</html>

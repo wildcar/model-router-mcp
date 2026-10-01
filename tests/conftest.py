@@ -41,6 +41,8 @@ def client(app_db_path, tmp_path_factory):
         # answered text, a chat run in the suite reached the live ChatGPT backend.
         CODEX_AUTH_PATH=None,
         CATALOG_SYNC_INTERVAL_SECONDS=0,
+        # The console login is tested on its own app (test_web_login.py).
+        WEB_AUTH_HTPASSWD=None,
     )
     with TestClient(build_app(settings)) as c:
         yield c

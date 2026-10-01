@@ -122,7 +122,7 @@ into `/etc/systemd/system/`, and `enable --now`s it.
 sudo cp deploy/nginx-model-router.conf /etc/nginx/sites-available/model-router
 # edit server_name -> your subdomain
 sudo ln -s /etc/nginx/sites-available/model-router /etc/nginx/sites-enabled/
-sudo htpasswd -c /etc/nginx/model-router.htpasswd <web-user>   # web console login
+sudo htpasswd -c /etc/nginx/model-router.htpasswd <web-user>   # web console users
 sudo certbot --nginx -d router.example.com
 sudo nginx -t && sudo systemctl reload nginx
 ```
@@ -169,7 +169,23 @@ curl -fsS http://127.0.0.1:8088/health
 
 - **MCP endpoint:** `https://router.example.com/mcp` — clients must send
   `Authorization: Bearer <AUTH_TOKEN>`.
-- **Web console:** `https://router.example.com/` — HTTP Basic (htpasswd).
+- **Web console:** `https://router.example.com/` — sign-in page `/login`, users
+  from the htpasswd file named by `WEB_AUTH_HTPASSWD` in `.env`
+  (`htpasswd -B` lines need `pip install bcrypt`; `-m`/apr1 works as is).
+  `htpasswd` still adds users and changes passwords; a changed password ends
+  that user's sessions. nginx itself does no Basic auth any more.
+
+### Moving an existing host from nginx Basic auth to the login page
+
+Order matters, so the console is never open in between:
+
+1. Deploy the code (`deploy.sh`). Without `WEB_AUTH_HTPASSWD` nothing changes.
+2. Add `WEB_AUTH_HTPASSWD=/etc/nginx/model-router.htpasswd` to `.env`, run
+   `deploy.sh` again. Both gates are now on: the Basic dialog, then the page.
+3. Drop both `auth_basic` / `auth_basic_user_file` pairs from the live nginx
+   site, `sudo nginx -t && sudo systemctl reload nginx`. Only the page is left.
+
+The htpasswd file must be readable by `modelrouter` (it is `644` by default).
 - Crash recovery is automatic (`Restart=always`, `RestartSec=5`); the service is
   `enable`d so it starts on boot.
 

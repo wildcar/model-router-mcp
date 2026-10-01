@@ -15,7 +15,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from router_mcp.bootstrap import build_core
@@ -26,6 +26,7 @@ from router_mcp.mcp_server.tools import mcp
 from router_mcp.runtime import set_core
 from router_mcp.web import retention
 from router_mcp.web.api import api_router, blob_router
+from router_mcp.web.auth import COOKIE_NAME, WebAuth, auth_router, login_redirect
 from router_mcp.web.pages import pages_router
 from router_mcp.web.views import error_envelope
 
@@ -75,7 +76,7 @@ class McpBearerAuthMiddleware:
 
     Implemented as raw ASGI (not BaseHTTPMiddleware) so it never buffers the
     streamable-HTTP/SSE response body — valid requests pass through untouched.
-    The web console/API is guarded by nginx Basic auth; /health stays open. When
+    The web console/API is guarded by WebAuthMiddleware; /health stays open. When
     no token is configured (local dev) this is a no-op.
     """
 
@@ -96,6 +97,47 @@ class McpBearerAuthMiddleware:
                     await response(scope, receive, send)
                     return
         await self.app(scope, receive, send)
+
+class WebAuthMiddleware:
+    """Pure-ASGI gate for the console and its API: a session from /login.
+
+    A page asked for without a session redirects to /login and comes back after
+    it; anything else (the JSON API, blobs, a POST) answers 401 in the API's
+    error envelope, which the console turns into the same redirect. Raw ASGI
+    for the reason McpBearerAuthMiddleware gives: CLI runs stream their bodies.
+    No-op when WEB_AUTH_HTPASSWD is unset.
+    """
+
+    def __init__(self, app, auth: WebAuth | None) -> None:
+        self.app = app
+        self.auth = auth
+
+    async def __call__(self, scope, receive, send) -> None:
+        auth = self.auth
+        if auth is None or scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+        path = scope.get("path", "")
+        if auth.is_open_path(path) or auth.is_local_caller(scope):
+            await self.app(scope, receive, send)
+            return
+        request = Request(scope)
+        if auth.session_user(request.cookies.get(COOKIE_NAME)):
+            await self.app(scope, receive, send)
+            return
+        await _drain_request_body(receive)
+        is_page = scope.get("method") == "GET" and not path.startswith(("/api/", "/blobs/"))
+        if is_page:
+            query = scope.get("query_string", b"").decode("latin-1")
+            response = RedirectResponse(login_redirect(path, query), status_code=303)
+        else:
+            response = JSONResponse(
+                {"error": {"code": "unauthenticated", "message": "Нужно войти в консоль.",
+                           "retriable": False}},
+                status_code=401,
+            )
+        await response(scope, receive, send)
+
 
 STATIC_DIR = Path(__file__).resolve().parent / "web" / "static"
 
@@ -186,7 +228,10 @@ def build_app(settings: Settings | None = None) -> FastAPI:
             await core.aclose()
 
     app = FastAPI(title="model-router-mcp", lifespan=lifespan)
+    app.state.web_auth = WebAuth.from_settings(settings)
 
+    # Session gate for the console (no-op when WEB_AUTH_HTPASSWD is unset).
+    app.add_middleware(WebAuthMiddleware, auth=app.state.web_auth)
     # Bearer-token gate for /mcp (no-op when AUTH_TOKEN is unset).
     app.add_middleware(McpBearerAuthMiddleware, token=settings.auth_token)
     # Outermost, so nothing ever sees a slash-less /mcp and redirects it.
@@ -212,7 +257,7 @@ def build_app(settings: Settings | None = None) -> FastAPI:
         """Public liveness only.
 
         The version and the provider inventory used to be here; that is a map of
-        the installation handed out before Basic auth. The console reads the
+        the installation handed out before the console login. The console reads the
         same facts from /api/v1/health/summary, behind the gate.
         """
         return {"status": "ok"}
@@ -226,6 +271,7 @@ def build_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(api_router, prefix="/api/v1")
     app.include_router(api_router, prefix="/api", include_in_schema=False)
     app.include_router(blob_router)
+    app.include_router(auth_router)
     app.include_router(pages_router)
     app.mount("/static", RevalidatedStaticFiles(directory=str(STATIC_DIR)), name="static")
 

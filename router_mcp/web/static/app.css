@@ -9,6 +9,14 @@ nav { display:flex; gap:16px; align-items:center; }
 nav a { color:var(--muted); text-decoration:none; padding:4px 0; }
 nav a.active { color:var(--fg); border-bottom:2px solid var(--accent); }
 nav .spacer { flex:1; }
+nav form.logout { margin:0; }
+nav form.logout button { background:none; border:none; color:var(--muted); padding:4px 0; font:inherit; }
+nav form.logout button:hover { color:var(--fg); }
+/* The sign-in form: one narrow card in the middle of the screen. */
+.login-page main { min-height:100vh; display:flex; align-items:center; justify-content:center; padding:16px; }
+.login-card { width:100%; max-width:340px; display:flex; flex-direction:column; gap:14px; margin:0; }
+.login-card h1 { margin:0 0 4px; font-size:18px; }
+.login-card .err { margin:0; }
 main { padding:24px; max-width:1100px; margin:0 auto; }
 .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:18px; margin-bottom:20px; }
 .card h2 { margin:0 0 14px; font-size:15px; }

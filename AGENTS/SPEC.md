@@ -90,6 +90,7 @@ on it; adapters never touch storage/mcp directly.
 37. ✅ OpenRouter's dedicated images endpoint (`POST /images`): rows marked with the `images_api` capability — models absent from `GET /models` entirely, meta/muse-image first — generate and edit images there (`input_references` for reference photos), and an unmarked row follows the chat endpoint's own «use /api/v1/images» 404 instead of dying on it. The adapter now declares `image-to-image`.
 38. ✅ A provider whose models are computed in this process (`local`): an adapter that calls a Python function instead of an endpoint and is otherwise indistinguishable — the same `runs`, the same error envelope, a `usage` row at exactly zero. Inference runs in a thread pool behind a semaphore (`LOCAL_MAX_CONCURRENCY`), under a deadline (`timeout`, retriable); missing weights are `model_not_loaded`. First model: UVDoc, straightening a photographed page (`local/uvdoc`). [ADR-0009]
 40. ✅ Decision models (`text-to-decisions`): typed questions about a text — `noul` (yes/no), `choice` (one of N), `score` (an ordered scale) — answered with probabilities on OpenRouter's `POST /systemone` (the same call as `/api/alpha/decisions`). First model: TypeSafe Jev (`typesafe/jev-1.13`, alias `~typesafe/jev-latest`), absent from `GET /models` like GPT Image, rows typed in. Billed as `chat`: input tokens at the registry rate, output free. MCP tool `decide`, HTTP `POST /api/v1/decide`, the same shorthand on `/runs`.
+41. ✅ The console signs in on its own page (`/login`, session cookie) instead of nginx's HTTP Basic dialog, which password managers filled unreliably; users stay in the same htpasswd file (`WEB_AUTH_HTPASSWD`). See «Console login».
 
 ## Tasks, media and billing groups (30)
 
@@ -424,6 +425,26 @@ any other caller see the same shapes.
 - Money is never returned without `cost_source`.
 - `/health` is public and says `{"status": "ok"}` only. Version and provider
   inventory are a map of the installation and move behind the auth gate.
+
+### Console login
+
+- `WEB_AUTH_HTPASSWD` set: every path except `/health`, `/mcp`, `/public/blobs/*`,
+  `/login` and the two stylesheets needs a session. A page `GET` without one
+  answers 303 to `/login?next=<path>`; anything else answers 401 with
+  `{"error": {"code": "unauthenticated", …}}`, and the console's API client
+  turns that into the same redirect. Unset: no gate (local dev).
+- `/login` is a plain form (`autocomplete="username"` / `"current-password"`) so
+  password managers fill it. Users come from the htpasswd file (apr1, `{SHA}`,
+  bcrypt when the module is installed). `next` accepts only a same-site path.
+- The session is an `HttpOnly`, `SameSite=Lax` cookie `user.expiry.HMAC`, the
+  HMAC also covering the user's current hash: a changed password ends old
+  sessions. Lifetime `WEB_AUTH_SESSION_DAYS` (30). Key: `WEB_AUTH_SECRET`, else
+  generated once into `web_session.key` beside the database.
+- 10 failed sign-ins from one address in 10 minutes answer 429 for the rest of
+  the window. `POST /logout` clears the cookie.
+- A request on loopback without `X-Real-IP` / `X-Forwarded-For` (a service on
+  this host calling `127.0.0.1:8088`) is let through, as nginx's Basic auth never
+  saw it either. `WEB_AUTH_TRUST_LOOPBACK=false` closes that.
 
 ### The `Run` envelope
 
@@ -1180,7 +1201,8 @@ everything.
   (`pip install -e '.[anthropic,local]'`, as the scripts do).
 - Endpoints: `GET /health` (open, status only); `/mcp` (Streamable HTTP, requires
   `Authorization: Bearer $AUTH_TOKEN` when set, enforced by a pure-ASGI middleware);
-  web console `/`, `/registry`, `/logs` (guarded by nginx HTTP Basic auth).
+  web console `/`, `/registry`, `/logs` (guarded by the app's login page, see
+  «Console login»).
 
 ## Current state
 

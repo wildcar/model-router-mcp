@@ -34,6 +34,11 @@ export async function api(path, opts = {}) {
   if (opts.formData !== undefined) init.body = opts.formData;
   const res = await fetch(path.startsWith('/') ? BASE + path : path, init);
   if (res.status === 204) return null;
+  // The session ran out (or the password changed): back to the sign-in page,
+  // which returns here afterwards. Nothing on this page can work without it.
+  if (res.status === 401 && path.startsWith('/')) {
+    location.assign('/login?next=' + encodeURIComponent(location.pathname + location.search));
+  }
   let payload = null;
   try { payload = await res.json(); } catch (_) { /* empty or non-JSON body */ }
   if (!res.ok) {

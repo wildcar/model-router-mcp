@@ -26,6 +26,9 @@
       <a href="/connections" class="{{ 'active' if active == 'connections' }}">Подключения</a>
       <span class="spacer"></span>
       <a href="/mcp" title="MCP Streamable HTTP endpoint">/mcp</a>
+      {% if request.app.state.web_auth %}
+      <form method="post" action="/logout" class="logout"><button type="submit">Выйти</button></form>
+      {% endif %}
     </nav>
   </header>
   <main>
