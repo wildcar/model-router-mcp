@@ -199,6 +199,20 @@ class ResponseTruncated(ProviderError):
     http_status = 422
 
 
+class EmptyResponse(ProviderError):
+    """The provider answered with nothing usable: no text, no picture.
+
+    Not truncation (no `finish_reason="length"`) and not a refusal: the model
+    simply said nothing, which OpenRouter hosts do now and then. A property of
+    the moment, not of the service, so the operator is not paged about it by
+    default (it is in `NOTIFY_MUTE_CODES`); the row stays in the log under its
+    own code. Same HTTP status as its parent, so callers see no change but the
+    code.
+    """
+
+    code = "empty_response"
+
+
 class ModelUnavailable(ProviderError):
     """The requested model cannot serve the request (unknown/retired upstream).
 

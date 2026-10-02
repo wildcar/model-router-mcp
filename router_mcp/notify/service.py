@@ -4,7 +4,8 @@ Three filters stand between a failed run and a message, in this order:
 
 1. **Muted codes.** `NOTIFY_MUTE_CODES` lists the error codes that are a
    property of the request rather than of the service — a refused picture
-   (`content_filter`), a `max_tokens` too small (`response_truncated`). They
+   (`content_filter`), a `max_tokens` too small (`response_truncated`), a model
+   that now and then answers with nothing (`empty_response`). They
    stay in the log, where the journal's status filter finds them.
 2. **Muted apps and callers.** A test bench or a client known to send garbage
    can be excluded by `request_logs.app` or by `external_user_id`.

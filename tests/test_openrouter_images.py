@@ -19,7 +19,7 @@ import httpx
 import pytest
 
 from router_mcp.adapters.openrouter import OpenRouterAdapter
-from router_mcp.domain.errors import ModelUnavailable, ProviderError
+from router_mcp.domain.errors import EmptyResponse, ModelUnavailable
 from router_mcp.domain.messages import Attachment, RouterRequest
 from router_mcp.domain.modality import Modality
 from router_mcp.domain.task import Task
@@ -144,7 +144,7 @@ async def test_empty_answer_is_a_named_failure():
         "images": httpx.Response(200, json={"data": [], "usage": {"cost": 0}}),
     })
     request = RouterRequest(Task.TEXT_TO_IMAGE, "u", text="дерево")
-    with pytest.raises(ProviderError, match="empty response"):
+    with pytest.raises(EmptyResponse, match="empty response"):
         await adapter.generate(request, _model())
 
 

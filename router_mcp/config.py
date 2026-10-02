@@ -259,7 +259,7 @@ class Settings(BaseSettings):
     # nothing; an empty account (`insufficient_credits`) is exactly what the
     # channel exists for and is deliberately not in this list.
     notify_mute_codes: str = Field(
-        default="content_filter,response_truncated,bad_request,image_too_large",
+        default="content_filter,response_truncated,empty_response,bad_request,image_too_large",
         alias="NOTIFY_MUTE_CODES",
     )
     # Applications (`request_logs.app`) or callers (`external_user_id`) whose

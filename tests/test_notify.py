@@ -267,7 +267,7 @@ def test_build_notifier_from_settings_is_off_without_credentials():
     )
     notifier = build_notifier(settings)
     assert not notifier.enabled
-    assert "content_filter" in notifier.describe()["muted_codes"]
+    assert {"content_filter", "empty_response"} <= set(notifier.describe()["muted_codes"])
 
 
 def test_build_notifier_from_settings_wires_both_channels():

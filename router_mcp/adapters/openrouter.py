@@ -30,6 +30,7 @@ from router_mcp.domain import progress
 from router_mcp.domain.errors import (
     BadRequest,
     ContentFiltered,
+    EmptyResponse,
     ModelUnavailable,
     ProviderError,
     ProviderUnavailable,
@@ -332,7 +333,7 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
                 model.model_id,
                 json.dumps(choice0 or data, ensure_ascii=False)[:600],
             )
-            raise ProviderError("Model returned an empty response")
+            raise EmptyResponse("Model returned an empty response")
 
         attachments = [Attachment(kind="image", mime="image/png", url=u) for u in image_urls]
         served_by = data.get("provider") if isinstance(data, dict) else None
@@ -433,7 +434,7 @@ class OpenRouterAdapter(RetryClientMixin, ProviderAdapter):
                 model.model_id,
                 json.dumps(data, ensure_ascii=False)[:600],
             )
-            raise ProviderError("Model returned an empty response")
+            raise EmptyResponse("Model returned an empty response")
 
         raw_usage = data.get("usage") if isinstance(data, dict) else None
         raw_usage = raw_usage if isinstance(raw_usage, dict) else {}

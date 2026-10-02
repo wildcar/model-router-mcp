@@ -19,7 +19,7 @@ from router_mcp.adapters.base import (
     openai_shaped_usage,
     truncated_error,
 )
-from router_mcp.domain.errors import ProviderError, ProviderUnavailable
+from router_mcp.domain.errors import EmptyResponse, ProviderError, ProviderUnavailable
 from router_mcp.domain.messages import RouterRequest, RouterResponse, Usage
 from router_mcp.domain.task import Task
 from router_mcp.registry.models import RegistryModel
@@ -145,7 +145,7 @@ class DeepSeekAdapter(RetryClientMixin, ProviderAdapter):
                     max_tokens=max_tokens,
                     completion_tokens=raw_usage.get("completion_tokens"),
                 )
-            raise ProviderError("DeepSeek returned an empty response")
+            raise EmptyResponse("DeepSeek returned an empty response")
         # DeepSeek counts cache hits inside `prompt_tokens`
         # (hit + miss == prompt_tokens), which is the contract Usage expects, so
         # the total passes through untouched and only the split is added. A hit

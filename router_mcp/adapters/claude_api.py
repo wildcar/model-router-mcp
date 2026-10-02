@@ -22,7 +22,12 @@ from router_mcp.adapters.base import (
     provider_error_for,
     truncated_error,
 )
-from router_mcp.domain.errors import ContentFiltered, ProviderError, ProviderUnavailable
+from router_mcp.domain.errors import (
+    ContentFiltered,
+    EmptyResponse,
+    ProviderError,
+    ProviderUnavailable,
+)
 from router_mcp.domain.messages import RouterRequest, RouterResponse, Usage
 from router_mcp.domain.task import Task
 from router_mcp.registry.models import RegistryModel
@@ -202,7 +207,7 @@ class ClaudeApiAdapter(RetryClientMixin, ProviderAdapter):
                 )
             if data.get("stop_reason") == "refusal":
                 raise ContentFiltered("Anthropic declined to answer (stop_reason=refusal)")
-            raise ProviderError("Anthropic returned an empty response")
+            raise EmptyResponse("Anthropic returned an empty response")
         # Anthropic reports cache reads and writes *outside* `input_tokens`,
         # unlike the OpenAI-shaped providers. Usage's contract is that
         # `prompt_tokens` is the whole prompt, so they are added back here —
