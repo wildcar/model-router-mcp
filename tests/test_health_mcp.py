@@ -125,3 +125,22 @@ def test_tool_and_client_stats_come_from_the_log(client, app_db_path):
     assert any(row["tool"] == "renamed_tool" for row in body["retired_tools_called"])
     clients = {c["client"] for c in body["clients"]}
     assert "telecodex" in clients and "(без метки)" in clients
+
+
+@pytest.mark.asyncio
+async def test_list_models_leaves_out_disabled_providers(client):
+    """A disabled provider's rows stay active in the registry but must not be
+    offered to MCP clients: routing would refuse every one of them."""
+    from router_mcp.mcp_server.tools import list_models
+
+    core = get_core()
+    before = await list_models()
+    providers = {m["service_provider"] for m in before}
+    victim = sorted(providers)[0]
+    await core.db.set_provider_enabled(victim, False)
+    try:
+        after = await list_models()
+    finally:
+        await core.db.set_provider_enabled(victim, True)
+    assert after and all(m["service_provider"] != victim for m in after)
+    assert len(after) < len(before)

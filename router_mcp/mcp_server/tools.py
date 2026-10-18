@@ -71,13 +71,15 @@ async def list_models(
     `text-to-audio`, `text-to-video`, `image-to-video`, `text-to-decisions`,
     `cli`. `modality` is the
     coarser billing group (`chat`/`image`/`stt`/`tts`/`audio`/`video`/`cli`) and
-    is kept for callers written before tasks existed.
+    is kept for callers written before tasks existed. Models of a disabled
+    provider are left out: routing would refuse them anyway.
     """
     core = get_core()
     models = await core.registry.get_models(
         task=task, modality=modality, tier=tier, provider=provider
     )
-    return [model_to_dict(m) for m in models]
+    enabled = await core.db.get_enabled_provider_ids()
+    return [model_to_dict(m) for m in models if m.service_provider_id in enabled]
 
 
 @mcp.tool()
