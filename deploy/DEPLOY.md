@@ -60,6 +60,7 @@ sudo -u modelrouter sed -i \
 # Fill the rest by editing .env (as root/keeper):
 #   OPENROUTER_API_KEY=...
 #   AUTH_TOKEN=$(openssl rand -hex 32)   # required for /mcp over the internet
+#   MCP_ALLOWED_HOSTS=router.example.com # else /mcp via nginx answers 421 Invalid Host header
 sudo chmod 600 .env
 ```
 

@@ -17,6 +17,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from mcp.server.transport_security import TransportSecuritySettings
 
 from router_mcp.bootstrap import build_core
 from router_mcp.config import Settings, load_settings
@@ -189,12 +190,34 @@ async def retention_sweep_loop(core, interval_seconds: int) -> None:
             logger.warning("Scheduled retention purge failed", exc_info=True)
 
 
+_LOCAL_HOSTS = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
+_LOCAL_ORIGINS = ["http://127.0.0.1:*", "http://localhost:*", "http://[::1]:*"]
+
+
+def mcp_transport_security(settings: Settings) -> TransportSecuritySettings:
+    """The SDK's localhost-only DNS-rebinding guard plus MCP_ALLOWED_HOSTS.
+
+    Behind nginx the Host header is the public domain, which the SDK's default
+    list rejects with 421 Invalid Host header. Each extra host is also allowed
+    as an https/http Origin, for browser-based clients.
+    """
+    extra = settings.mcp_allowed_host_list()
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=_LOCAL_HOSTS + extra,
+        allowed_origins=_LOCAL_ORIGINS
+        + [f"{scheme}://{host}" for host in extra for scheme in ("https", "http")],
+    )
+
+
 def build_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or load_settings()
     setup_logging(settings.log_file, settings.log_level)
 
     # Build the streamable-http ASGI app once; this also instantiates the
-    # session manager that the lifespan below must run.
+    # session manager that the lifespan below must run. The session manager
+    # reads transport_security on that first call, so set it before.
+    mcp.settings.transport_security = mcp_transport_security(settings)
     mcp_app = mcp.streamable_http_app()
 
     @asynccontextmanager

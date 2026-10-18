@@ -15,7 +15,11 @@ from starlette.responses import JSONResponse, PlainTextResponse
 from starlette.routing import Mount, Route
 from starlette.testclient import TestClient
 
-from router_mcp.app import McpBearerAuthMiddleware, McpTrailingSlashMiddleware
+from router_mcp.app import (
+    McpBearerAuthMiddleware,
+    McpTrailingSlashMiddleware,
+    mcp_transport_security,
+)
 
 TOKEN = "secret-token"
 
@@ -99,3 +103,32 @@ def test_unauthorized_body_is_drained_before_401():
 
     assert len(drained) == len(chunks)
     assert sent[0]["status"] == 401
+
+
+def _host_ok(settings, host: str) -> bool:
+    from mcp.server.transport_security import TransportSecurityMiddleware
+
+    return TransportSecurityMiddleware(mcp_transport_security(settings))._validate_host(host)
+
+
+def test_public_host_rejected_without_mcp_allowed_hosts():
+    from router_mcp.config import Settings
+
+    settings = Settings(_env_file=None)
+    assert _host_ok(settings, "127.0.0.1:8088")
+    assert not _host_ok(settings, "mr.example.org")
+
+
+def test_mcp_allowed_hosts_admits_public_host_and_origin():
+    from mcp.server.transport_security import TransportSecurityMiddleware
+
+    from router_mcp.config import Settings
+
+    settings = Settings(_env_file=None, MCP_ALLOWED_HOSTS=" mr.example.org , other.example.org")
+    assert _host_ok(settings, "mr.example.org")
+    assert _host_ok(settings, "other.example.org")
+    assert _host_ok(settings, "localhost:8000")
+    assert not _host_ok(settings, "evil.example.com")
+    guard = TransportSecurityMiddleware(mcp_transport_security(settings))
+    assert guard._validate_origin("https://mr.example.org")
+    assert not guard._validate_origin("https://evil.example.com")

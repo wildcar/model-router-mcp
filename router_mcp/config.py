@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     # When set, requests to /mcp must carry `Authorization: Bearer <AUTH_TOKEN>`.
     # The web console/API is guarded separately (WEB_AUTH_* below); /health is open.
     auth_token: str | None = Field(default=None, alias="AUTH_TOKEN")
+    # Extra Host headers /mcp accepts, comma-separated (e.g. the public domain
+    # nginx forwards as `Host`). The MCP SDK guards against DNS rebinding and
+    # otherwise answers 421 to anything but 127.0.0.1/localhost/[::1].
+    mcp_allowed_hosts: str = Field(default="", alias="MCP_ALLOWED_HOSTS")
 
     # --- Web console login ------------------------------------------------
     # An htpasswd file (apr1 / bcrypt / {SHA} lines) whose users may sign in to
@@ -288,6 +292,9 @@ class Settings(BaseSettings):
     @staticmethod
     def _csv(value: str | None) -> list[str]:
         return [p.strip() for p in (value or "").split(",") if p.strip()]
+
+    def mcp_allowed_host_list(self) -> list[str]:
+        return self._csv(self.mcp_allowed_hosts)
 
     def notify_chat_ids(self) -> list[str]:
         return self._csv(self.notify_telegram_chat_ids)
