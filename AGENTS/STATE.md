@@ -11,14 +11,12 @@ it as a managed service on this host.
 
 ## Now
 
-- 🔄 `/public/blobs` отвечает на HEAD (2026-11-17). nano-banana-2 на Replicate
-  с картинкой по нашей ссылке падал с `RefreshError: Invalid JWT Signature`
-  (старый воркер, в логе `Matched input image aspect ratio … No sid`), а та же
-  модель с base64 или ссылкой с чужого хоста проходила через их `ai-gateway`.
-  Гипотеза: шлюз проверяет ссылку HEAD-запросом, наш 405 уводил задачу на
-  старый путь. Проверить повтором запроса после деплоя; если не поможет,
-  слать картинки `google/*` моделям как data URI. Тикет в поддержке Replicate
-  открыт пользователем.
+- ⏸ nano-banana-2 на Replicate с картинкой по нашей ссылке падает (2026-11-17).
+  Ошибка `RefreshError: Invalid JWT Signature` у Replicate, старый воркер
+  (в логе `Matched input image aspect ratio … No sid`). Тот же файл и промпт как
+  base64 и ссылки с чужих хостов проходят через их `ai-gateway`. HEAD на
+  `/public/blobs` добавлен, но не помог: Replicate HEAD не шлёт. Решено ждать
+  ответа на тикет пользователя; запасной вариант — data URI для `google/*`.
 - ✅ Вход в консоль на своей странице (2026-10-01, просьба пользователя: окно
   Basic менеджер паролей заполнял не всегда). `/login` с обычной формой,
   сессия в подписанной cookie на 30 дней, пользователи из того же
