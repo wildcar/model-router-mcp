@@ -197,7 +197,9 @@ that consumes compute with no rate is `unpriced`.
 `GET /public/blobs/{ref}?exp&sig` is the only route outside the auth gate: an
 HMAC over the ref and the deadline, on a separate host
 (`PUBLIC_BLOB_BASE_URL`), so a provider that takes file inputs by URL can fetch
-one file for a few minutes. No `PUBLIC_BLOB_SIGNING_KEY`, no service at all.
+one file for a few minutes. It answers `HEAD` as well as `GET`, under the same
+signature check: Replicate's gateway probes an input link first. No
+`PUBLIC_BLOB_SIGNING_KEY`, no service at all.
 
 ## Catalog freshness, price provenance, fallback
 

@@ -103,6 +103,26 @@ def test_a_signed_link_is_never_cached(client, monkeypatch):
     assert response.headers["cache-control"] == "private, no-store"
 
 
+def test_a_signed_link_answers_head(client, monkeypatch):
+    """A provider may probe the link before fetching it; a 405 there sent
+    Replicate's nano-banana-2 runs down a path that failed every one of them."""
+    from router_mcp.runtime import get_core
+
+    core = get_core()
+    monkeypatch.setattr(core.settings, "public_blob_base_url", "https://blob.example.org")
+    monkeypatch.setattr(core.settings, "public_blob_signing_key", KEY)
+    ref = core.blobs.save(b"\x89PNG payload", "image/png")
+    path = public_blobs.make_url(core.settings, ref).split("https://blob.example.org", 1)[1]
+
+    response = client.head(path)
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/png")
+    assert response.headers["content-length"] == str(len(b"\x89PNG payload"))
+    assert response.headers["cache-control"] == "private, no-store"
+    # And the signature still gates it: HEAD is no way around the check.
+    assert client.head(f"/public/blobs/{ref}").status_code == 404
+
+
 # --- saying so before the money is spent -----------------------------------
 # The failure these describe is entirely silent: the adapter's message is clear
 # but only appears on the first real request from a phone, long after the key was

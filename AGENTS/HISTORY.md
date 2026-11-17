@@ -4,6 +4,12 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 
 ---
 
+## 2026-11-17 · /public/blobs отвечает на HEAD
+- What: маршрут подписанных ссылок принимает GET и HEAD (та же проверка подписи), тест на HEAD.
+- Why: nano-banana-2 на Replicate падал с Invalid JWT Signature только на наших ссылках (HEAD давал 405), с чужими ссылками и base64 проходил.
+- Files: router_mcp/web/api.py, tests/test_public_blobs.py, AGENTS/SPEC.md
+- Next: повторить запрос с картинкой после деплоя; если упадёт, слать картинки google/* как data URI.
+
 ## 2026-10-01 · вход в консоль на странице /login вместо Basic
 - What: `web/auth.py` (htpasswd apr1/{SHA}/bcrypt, HMAC-cookie, троттлинг), `WebAuthMiddleware`, шаблон `login.html`, кнопка «Выйти», 401 в api.js ведёт на /login; nginx-шаблон без auth_basic.
 - Why: окно Basic менеджер паролей заполнял не всегда.

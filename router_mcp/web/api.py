@@ -1494,7 +1494,11 @@ async def api_delete_model(service_provider_id: str, model_id: str) -> dict[str,
 INLINE_MIME_PREFIXES = ("image/", "audio/")
 
 
-@blob_router.get("/public/blobs/{ref}")
+# HEAD as well as GET: Replicate's gateway probes an input URL before taking the
+# job, and on our 405 it handed the run to its legacy worker instead — the one
+# that failed every nano-banana-2 edit with "Invalid JWT Signature" (2026-11-16),
+# while the same image by any other host's link went through.
+@blob_router.api_route("/public/blobs/{ref}", methods=["GET", "HEAD"])
 async def serve_public_blob(
     ref: str, request: Request, exp: str | None = None, sig: str | None = None
 ) -> Response:
