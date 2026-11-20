@@ -8,7 +8,7 @@ Newest first. Each entry ≤5 lines using the format defined in `AGENTS.md`.
 - What: маршрут подписанных ссылок принимает GET и HEAD (та же проверка подписи), тест на HEAD.
 - Why: nano-banana-2 на Replicate падал с Invalid JWT Signature только на наших ссылках (HEAD давал 405), с чужими ссылками и base64 проходил.
 - Files: router_mcp/web/api.py, tests/test_public_blobs.py, AGENTS/SPEC.md
-- Next: повтор упал так же (HEAD Replicate не шлёт); base64 того же файла прошёл. Ждём Replicate, запасной план: data URI для google/*.
+- Next: повтор упал так же (HEAD Replicate не шлёт). 2026-11-20 Replicate починил ключ, запуски по нашей ссылке проходят.
 
 ## 2026-10-01 · вход в консоль на странице /login вместо Basic
 - What: `web/auth.py` (htpasswd apr1/{SHA}/bcrypt, HMAC-cookie, троттлинг), `WebAuthMiddleware`, шаблон `login.html`, кнопка «Выйти», 401 в api.js ведёт на /login; nginx-шаблон без auth_basic.

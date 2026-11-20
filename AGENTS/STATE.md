@@ -11,12 +11,12 @@ it as a managed service on this host.
 
 ## Now
 
-- ⏸ nano-banana-2 на Replicate с картинкой по нашей ссылке падает (2026-11-17).
-  Ошибка `RefreshError: Invalid JWT Signature` у Replicate, старый воркер
-  (в логе `Matched input image aspect ratio … No sid`). Тот же файл и промпт как
-  base64 и ссылки с чужих хостов проходят через их `ai-gateway`. HEAD на
-  `/public/blobs` добавлен, но не помог: Replicate HEAD не шлёт. Решено ждать
-  ответа на тикет пользователя; запасной вариант — data URI для `google/*`.
+- ✅ nano-banana-2 на Replicate с картинкой по нашей ссылке снова работает
+  (2026-11-20, предсказание `26j52z39gdrmw0d1z3hbjm4rvm`). 16–17 ноября такие
+  запуски падали с `RefreshError: Invalid JWT Signature`: ссылки с
+  blob.wildcar.org Replicate отдаёт старому воркеру (`… No sid`), а у того был
+  битый Google-ключ. Ключ Replicate починил, код роутера не менялся; HEAD на
+  `/public/blobs` остался, хотя Replicate его не шлёт.
 - ✅ Вход в консоль на своей странице (2026-10-01, просьба пользователя: окно
   Basic менеджер паролей заполнял не всегда). `/login` с обычной формой,
   сессия в подписанной cookie на 30 дней, пользователи из того же
